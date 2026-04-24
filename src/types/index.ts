@@ -1,7 +1,11 @@
+export interface LoraEntry {
+  name: string;
+  weight: number;
+}
+
 export interface GenerationParams {
   checkpoint: string;
-  lora: string;
-  loraStrength: number;
+  loras: LoraEntry[];
   positivePrompt: string;
   negativePrompt: string;
   width: number;

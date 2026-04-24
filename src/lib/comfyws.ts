@@ -202,7 +202,9 @@ class ComfyWSManager {
           promptPos: params.positivePrompt,
           promptNeg: params.negativePrompt,
           model: params.checkpoint,
-          lora: params.lora || null,
+          lora: params.loras.length > 0
+            ? params.loras.map((l) => `${l.name} (${l.weight.toFixed(2)})`).join(', ')
+            : null,
           seed: BigInt(resolvedSeed),
           cfg: params.cfg,
           steps: params.steps,

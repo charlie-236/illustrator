@@ -20,20 +20,22 @@ export function buildWorkflow(params: GenerationParams): Record<string, unknown>
   let modelRef: [string, number] = ['1', 0];
   let clipRef: [string, number] = ['1', 1];
 
-  if (params.lora) {
-    nodes['10'] = {
+  // Chain LoRA nodes starting at ID 100 to avoid colliding with core node IDs.
+  params.loras.forEach((entry, i) => {
+    const id = String(100 + i);
+    nodes[id] = {
       class_type: 'LoraLoader',
       inputs: {
-        model: ['1', 0],
-        clip: ['1', 1],
-        lora_name: params.lora,
-        strength_model: params.loraStrength,
-        strength_clip: params.loraStrength,
+        model: modelRef,
+        clip: clipRef,
+        lora_name: entry.name,
+        strength_model: entry.weight,
+        strength_clip: entry.weight,
       },
     };
-    modelRef = ['10', 0];
-    clipRef = ['10', 1];
-  }
+    modelRef = [id, 0];
+    clipRef = [id, 1];
+  });
 
   nodes['3'] = {
     class_type: 'CLIPTextEncode',

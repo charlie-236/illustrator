@@ -10,8 +10,7 @@ import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 
 const DEFAULTS: GenerationParams = {
   checkpoint: '',
-  lora: '',
-  loraStrength: 0.8,
+  loras: [],
   positivePrompt: '',
   negativePrompt: 'nsfw, ugly, blurry, low quality, watermark, text, signature',
   width: 512,
@@ -150,11 +149,9 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
       <div className="card">
         <ModelSelect
           checkpoint={p.checkpoint}
-          lora={p.lora}
-          loraStrength={p.loraStrength}
+          loras={p.loras}
           onCheckpointChange={(v) => update('checkpoint', v)}
-          onLoraChange={(v) => update('lora', v)}
-          onLoraStrengthChange={(v) => update('loraStrength', v)}
+          onLorasChange={(v) => update('loras', v)}
         />
       </div>
 
