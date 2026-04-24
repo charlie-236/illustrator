@@ -35,6 +35,17 @@ function extractImage(buf: Buffer): Buffer | null {
   return null;
 }
 
+function slugifyPrompt(prompt: string): string {
+  const slug = prompt
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 30)
+    .replace(/_+$/, '');
+  return slug || 'generation';
+}
+
 class ComfyWSManager {
   private ws: WebSocket | null = null;
   private clientId: string;
@@ -178,7 +189,7 @@ class ComfyWSManager {
       await mkdir(dir, { recursive: true });
 
       const ext = lastImageBuffer[0] === 0x89 ? 'png' : 'jpg';
-      const filename = `${Date.now()}_${job.promptId.slice(0, 8)}.${ext}`;
+      const filename = `${slugifyPrompt(params.positivePrompt)}_${Date.now()}.${ext}`;
       await writeFile(path.join(dir, filename), lastImageBuffer);
 
       const filePath = `/generations/${filename}`;

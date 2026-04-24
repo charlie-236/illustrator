@@ -15,11 +15,12 @@ export default function Home() {
     <div className="flex flex-col min-h-screen max-w-2xl mx-auto">
       <TabNav active={tab} onChange={setTab} />
       <main className="flex-1 overflow-y-auto pb-24">
-        {tab === 'studio' ? (
+        <div className={tab === 'studio' ? '' : 'hidden'}>
           <Studio onGenerated={() => setRefreshGallery((n) => n + 1)} />
-        ) : (
+        </div>
+        <div className={tab === 'gallery' ? '' : 'hidden'}>
           <Gallery refreshToken={refreshGallery} />
-        )}
+        </div>
       </main>
     </div>
   );

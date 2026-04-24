@@ -109,6 +109,26 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
 
   return (
     <div className="p-4 space-y-4">
+      {/* Progress / result — top so the keyboard never obscures it */}
+      {(isGenerating || state.status === 'done') && (
+        <div className="card">
+          <GenerationProgress
+            value={state.progress.value}
+            max={state.progress.max}
+            imageUrl={state.imageUrl}
+          />
+          {state.status === 'done' && state.resolvedSeed !== -1 && (
+            <p className="text-xs text-zinc-500 mt-2 text-center tabular-nums">Seed: {state.resolvedSeed}</p>
+          )}
+        </div>
+      )}
+
+      {state.status === 'error' && (
+        <div className="card border-red-900 bg-red-950/30">
+          <p className="text-red-400 text-sm">{state.error}</p>
+        </div>
+      )}
+
       {/* Prompts */}
       <div className="card space-y-3">
         <PromptArea
@@ -188,26 +208,6 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
           </div>
         </div>
       </div>
-
-      {/* Progress / result */}
-      {(isGenerating || state.status === 'done') && (
-        <div className="card">
-          <GenerationProgress
-            value={state.progress.value}
-            max={state.progress.max}
-            imageUrl={state.imageUrl}
-          />
-          {state.status === 'done' && state.resolvedSeed !== -1 && (
-            <p className="text-xs text-zinc-500 mt-2 text-center tabular-nums">Seed: {state.resolvedSeed}</p>
-          )}
-        </div>
-      )}
-
-      {state.status === 'error' && (
-        <div className="card border-red-900 bg-red-950/30">
-          <p className="text-red-400 text-sm">{state.error}</p>
-        </div>
-      )}
 
       {/* Sticky generate button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto">
