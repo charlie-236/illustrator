@@ -7,6 +7,12 @@ interface Props {
   onChange: (t: Tab) => void;
 }
 
+const TAB_LABELS: Record<Tab, string> = {
+  studio: 'Studio',
+  gallery: 'Gallery',
+  models: 'Models',
+};
+
 export default function TabNav({ active, onChange }: Props) {
   return (
     <header className="sticky top-0 z-40 bg-zinc-950/90 backdrop-blur border-b border-zinc-800">
@@ -15,17 +21,17 @@ export default function TabNav({ active, onChange }: Props) {
           ✦ Illustrator
         </span>
         <nav className="flex gap-1">
-          {(['studio', 'gallery'] as Tab[]).map((t) => (
+          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => onChange(t)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 active === t
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              {t}
+              {TAB_LABELS[t]}
             </button>
           ))}
         </nav>

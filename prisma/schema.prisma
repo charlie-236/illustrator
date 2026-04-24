@@ -25,3 +25,13 @@ model Generation {
 
   @@index([createdAt(sort: Desc)])
 }
+
+model CheckpointConfig {
+  id                    String   @id @default(cuid())
+  checkpointName        String   @unique
+  defaultWidth          Int      @default(512)
+  defaultHeight         Int      @default(512)
+  defaultPositivePrompt String   @default("")
+  defaultNegativePrompt String   @default("")
+  updatedAt             DateTime @updatedAt
+}

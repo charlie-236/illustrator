@@ -34,6 +34,15 @@ export interface GenerationRecord {
   createdAt: string;
 }
 
+export interface CheckpointConfig {
+  id: string;
+  checkpointName: string;
+  defaultWidth: number;
+  defaultHeight: number;
+  defaultPositivePrompt: string;
+  defaultNegativePrompt: string;
+}
+
 export interface ModelInfo {
   checkpoints: string[];
   loras: string[];

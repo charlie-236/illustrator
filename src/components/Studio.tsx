@@ -5,7 +5,7 @@ import PromptArea from './PromptArea';
 import ModelSelect from './ModelSelect';
 import ParamSlider from './ParamSlider';
 import GenerationProgress from './GenerationProgress';
-import type { GenerationParams, SSEEvent } from '@/types';
+import type { CheckpointConfig, GenerationParams, SSEEvent } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 
 const DEFAULTS: GenerationParams = {
@@ -40,9 +40,78 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
     resolvedSeed: -1,
   });
   const sseRef = useRef<EventSource | null>(null);
+  // Tracks the trigger words/resolution currently injected from a checkpoint config,
+  // so we can strip them cleanly when the user switches to a different checkpoint.
+  const injectedRef = useRef<Pick<CheckpointConfig, 'defaultPositivePrompt' | 'defaultNegativePrompt'> | null>(null);
 
   function update<K extends keyof GenerationParams>(key: K, val: GenerationParams[K]) {
     setP((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function stripInjected(text: string, prefix: string): string {
+    if (!prefix) return text;
+    const withSep = `${prefix}, `;
+    if (text.startsWith(withSep)) return text.slice(withSep.length);
+    if (text === prefix) return '';
+    return text;
+  }
+
+  async function handleCheckpointChange(newCheckpoint: string) {
+    update('checkpoint', newCheckpoint);
+    if (!newCheckpoint) return;
+
+    try {
+      const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);
+
+      if (!res.ok) {
+        // No config saved — strip whatever was injected by the previous checkpoint
+        if (injectedRef.current) {
+          const prev = injectedRef.current;
+          setP((s) => ({
+            ...s,
+            positivePrompt: stripInjected(s.positivePrompt, prev.defaultPositivePrompt),
+            negativePrompt: stripInjected(s.negativePrompt, prev.defaultNegativePrompt),
+          }));
+          injectedRef.current = null;
+        }
+        return;
+      }
+
+      const config = await res.json() as CheckpointConfig;
+
+      setP((s) => {
+        // Strip previous checkpoint's injected text first
+        let pos = injectedRef.current
+          ? stripInjected(s.positivePrompt, injectedRef.current.defaultPositivePrompt)
+          : s.positivePrompt;
+        let neg = injectedRef.current
+          ? stripInjected(s.negativePrompt, injectedRef.current.defaultNegativePrompt)
+          : s.negativePrompt;
+
+        // Prepend new config trigger words
+        if (config.defaultPositivePrompt) {
+          pos = pos ? `${config.defaultPositivePrompt}, ${pos}` : config.defaultPositivePrompt;
+        }
+        if (config.defaultNegativePrompt) {
+          neg = neg ? `${config.defaultNegativePrompt}, ${neg}` : config.defaultNegativePrompt;
+        }
+
+        return {
+          ...s,
+          width: config.defaultWidth,
+          height: config.defaultHeight,
+          positivePrompt: pos,
+          negativePrompt: neg,
+        };
+      });
+
+      injectedRef.current = {
+        defaultPositivePrompt: config.defaultPositivePrompt,
+        defaultNegativePrompt: config.defaultNegativePrompt,
+      };
+    } catch {
+      // Config fetch is non-critical; checkpoint change still applies
+    }
   }
 
   async function handleGenerate() {
@@ -150,7 +219,7 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
         <ModelSelect
           checkpoint={p.checkpoint}
           loras={p.loras}
-          onCheckpointChange={(v) => update('checkpoint', v)}
+          onCheckpointChange={handleCheckpointChange}
           onLorasChange={(v) => update('loras', v)}
         />
       </div>

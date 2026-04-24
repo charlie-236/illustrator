@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import Studio from '@/components/Studio';
 import Gallery from '@/components/Gallery';
+import ModelConfig from '@/components/ModelConfig';
 import TabNav from '@/components/TabNav';
 
-export type Tab = 'studio' | 'gallery';
+export type Tab = 'studio' | 'gallery' | 'models';
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>('studio');
@@ -20,6 +21,9 @@ export default function Home() {
         </div>
         <div className={tab === 'gallery' ? '' : 'hidden'}>
           <Gallery refreshToken={refreshGallery} />
+        </div>
+        <div className={tab === 'models' ? '' : 'hidden'}>
+          <ModelConfig />
         </div>
       </main>
     </div>
