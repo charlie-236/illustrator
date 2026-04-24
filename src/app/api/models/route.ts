@@ -1,0 +1,30 @@
+import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+const COMFYUI = process.env.COMFYUI_URL ?? 'http://localhost:8188';
+
+async function getNodeInputList(nodeType: string, inputName: string): Promise<string[]> {
+  const res = await fetch(`${COMFYUI}/object_info/${nodeType}`, { cache: 'no-store' });
+  if (!res.ok) return [];
+  const data = await res.json() as Record<string, unknown>;
+  const node = data[nodeType] as { input?: { required?: Record<string, unknown[]> } } | undefined;
+  const list = node?.input?.required?.[inputName]?.[0];
+  return Array.isArray(list) ? (list as string[]) : [];
+}
+
+export async function GET() {
+  try {
+    const [checkpoints, loras] = await Promise.all([
+      getNodeInputList('CheckpointLoaderSimple', 'ckpt_name'),
+      getNodeInputList('LoraLoader', 'lora_name'),
+    ]);
+    return NextResponse.json({ checkpoints, loras });
+  } catch (err) {
+    console.error('[/api/models]', err);
+    return NextResponse.json(
+      { error: 'Failed to reach ComfyUI', checkpoints: [], loras: [] },
+      { status: 502 },
+    );
+  }
+}

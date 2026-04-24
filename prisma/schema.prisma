@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Generation {
+  id        String   @id @default(cuid())
+  filePath  String
+  promptPos String
+  promptNeg String
+  model     String
+  lora      String?
+  seed      BigInt
+  cfg       Float
+  steps     Int
+  width     Int
+  height    Int
+  sampler   String   @default("euler")
+  scheduler String   @default("normal")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}
