@@ -7,9 +7,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { promptId: string } },
+  { params }: { params: Promise<{ promptId: string }> },
 ) {
-  const { promptId } = params;
+  const { promptId } = await params;
   const url = new URL(req.url);
 
   let genParams: GenerationParams;

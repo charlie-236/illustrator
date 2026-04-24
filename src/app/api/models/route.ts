@@ -5,7 +5,10 @@ export const dynamic = 'force-dynamic';
 const COMFYUI = process.env.COMFYUI_URL ?? 'http://localhost:8188';
 
 async function getNodeInputList(nodeType: string, inputName: string): Promise<string[]> {
-  const res = await fetch(`${COMFYUI}/object_info/${nodeType}`, { cache: 'no-store' });
+  const res = await fetch(`${COMFYUI}/object_info/${nodeType}`, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(5000),
+  });
   if (!res.ok) return [];
   const data = await res.json() as Record<string, unknown>;
   const node = data[nodeType] as { input?: { required?: Record<string, unknown[]> } } | undefined;

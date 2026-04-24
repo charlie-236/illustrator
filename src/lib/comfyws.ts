@@ -41,6 +41,7 @@ class ComfyWSManager {
   private jobs = new Map<string, Job>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
+  private reconnectAttempts = 0;
 
   constructor() {
     this.clientId = uuidv4();
@@ -54,6 +55,9 @@ class ComfyWSManager {
     this.ws = ws;
 
     ws.on('open', () => {
+      if (this.reconnectAttempts > 0) {
+        this.flushJobsOnReconnect();
+      }
       this.connected = true;
       console.log('[ComfyWS] Connected');
     });
@@ -83,10 +87,21 @@ class ComfyWSManager {
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return;
+    this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
     }, 4000);
+  }
+
+  private flushJobsOnReconnect() {
+    for (const job of this.jobs.values()) {
+      job.controller.enqueue(
+        sseChunk('error', { message: 'Connection lost — please retry' }),
+      );
+      try { job.controller.close(); } catch { /* already closed */ }
+    }
+    this.jobs.clear();
   }
 
   private onBinary(buf: Buffer) {
