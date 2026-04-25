@@ -59,7 +59,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
         </div>
         <div className="overflow-y-auto flex-1 p-3 space-y-2 pb-8">
           {items.length === 0 && (
-            <p className="text-zinc-500 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
+            <p className="text-zinc-400 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
           )}
           {items.map((raw) => {
             const name = nameMap[raw] ?? raw;
@@ -78,7 +78,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
                   {name}
                 </span>
                 {name !== raw && (
-                  <span className="text-xs text-zinc-500 mt-0.5 truncate">{raw}</span>
+                  <span className="text-xs text-zinc-400 mt-0.5 truncate">{raw}</span>
                 )}
               </button>
             );
@@ -200,7 +200,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
         </div>
 
         {loras.length === 0 && (
-          <p className="text-xs text-zinc-600 italic">No LoRAs — tap Add LoRA to stack one.</p>
+          <p className="text-xs text-zinc-500 italic">No LoRAs — tap Add LoRA to stack one.</p>
         )}
 
         <div className="space-y-3">
@@ -245,7 +245,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                 </div>
                 {/* Weight slider */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-600 w-6 text-right tabular-nums">-2</span>
+                  <span className="text-xs text-zinc-500 w-6 text-right tabular-nums">-2</span>
                   <input
                     type="range"
                     min={-2}
@@ -255,7 +255,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                     onChange={(e) => updateLora(i, 'weight', parseFloat(e.target.value))}
                     className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
                   />
-                  <span className="text-xs text-zinc-600 w-4 tabular-nums">2</span>
+                  <span className="text-xs text-zinc-500 w-4 tabular-nums">2</span>
                 </div>
                 {/* Trigger word pills — shown when this LoRA has triggerWords in the DB */}
                 {triggerPills.length > 0 && (

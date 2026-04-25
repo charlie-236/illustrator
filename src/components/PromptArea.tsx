@@ -21,8 +21,8 @@ export default function PromptArea({ label, value, onChange, placeholder, rows =
         className="input-base resize-none leading-relaxed"
       />
       {hint && (
-        <p className="mt-1 text-xs text-zinc-600 leading-relaxed">
-          <span className="text-zinc-700">Default: </span>{hint}
+        <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
+          <span className="text-zinc-500">Default: </span>{hint}
         </p>
       )}
     </div>

@@ -58,7 +58,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
         </div>
         <div className="overflow-y-auto flex-1 p-3 space-y-2 pb-8">
           {items.length === 0 && (
-            <p className="text-zinc-500 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
+            <p className="text-zinc-400 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
           )}
           {items.map((raw) => {
             const name = nameMap[raw] ?? raw;
@@ -77,7 +77,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
                   {name}
                 </span>
                 {name !== raw && (
-                  <span className="text-xs text-zinc-500 mt-0.5 truncate">{raw}</span>
+                  <span className="text-xs text-zinc-400 mt-0.5 truncate">{raw}</span>
                 )}
               </button>
             );
@@ -281,7 +281,7 @@ export default function ModelConfig() {
     <div className="p-4 space-y-4">
       <div className="card space-y-1">
         <h2 className="text-base font-semibold text-zinc-200">Model Settings</h2>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Assign friendly names, trigger words, and defaults to your models.
         </p>
       </div>
@@ -326,6 +326,16 @@ export default function ModelConfig() {
 
           <div className={`card space-y-4 transition-opacity ${loadingCkptConfig ? 'opacity-40 pointer-events-none' : ''}`}>
             <div>
+              <label className="label">File</label>
+              <input
+                type="text"
+                readOnly
+                value={selectedCheckpoint}
+                className="input-base min-h-12 bg-zinc-800/40 text-zinc-400 font-mono text-xs cursor-default"
+              />
+            </div>
+
+            <div>
               <label className="label">Friendly Name</label>
               <input
                 type="text"
@@ -357,7 +367,7 @@ export default function ModelConfig() {
 
             <div>
               <label className="label">Default Positive Prompt</label>
-              <p className="text-xs text-zinc-600 mb-1.5">
+              <p className="text-xs text-zinc-400 mb-1.5">
                 Prepended to the positive prompt in every generation with this checkpoint.
               </p>
               <textarea rows={3}
@@ -394,7 +404,7 @@ export default function ModelConfig() {
               onClick={() => setLoraBrowserOpen(true)}
             />
             {!loadingModels && loras.length === 0 && (
-              <p className="text-xs text-zinc-500 mt-2">No LoRAs found in ComfyUI.</p>
+              <p className="text-xs text-zinc-400 mt-2">No LoRAs found in ComfyUI.</p>
             )}
           </div>
 
@@ -412,6 +422,16 @@ export default function ModelConfig() {
 
           <div className={`card space-y-4 transition-opacity ${loadingLoraConfig ? 'opacity-40 pointer-events-none' : ''}`}>
             <div>
+              <label className="label">File</label>
+              <input
+                type="text"
+                readOnly
+                value={selectedLora}
+                className="input-base min-h-12 bg-zinc-800/40 text-zinc-400 font-mono text-xs cursor-default"
+              />
+            </div>
+
+            <div>
               <label className="label">Friendly Name</label>
               <input
                 type="text"
@@ -424,7 +444,7 @@ export default function ModelConfig() {
 
             <div>
               <label className="label">Trigger Words</label>
-              <p className="text-xs text-zinc-600 mb-1.5">
+              <p className="text-xs text-zinc-400 mb-1.5">
                 Automatically appended to the positive prompt when this LoRA is used.
               </p>
               <textarea rows={2}
