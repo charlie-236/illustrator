@@ -8,7 +8,8 @@
       "Bash(curl *)",
       "Bash(pm2 list *)",
       "Bash(pm2 show *)",
-      "Bash(pm2 restart *)"
+      "Bash(pm2 restart *)",
+      "Bash(npx tsc *)"
     ]
   }
 }

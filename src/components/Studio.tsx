@@ -8,6 +8,11 @@ import GenerationProgress from './GenerationProgress';
 import type { CheckpointConfig, GenerationParams, SSEEvent } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 
+interface CheckpointDefaults {
+  positivePrompt: string;
+  negativePrompt: string;
+}
+
 const DEFAULTS: GenerationParams = {
   checkpoint: '',
   loras: [],
@@ -40,75 +45,31 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
     resolvedSeed: -1,
   });
   const sseRef = useRef<EventSource | null>(null);
-  // Tracks the trigger words/resolution currently injected from a checkpoint config,
-  // so we can strip them cleanly when the user switches to a different checkpoint.
-  const injectedRef = useRef<Pick<CheckpointConfig, 'defaultPositivePrompt' | 'defaultNegativePrompt'> | null>(null);
+  const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
 
   function update<K extends keyof GenerationParams>(key: K, val: GenerationParams[K]) {
     setP((prev) => ({ ...prev, [key]: val }));
   }
 
-  function stripInjected(text: string, prefix: string): string {
-    if (!prefix) return text;
-    const withSep = `${prefix}, `;
-    if (text.startsWith(withSep)) return text.slice(withSep.length);
-    if (text === prefix) return '';
-    return text;
-  }
-
   async function handleCheckpointChange(newCheckpoint: string) {
     update('checkpoint', newCheckpoint);
-    if (!newCheckpoint) return;
+    if (!newCheckpoint) {
+      setCheckpointDefaults(null);
+      return;
+    }
 
     try {
       const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);
-
       if (!res.ok) {
-        // No config saved — strip whatever was injected by the previous checkpoint
-        if (injectedRef.current) {
-          const prev = injectedRef.current;
-          setP((s) => ({
-            ...s,
-            positivePrompt: stripInjected(s.positivePrompt, prev.defaultPositivePrompt),
-            negativePrompt: stripInjected(s.negativePrompt, prev.defaultNegativePrompt),
-          }));
-          injectedRef.current = null;
-        }
+        setCheckpointDefaults(null);
         return;
       }
-
       const config = await res.json() as CheckpointConfig;
-
-      setP((s) => {
-        // Strip previous checkpoint's injected text first
-        let pos = injectedRef.current
-          ? stripInjected(s.positivePrompt, injectedRef.current.defaultPositivePrompt)
-          : s.positivePrompt;
-        let neg = injectedRef.current
-          ? stripInjected(s.negativePrompt, injectedRef.current.defaultNegativePrompt)
-          : s.negativePrompt;
-
-        // Prepend new config trigger words
-        if (config.defaultPositivePrompt) {
-          pos = pos ? `${config.defaultPositivePrompt}, ${pos}` : config.defaultPositivePrompt;
-        }
-        if (config.defaultNegativePrompt) {
-          neg = neg ? `${config.defaultNegativePrompt}, ${neg}` : config.defaultNegativePrompt;
-        }
-
-        return {
-          ...s,
-          width: config.defaultWidth,
-          height: config.defaultHeight,
-          positivePrompt: pos,
-          negativePrompt: neg,
-        };
+      setCheckpointDefaults({
+        positivePrompt: config.defaultPositivePrompt,
+        negativePrompt: config.defaultNegativePrompt,
       });
-
-      injectedRef.current = {
-        defaultPositivePrompt: config.defaultPositivePrompt,
-        defaultNegativePrompt: config.defaultNegativePrompt,
-      };
+      setP((s) => ({ ...s, width: config.defaultWidth, height: config.defaultHeight }));
     } catch {
       // Config fetch is non-critical; checkpoint change still applies
     }
@@ -205,12 +166,14 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
           onChange={(v) => update('positivePrompt', v)}
           placeholder="masterpiece, best quality, …"
           rows={4}
+          hint={checkpointDefaults?.positivePrompt || undefined}
         />
         <PromptArea
           label="Negative Prompt"
           value={p.negativePrompt}
           onChange={(v) => update('negativePrompt', v)}
           rows={2}
+          hint={checkpointDefaults?.negativePrompt || undefined}
         />
       </div>
 

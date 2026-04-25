@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildWorkflow, extractSeedFromWorkflow } from '@/lib/workflow';
 import { getComfyWSManager } from '@/lib/comfyws';
+import { prisma } from '@/lib/prisma';
 import type { GenerationParams } from '@/types';
 
 const COMFYUI = process.env.COMFYUI_URL ?? 'http://localhost:8188';
@@ -13,8 +14,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
+  // Fetch checkpoint defaults to concatenate server-side; original user prompts go to DB/filename
+  let finalPositive = params.positivePrompt;
+  let finalNegative = params.negativePrompt;
+  if (params.checkpoint) {
+    try {
+      const config = await prisma.checkpointConfig.findUnique({
+        where: { checkpointName: params.checkpoint },
+      });
+      if (config) {
+        if (config.defaultPositivePrompt) {
+          finalPositive = [config.defaultPositivePrompt, params.positivePrompt]
+            .filter(Boolean)
+            .join(', ');
+        }
+        if (config.defaultNegativePrompt) {
+          finalNegative = [config.defaultNegativePrompt, params.negativePrompt]
+            .filter(Boolean)
+            .join(', ');
+        }
+      }
+    } catch {
+      // Non-critical — proceed with user prompts only
+    }
+  }
+
+  const workflowParams: GenerationParams = {
+    ...params,
+    positivePrompt: finalPositive,
+    negativePrompt: finalNegative,
+  };
+
   const manager = getComfyWSManager();
-  const workflow = buildWorkflow(params);
+  const workflow = buildWorkflow(workflowParams);
   const resolvedSeed = extractSeedFromWorkflow(workflow as Record<string, unknown>);
 
   let comfyRes: Response;
