@@ -15,6 +15,7 @@ export interface GenerationParams {
   seed: number;
   sampler: string;
   scheduler: string;
+  batchSize: number;
 }
 
 export interface GenerationRecord {
@@ -59,7 +60,7 @@ export interface ModelInfo {
 
 export type SSEEvent =
   | { type: 'progress'; value: number; max: number }
-  | { type: 'complete'; imageUrl: string; generationId: string }
+  | { type: 'complete'; records: GenerationRecord[] }
   | { type: 'error'; message: string };
 
 export const SAMPLERS = [

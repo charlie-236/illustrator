@@ -30,6 +30,7 @@ function recordToParams(record: GenerationRecord): GenerationParams {
     seed: parseInt(record.seed, 10),
     sampler: record.sampler,
     scheduler: record.scheduler,
+    batchSize: 1,
   };
 }
 

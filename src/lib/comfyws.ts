@@ -9,7 +9,8 @@ interface Job {
   params: GenerationParams;
   resolvedSeed: number;
   controller: ReadableStreamDefaultController<Uint8Array>;
-  lastImageBuffer: Buffer | null;
+  /** Accumulates every image binary frame for this prompt (one per batch image). */
+  imageBuffers: Buffer[];
   activeNode: string | null;
 }
 
@@ -70,6 +71,7 @@ class ComfyWSManager {
         this.flushJobsOnReconnect();
       }
       this.connected = true;
+      this.reconnectAttempts = 0;
       console.log('[ComfyWS] Connected');
     });
 
@@ -119,10 +121,11 @@ class ComfyWSManager {
     const image = extractImage(buf);
     if (!image) return;
 
-    // Binary messages aren't tagged with prompt_id; attach to the actively executing job.
+    // Binary frames aren't tagged with prompt_id; attach to the actively executing job.
+    // For batches, multiple frames arrive for a single job — push each one.
     for (const job of this.jobs.values()) {
       if (job.activeNode !== null) {
-        job.lastImageBuffer = image;
+        job.imageBuffers.push(Buffer.from(image)); // copy to avoid shared buffer issues
         return;
       }
     }
@@ -175,10 +178,10 @@ class ComfyWSManager {
   }
 
   private async finalizeJob(job: Job) {
-    const { params, resolvedSeed, lastImageBuffer, controller } = job;
+    const { params, resolvedSeed, imageBuffers, controller } = job;
     this.jobs.delete(job.promptId);
 
-    if (!lastImageBuffer) {
+    if (imageBuffers.length === 0) {
       controller.enqueue(sseChunk('error', { message: 'No image data received' }));
       try { controller.close(); } catch { /* already closed */ }
       return;
@@ -188,36 +191,54 @@ class ComfyWSManager {
       const dir = path.join(process.cwd(), 'public', 'generations');
       await mkdir(dir, { recursive: true });
 
-      const ext = lastImageBuffer[0] === 0x89 ? 'png' : 'jpg';
-      const filename = `${slugifyPrompt(params.positivePrompt)}_${Date.now()}.${ext}`;
-      await writeFile(path.join(dir, filename), lastImageBuffer);
-
-      const filePath = `/api/images/${filename}`;
-
-      // Lazy-require prisma to avoid issues during cold start
       const { prisma } = await import('./prisma');
-      const record = await prisma.generation.create({
-        data: {
-          filePath,
-          promptPos: params.positivePrompt,
-          promptNeg: params.negativePrompt,
-          model: params.checkpoint,
-          lora: params.loras.length > 0
-            ? params.loras.map((l) => `${l.name} (${l.weight.toFixed(2)})`).join(', ')
-            : null,
-          seed: BigInt(resolvedSeed),
-          cfg: params.cfg,
-          steps: params.steps,
-          width: params.width,
-          height: params.height,
-          sampler: params.sampler,
-          scheduler: params.scheduler,
-        },
-      });
+      const slug = slugifyPrompt(params.positivePrompt);
+      const timestamp = Date.now();
+      const isBatch = imageBuffers.length > 1;
 
-      controller.enqueue(
-        sseChunk('complete', { imageUrl: filePath, generationId: record.id }),
-      );
+      const loraStr = params.loras.length > 0
+        ? params.loras.map((l) => `${l.name} (${l.weight.toFixed(2)})`).join(', ')
+        : null;
+
+      const records = [];
+
+      for (let i = 0; i < imageBuffers.length; i++) {
+        const buf = imageBuffers[i];
+        const ext = buf[0] === 0x89 ? 'png' : 'jpg';
+        // Batch images get a _1, _2 … suffix so filenames stay unique.
+        const filename = isBatch
+          ? `${slug}_${timestamp}_${i + 1}.${ext}`
+          : `${slug}_${timestamp}.${ext}`;
+
+        await writeFile(path.join(dir, filename), buf);
+
+        const filePath = `/api/images/${filename}`;
+
+        const record = await prisma.generation.create({
+          data: {
+            filePath,
+            promptPos: params.positivePrompt,
+            promptNeg: params.negativePrompt,
+            model: params.checkpoint,
+            lora: loraStr,
+            seed: BigInt(resolvedSeed),
+            cfg: params.cfg,
+            steps: params.steps,
+            width: params.width,
+            height: params.height,
+            sampler: params.sampler,
+            scheduler: params.scheduler,
+          },
+        });
+
+        records.push({
+          ...record,
+          seed: record.seed.toString(),
+          createdAt: record.createdAt.toISOString(),
+        });
+      }
+
+      controller.enqueue(sseChunk('complete', { records }));
     } catch (err) {
       console.error('[ComfyWS] finalizeJob error', err);
       controller.enqueue(sseChunk('error', { message: String(err) }));
@@ -237,7 +258,7 @@ class ComfyWSManager {
       params,
       resolvedSeed,
       controller,
-      lastImageBuffer: null,
+      imageBuffers: [],
       activeNode: null,
     });
   }

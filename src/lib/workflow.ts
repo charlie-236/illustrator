@@ -14,7 +14,7 @@ export function buildWorkflow(params: GenerationParams): Record<string, unknown>
 
   nodes['2'] = {
     class_type: 'EmptyLatentImage',
-    inputs: { width: params.width, height: params.height, batch_size: 1 },
+    inputs: { width: params.width, height: params.height, batch_size: params.batchSize ?? 1 },
   };
 
   let modelRef: [string, number] = ['1', 0];

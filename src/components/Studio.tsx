@@ -26,14 +26,14 @@ const DEFAULTS: GenerationParams = {
   seed: -1,
   sampler: 'euler',
   scheduler: 'karras',
+  batchSize: 1,
 };
 
 interface State {
   status: 'idle' | 'generating' | 'done' | 'error';
   progress: { value: number; max: number };
-  imageUrl: string;
-  generationId: string;
-  record: GenerationRecord | null;
+  /** All records returned by the completed generation (one per batch image). */
+  records: GenerationRecord[];
   error: string;
   resolvedSeed: number;
 }
@@ -50,20 +50,19 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
   const [state, setState] = useState<State>({
     status: 'idle',
     progress: { value: 0, max: 0 },
-    imageUrl: '',
-    generationId: '',
-    record: null,
+    records: [],
     error: '',
     resolvedSeed: -1,
   });
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalStartIdx, setModalStartIdx] = useState(0);
   const sseRef = useRef<EventSource | null>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
 
   // Apply remix data when received from Gallery
   useEffect(() => {
     if (!remixParams) return;
-    setP(remixParams);
+    setP({ ...remixParams, batchSize: remixParams.batchSize ?? 1 });
     onRemixConsumed();
     if (remixParams.checkpoint) {
       fetch(`/api/checkpoint-config?name=${encodeURIComponent(remixParams.checkpoint)}`)
@@ -107,9 +106,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
     setState({
       status: 'generating',
       progress: { value: 0, max: p.steps },
-      imageUrl: '',
-      generationId: '',
-      record: null,
+      records: [],
       error: '',
       resolvedSeed: -1,
     });
@@ -149,21 +146,17 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
     });
 
     sse.addEventListener('complete', (e) => {
-      const d = JSON.parse(e.data) as { imageUrl: string; generationId: string };
-      setState((s) => ({ ...s, status: 'done', imageUrl: d.imageUrl, generationId: d.generationId }));
+      const d = JSON.parse(e.data) as { records: GenerationRecord[] };
+      setState((s) => ({ ...s, status: 'done', records: d.records }));
       update('seed', resolvedSeed);
       sse.close();
       onGenerated();
-
-      // Fetch the full record so the modal has complete metadata
-      fetch(`/api/generation/${d.generationId}`)
-        .then((r) => r.json() as Promise<GenerationRecord>)
-        .then((record) => setState((s) => ({ ...s, record })))
-        .catch(() => {});
     });
 
     sse.addEventListener('error', (e) => {
-      const msg = e instanceof MessageEvent ? (JSON.parse(e.data) as { message: string }).message : 'Unknown error';
+      const msg = e instanceof MessageEvent
+        ? (JSON.parse(e.data) as { message: string }).message
+        : 'Unknown error';
       setState((s) => ({ ...s, status: 'error', error: msg }));
       sse.close();
     });
@@ -178,7 +171,14 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
   async function handleStudioDelete(id: string): Promise<void> {
     const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Delete failed');
-    setState((s) => ({ ...s, status: 'idle', imageUrl: '', generationId: '', record: null }));
+    setState((s) => {
+      const remaining = s.records.filter((r) => r.id !== id);
+      return {
+        ...s,
+        records: remaining,
+        status: remaining.length === 0 ? 'idle' : s.status,
+      };
+    });
     onGenerated();
   }
 
@@ -194,31 +194,25 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
         </div>
       )}
 
-      {/* ── After generation: thumbnail card ── */}
-      {state.status === 'done' && state.imageUrl && (
+      {/* ── After generation: batch thumbnail grid ── */}
+      {state.status === 'done' && state.records.length > 0 && (
         <div className="card">
           <div className="grid grid-cols-3 gap-1.5">
-            <div className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors">
-              <button
-                className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-                onClick={() => { if (state.record) setModalOpen(true); }}
-                disabled={!state.record}
-                aria-label="View generation"
+            {state.records.map((rec, i) => (
+              <div
+                key={rec.id}
+                className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={state.imageUrl}
-                  alt="Generated"
-                  className="w-full h-full object-cover"
-                />
-              </button>
-              {/* Spinner while record loads */}
-              {!state.record && (
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-black/20">
-                  <div className="w-5 h-5 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
-                </div>
-              )}
-            </div>
+                <button
+                  className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                  onClick={() => { setModalStartIdx(i); setModalOpen(true); }}
+                  aria-label={`View generation ${i + 1}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={rec.filePath} alt="Generated" className="w-full h-full object-cover" />
+                </button>
+              </div>
+            ))}
           </div>
           {state.resolvedSeed !== -1 && (
             <p className="text-xs text-zinc-400 mt-2 tabular-nums">Seed: {state.resolvedSeed}</p>
@@ -265,6 +259,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
       <div className="card space-y-4">
         <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
         <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
+        <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -334,15 +329,19 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
                      disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
                      text-white shadow-lg shadow-violet-900/40"
         >
-          {isGenerating ? `Generating… ${state.progress.value}/${state.progress.max}` : 'Generate'}
+          {isGenerating
+            ? `Generating… ${state.progress.value}/${state.progress.max}`
+            : p.batchSize > 1
+              ? `Generate ×${p.batchSize}`
+              : 'Generate'}
         </button>
       </div>
 
       {/* ── Full-screen image modal ── */}
-      {modalOpen && state.record && (
+      {modalOpen && state.records.length > 0 && (
         <ImageModal
-          items={[state.record]}
-          startIndex={0}
+          items={state.records}
+          startIndex={modalStartIdx}
           onClose={() => setModalOpen(false)}
           onRemix={(record) => { onRemix(record); setModalOpen(false); }}
           onDelete={handleStudioDelete}
