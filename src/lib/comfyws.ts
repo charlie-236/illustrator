@@ -192,7 +192,7 @@ class ComfyWSManager {
       const filename = `${slugifyPrompt(params.positivePrompt)}_${Date.now()}.${ext}`;
       await writeFile(path.join(dir, filename), lastImageBuffer);
 
-      const filePath = `/generations/${filename}`;
+      const filePath = `/api/images/${filename}`;
 
       // Lazy-require prisma to avoid issues during cold start
       const { prisma } = await import('./prisma');

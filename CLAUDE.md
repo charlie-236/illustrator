@@ -2,6 +2,23 @@
 
 Mobile-first ComfyUI generation frontend. Next.js 14 App Router, Tailwind CSS, Prisma + PostgreSQL. Runs locally via PM2 on port **3001**. ComfyUI backend is tunneled to `localhost:8188`.
 
+---
+
+## 🛑 CRITICAL ARCHITECTURE RULES
+
+### 1. The WebSocket Constraint
+The remote Azure A100 VM has severely limited disk space. ComfyUI must **NEVER** save images to its local storage.
+
+- **NEVER** use the standard `SaveImage` node in any workflow JSON.
+- **ALWAYS** use the `SaveImageWebsocket` node to stream raw image bytes back to the Next.js server.
+- **VALIDATION REQUIRED:** After any change to API routes that construct the ComfyUI workflow payload, explicitly scan the generated code to verify the string `"SaveImage"` does not appear as a node `class_type` anywhere in the node graph. Only `"SaveImageWebsocket"` is permitted.
+
+### 2. General Agent Directives
+- Before proposing any fix, verify it aligns with the `SaveImageWebsocket` requirement.
+- If a package update or ComfyUI node change breaks the WebSocket relay, fixing the relay takes priority over all UI/UX features.
+
+---
+
 ## Environment
 
 ```
@@ -173,12 +190,14 @@ Node IDs used in the ComfyUI API workflow:
 |----|-----------|-------|
 | 1 | CheckpointLoaderSimple | outputs: model[0], clip[1], vae[2] |
 | 2 | EmptyLatentImage | |
-| 3 | CLIPTextEncode | positive; uses clip from node 1 (or 10 if LoRA) |
-| 4 | CLIPTextEncode | negative; same clip source |
+| 3 | CLIPTextEncode | positive; clip input = last node in LoRA chain (or node 1 if none) |
+| 4 | CLIPTextEncode | negative; same clip source as node 3 |
 | 5 | KSampler | seed is the resolved value, never -1 |
 | 6 | VAEDecode | |
 | 7 | SaveImageWebsocket | terminal node — no disk write on remote |
-| 10 | LoraLoader | only present when `params.lora` is non-empty |
+| 100 | LoraLoader | first LoRA (`params.loras[0]`); inputs from node 1 |
+| 101 | LoraLoader | second LoRA (`params.loras[1]`); inputs from node 100 |
+| 100+i | LoraLoader | pattern: node ID = `100 + index`; each takes model/clip from the previous node in the chain; final node feeds KSampler + CLIPTextEncode nodes |
 
 ## Tailwind conventions
 

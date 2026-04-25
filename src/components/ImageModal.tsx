@@ -37,7 +37,13 @@ export default function ImageModal({ record, onClose }: Props) {
 
         {/* Image */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={record.filePath} alt="Generated" className="w-full object-contain" />
+        <img
+          src={record.filePath.startsWith('/generations/')
+            ? `/api/images/${record.filePath.slice('/generations/'.length)}`
+            : record.filePath}
+          alt="Generated"
+          className="w-full object-contain"
+        />
 
         {/* Metadata */}
         <div className="p-4 space-y-3">

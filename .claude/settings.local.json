@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npm install *)",
       "Bash(npx next *)",
-      "Bash(npx prisma *)"
+      "Bash(npx prisma *)",
+      "Bash(node *)",
+      "Bash(curl *)",
+      "Bash(pm2 list *)",
+      "Bash(pm2 show *)",
+      "Bash(pm2 restart *)"
     ]
   }
 }

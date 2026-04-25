@@ -15,6 +15,13 @@ interface Props {
   refreshToken: number;
 }
 
+function imgSrc(filePath: string): string {
+  // Old records stored /generations/... before the API-route fix; remap transparently.
+  return filePath.startsWith('/generations/')
+    ? `/api/images/${filePath.slice('/generations/'.length)}`
+    : filePath;
+}
+
 export default function Gallery({ refreshToken }: Props) {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [page, setPage] = useState(1);
@@ -59,7 +66,7 @@ export default function Gallery({ refreshToken }: Props) {
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={item.filePath}
+              src={imgSrc(item.filePath)}
               alt={item.promptPos.slice(0, 40)}
               className="w-full h-full object-cover"
               loading="lazy"
