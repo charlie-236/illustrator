@@ -25,7 +25,7 @@ export default function TabNav({ active, onChange }: Props) {
             <button
               key={t}
               onClick={() => onChange(t)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 min-h-12 rounded-lg text-sm font-medium transition-colors ${
                 active === t
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-500 hover:text-zinc-300'

@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import PromptArea from './PromptArea';
 import ModelSelect from './ModelSelect';
 import ParamSlider from './ParamSlider';
 import GenerationProgress from './GenerationProgress';
-import type { CheckpointConfig, GenerationParams, SSEEvent } from '@/types';
+import type { CheckpointConfig, GenerationParams } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 
 interface CheckpointDefaults {
@@ -35,7 +35,13 @@ interface State {
   resolvedSeed: number;
 }
 
-export default function Studio({ onGenerated }: { onGenerated: () => void }) {
+interface Props {
+  onGenerated: () => void;
+  remixParams: GenerationParams | null;
+  onRemixConsumed: () => void;
+}
+
+export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Props) {
   const [p, setP] = useState<GenerationParams>(DEFAULTS);
   const [state, setState] = useState<State>({
     status: 'idle',
@@ -46,6 +52,27 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
   });
   const sseRef = useRef<EventSource | null>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
+
+  // Apply remix data when received from Gallery
+  useEffect(() => {
+    if (!remixParams) return;
+    setP(remixParams);
+    onRemixConsumed();
+    // Fetch checkpoint config just for the hint display — does not overwrite params
+    if (remixParams.checkpoint) {
+      fetch(`/api/checkpoint-config?name=${encodeURIComponent(remixParams.checkpoint)}`)
+        .then((r) => (r.ok ? r.json() as Promise<CheckpointConfig> : null))
+        .then((config) => {
+          setCheckpointDefaults(config
+            ? { positivePrompt: config.defaultPositivePrompt, negativePrompt: config.defaultNegativePrompt }
+            : null,
+          );
+        })
+        .catch(() => {});
+    } else {
+      setCheckpointDefaults(null);
+    }
+  }, [remixParams, onRemixConsumed]);
 
   function update<K extends keyof GenerationParams>(key: K, val: GenerationParams[K]) {
     setP((prev) => ({ ...prev, [key]: val }));
@@ -117,6 +144,8 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
     sse.addEventListener('complete', (e) => {
       const d = JSON.parse(e.data) as { imageUrl: string; generationId: string };
       setState((s) => ({ ...s, status: 'done', imageUrl: d.imageUrl }));
+      // Capture the resolved seed so the user can re-run the exact same generation
+      update('seed', resolvedSeed);
       sse.close();
       onGenerated();
     });
@@ -218,22 +247,35 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Scheduler</label>
-            <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
-              {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+        <div>
+          <label className="label">Scheduler</label>
+          <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
+            {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
 
-          <div>
-            <label className="label">Seed <span className="normal-case text-zinc-600 font-normal">(-1 = random)</span></label>
+        {/* Seed — full-width row with randomize toggle */}
+        <div>
+          <label className="label">Seed</label>
+          <div className="flex gap-2">
             <input
               type="number"
               value={p.seed}
               onChange={(e) => update('seed', parseInt(e.target.value, 10))}
-              className="input-base"
+              className="input-base flex-1"
             />
+            <button
+              type="button"
+              onClick={() => update('seed', -1)}
+              disabled={p.seed === -1}
+              title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
+              className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
+                ${p.seed === -1
+                  ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
+                  : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+            >
+              {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
+            </button>
           </div>
         </div>
       </div>

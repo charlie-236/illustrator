@@ -300,7 +300,7 @@ function SaveRow({ status, onSave, disabled }: { status: SaveStatus; onSave: () 
       <button
         onClick={onSave}
         disabled={disabled || status === 'saving'}
-        className="flex-1 py-3 rounded-xl font-semibold text-sm transition-all
+        className="flex-1 min-h-12 rounded-xl font-semibold text-sm transition-all
                    bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
                    disabled:opacity-50 disabled:cursor-not-allowed text-white"
       >

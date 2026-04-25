@@ -13,16 +13,16 @@ interface GalleryResponse {
 
 interface Props {
   refreshToken: number;
+  onRemix: (record: GenerationRecord) => void;
 }
 
 function imgSrc(filePath: string): string {
-  // Old records stored /generations/... before the API-route fix; remap transparently.
   return filePath.startsWith('/generations/')
     ? `/api/images/${filePath.slice('/generations/'.length)}`
     : filePath;
 }
 
-export default function Gallery({ refreshToken }: Props) {
+export default function Gallery({ refreshToken, onRemix }: Props) {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
@@ -78,12 +78,13 @@ export default function Gallery({ refreshToken }: Props) {
         {items.map((item) => (
           <div
             key={item.id}
-            className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-violet-500 transition-colors group"
+            className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors group"
             onMouseLeave={() => { if (pendingDelete === item.id) setPendingDelete(null); }}
           >
+            {/* Image — tap to view details */}
             <button
               onClick={() => setSelected(item)}
-              className="w-full h-full focus:outline-none focus:ring-2 focus:ring-violet-500"
+              className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -93,27 +94,47 @@ export default function Gallery({ refreshToken }: Props) {
                 loading="lazy"
               />
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-              disabled={deleting === item.id}
-              className={`absolute top-1.5 right-1.5 p-1.5 rounded-lg backdrop-blur-sm transition-all
-                opacity-0 group-hover:opacity-100 focus:opacity-100
-                ${pendingDelete === item.id
-                  ? 'bg-red-600 text-white opacity-100'
-                  : 'bg-black/60 text-zinc-300 hover:bg-red-600 hover:text-white'}
-                disabled:opacity-50`}
-              title={pendingDelete === item.id ? 'Tap again to confirm delete' : 'Delete'}
-            >
-              {pendingDelete === item.id ? (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+
+            {/* Action strip — revealed on hover/focus-within */}
+            <div className="absolute bottom-0 left-0 right-0 flex items-stretch
+                            opacity-0 pointer-events-none
+                            group-hover:opacity-100 group-hover:pointer-events-auto
+                            group-focus-within:opacity-100 group-focus-within:pointer-events-auto
+                            transition-opacity">
+              {/* Remix */}
+              <button
+                onClick={(e) => { e.stopPropagation(); onRemix(item); }}
+                className="flex-1 min-h-12 bg-violet-600/90 backdrop-blur-sm text-white
+                           flex items-center justify-center
+                           hover:bg-violet-500 active:bg-violet-700 transition-colors"
+                title="Send to Studio"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 15l-4-4 4-4M8 15l-4-4 4-4" />
                 </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              )}
-            </button>
+              </button>
+
+              {/* Delete */}
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                disabled={deleting === item.id}
+                className={`min-h-12 min-w-12 backdrop-blur-sm flex items-center justify-center transition-colors disabled:opacity-50
+                  ${pendingDelete === item.id
+                    ? 'bg-red-600 text-white'
+                    : 'bg-zinc-900/85 text-zinc-300 hover:bg-red-600/80 hover:text-white'}`}
+                title={pendingDelete === item.id ? 'Tap again to confirm delete' : 'Delete'}
+              >
+                {pendingDelete === item.id ? (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         ))}
 
@@ -126,7 +147,7 @@ export default function Gallery({ refreshToken }: Props) {
         <div className="flex justify-center p-4">
           <button
             onClick={() => load(page + 1)}
-            className="px-6 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 transition-colors"
+            className="px-6 min-h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 transition-colors"
           >
             Load more
           </button>

@@ -87,7 +87,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
             type="button"
             onClick={addLora}
             disabled={loading || models.loras.length === 0}
-            className="text-xs px-2.5 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600
+            className="text-xs px-3 min-h-12 rounded-lg bg-zinc-700 hover:bg-zinc-600
                        disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 transition-colors"
           >
             + Add LoRA
@@ -123,7 +123,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                 <button
                   type="button"
                   onClick={() => removeLora(i)}
-                  className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors flex-shrink-0"
+                  className="min-h-12 min-w-12 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors flex-shrink-0 flex items-center justify-center"
                   aria-label="Remove LoRA"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

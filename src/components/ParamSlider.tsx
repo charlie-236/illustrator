@@ -20,15 +20,17 @@ export default function ParamSlider({ label, value, min, max, step, onChange, fo
         <span className="text-xs text-zinc-400 tabular-nums font-mono">{display}</span>
       </div>
       <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
-        />
+        <div className="flex-1 min-h-12 flex items-center">
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(e) => onChange(parseFloat(e.target.value))}
+            className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
+          />
+        </div>
         <input
           type="number"
           min={min}
@@ -36,7 +38,7 @@ export default function ParamSlider({ label, value, min, max, step, onChange, fo
           step={step}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="w-16 input-base text-center px-1.5 py-1 text-xs"
+          className="w-16 input-base text-center px-1.5 text-sm"
         />
       </div>
     </div>
