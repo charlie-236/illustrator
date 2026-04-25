@@ -17,6 +17,9 @@ The remote Azure A100 VM has severely limited disk space. ComfyUI must **NEVER**
 - Before proposing any fix, verify it aligns with the `SaveImageWebsocket` requirement.
 - If a package update or ComfyUI node change breaks the WebSocket relay, fixing the relay takes priority over all UI/UX features.
 
+### 3. Tablet-first application
+This is a tablet-first application. Every interactive element MUST have a minimum touch target of 48x48 pixels. Use Tailwind classes like min-h-12, min-w-12, p-3, or p-4 to ensure they are easily tappable.
+
 ---
 
 ## Environment

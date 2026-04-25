@@ -29,9 +29,19 @@ model Generation {
 model CheckpointConfig {
   id                    String   @id @default(cuid())
   checkpointName        String   @unique
+  friendlyName          String   @default("")
   defaultWidth          Int      @default(512)
   defaultHeight         Int      @default(512)
   defaultPositivePrompt String   @default("")
   defaultNegativePrompt String   @default("")
   updatedAt             DateTime @updatedAt
+}
+
+model LoraConfig {
+  id           String   @id @default(cuid())
+  loraName     String   @unique
+  friendlyName String   @default("")
+  triggerWords String   @default("")
+  baseModel    String   @default("")
+  updatedAt    DateTime @updatedAt
 }

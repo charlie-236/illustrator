@@ -6,10 +6,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const name = new URL(req.url).searchParams.get('name');
 
-  // No name = return all configs (used by dropdowns to populate friendly names)
+  // No name = return all configs
   if (!name) {
     try {
-      const configs = await prisma.checkpointConfig.findMany();
+      const configs = await prisma.loraConfig.findMany();
       return NextResponse.json(configs);
     } catch (err) {
       return NextResponse.json({ error: String(err) }, { status: 500 });
@@ -17,9 +17,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const config = await prisma.checkpointConfig.findUnique({
-      where: { checkpointName: name },
-    });
+    const config = await prisma.loraConfig.findUnique({ where: { loraName: name } });
     if (!config) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json(config);
   } catch (err) {
@@ -29,12 +27,10 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   let body: {
-    checkpointName: string;
+    loraName: string;
     friendlyName: string;
-    defaultWidth: number;
-    defaultHeight: number;
-    defaultPositivePrompt: string;
-    defaultNegativePrompt: string;
+    triggerWords: string;
+    baseModel: string;
   };
   try {
     body = await req.json();
@@ -42,14 +38,18 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { checkpointName, friendlyName, defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt } = body;
-  if (!checkpointName) return NextResponse.json({ error: 'checkpointName required' }, { status: 400 });
+  const { loraName, friendlyName, triggerWords, baseModel } = body;
+  if (!loraName) return NextResponse.json({ error: 'loraName required' }, { status: 400 });
 
-  const data = { friendlyName: friendlyName ?? '', defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt };
+  const data = {
+    friendlyName: friendlyName ?? '',
+    triggerWords: triggerWords ?? '',
+    baseModel: baseModel ?? '',
+  };
   try {
-    const config = await prisma.checkpointConfig.upsert({
-      where: { checkpointName },
-      create: { checkpointName, ...data },
+    const config = await prisma.loraConfig.upsert({
+      where: { loraName },
+      create: { loraName, ...data },
       update: data,
     });
     return NextResponse.json(config);

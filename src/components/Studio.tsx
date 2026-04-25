@@ -17,10 +17,10 @@ const DEFAULTS: GenerationParams = {
   checkpoint: '',
   loras: [],
   positivePrompt: '',
-  negativePrompt: 'nsfw, ugly, blurry, low quality, watermark, text, signature',
-  width: 512,
-  height: 512,
-  steps: 20,
+  negativePrompt: '',
+  width: 1024,
+  height: 1024,
+  steps: 35,
   cfg: 7,
   seed: -1,
   sampler: 'euler',
@@ -164,7 +164,7 @@ export default function Studio({ onGenerated }: { onGenerated: () => void }) {
           label="Positive Prompt"
           value={p.positivePrompt}
           onChange={(v) => update('positivePrompt', v)}
-          placeholder="masterpiece, best quality, …"
+          placeholder="A dog sunning itself on a shag rug."
           rows={4}
           hint={checkpointDefaults?.positivePrompt || undefined}
         />

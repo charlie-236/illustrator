@@ -37,10 +37,19 @@ export interface GenerationRecord {
 export interface CheckpointConfig {
   id: string;
   checkpointName: string;
+  friendlyName: string;
   defaultWidth: number;
   defaultHeight: number;
   defaultPositivePrompt: string;
   defaultNegativePrompt: string;
+}
+
+export interface LoraConfig {
+  id: string;
+  loraName: string;
+  friendlyName: string;
+  triggerWords: string;
+  baseModel: string;
 }
 
 export interface ModelInfo {

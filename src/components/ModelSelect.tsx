@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { LoraEntry, ModelInfo } from '@/types';
+import type { CheckpointConfig, LoraConfig, LoraEntry, ModelInfo } from '@/types';
 
 interface Props {
   checkpoint: string;
@@ -12,15 +12,32 @@ interface Props {
 
 export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange }: Props) {
   const [models, setModels] = useState<ModelInfo>({ checkpoints: [], loras: [] });
+  const [checkpointNames, setCheckpointNames] = useState<Record<string, string>>({});
+  const [loraNames, setLoraNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/models')
-      .then((r) => r.json())
-      .then((data: ModelInfo) => {
-        setModels(data);
-        if (!checkpoint && data.checkpoints[0]) onCheckpointChange(data.checkpoints[0]);
+    Promise.all([
+      fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
+      fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
+      fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
+    ])
+      .then(([modelsData, ckptConfigs, loraConfigs]) => {
+        setModels(modelsData);
+        if (!checkpoint && modelsData.checkpoints[0]) onCheckpointChange(modelsData.checkpoints[0]);
+
+        const ckptMap: Record<string, string> = {};
+        for (const c of ckptConfigs) {
+          if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
+        }
+        setCheckpointNames(ckptMap);
+
+        const loraMap: Record<string, string> = {};
+        for (const l of loraConfigs) {
+          if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
+        }
+        setLoraNames(loraMap);
       })
       .catch(() => setError('Could not reach ComfyUI'))
       .finally(() => setLoading(false));
@@ -57,7 +74,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
         >
           {loading && <option>Loading…</option>}
           {models.checkpoints.map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c} value={c}>{checkpointNames[c] ?? c}</option>
           ))}
         </select>
       </div>
@@ -84,7 +101,6 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
         <div className="space-y-3">
           {loras.map((entry, i) => (
             <div key={i} className="bg-zinc-800/60 rounded-lg p-3 space-y-2">
-              {/* Dropdown + weight input + remove */}
               <div className="flex items-center gap-2">
                 <select
                   value={entry.name}
@@ -92,7 +108,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                   className="input-base flex-1 text-sm py-1.5"
                 >
                   {models.loras.map((l) => (
-                    <option key={l} value={l}>{l}</option>
+                    <option key={l} value={l}>{loraNames[l] ?? l}</option>
                   ))}
                 </select>
                 <input
@@ -115,7 +131,6 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                   </svg>
                 </button>
               </div>
-              {/* Weight slider */}
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-600 w-6 text-right tabular-nums">-2</span>
                 <input

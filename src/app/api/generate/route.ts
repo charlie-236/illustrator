@@ -14,30 +14,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  // Fetch checkpoint defaults to concatenate server-side; original user prompts go to DB/filename
-  let finalPositive = params.positivePrompt;
-  let finalNegative = params.negativePrompt;
+  // Assemble final prompts server-side; original user prompts go to DB/filename
+  const positiveParts: string[] = [];
+  const negativeParts: string[] = [];
+
+  // 1. Checkpoint defaults
   if (params.checkpoint) {
     try {
-      const config = await prisma.checkpointConfig.findUnique({
+      const ckptConfig = await prisma.checkpointConfig.findUnique({
         where: { checkpointName: params.checkpoint },
       });
-      if (config) {
-        if (config.defaultPositivePrompt) {
-          finalPositive = [config.defaultPositivePrompt, params.positivePrompt]
-            .filter(Boolean)
-            .join(', ');
-        }
-        if (config.defaultNegativePrompt) {
-          finalNegative = [config.defaultNegativePrompt, params.negativePrompt]
-            .filter(Boolean)
-            .join(', ');
-        }
-      }
-    } catch {
-      // Non-critical — proceed with user prompts only
-    }
+      if (ckptConfig?.defaultPositivePrompt) positiveParts.push(ckptConfig.defaultPositivePrompt);
+      if (ckptConfig?.defaultNegativePrompt) negativeParts.push(ckptConfig.defaultNegativePrompt);
+    } catch { /* non-critical */ }
   }
+
+  // 2. LoRA trigger words (batch fetch, preserve user-specified LoRA order)
+  if (params.loras.length > 0) {
+    try {
+      const loraConfigs = await prisma.loraConfig.findMany({
+        where: { loraName: { in: params.loras.map((l) => l.name) } },
+      });
+      const loraConfigMap = new Map(loraConfigs.map((c) => [c.loraName, c]));
+      for (const lora of params.loras) {
+        const cfg = loraConfigMap.get(lora.name);
+        if (cfg?.triggerWords) positiveParts.push(cfg.triggerWords);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  // 3. User prompts
+  if (params.positivePrompt) positiveParts.push(params.positivePrompt);
+  if (params.negativePrompt) negativeParts.push(params.negativePrompt);
+
+  const finalPositive = positiveParts.join(', ');
+  const finalNegative = negativeParts.join(', ');
 
   const workflowParams: GenerationParams = {
     ...params,
