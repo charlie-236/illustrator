@@ -56,8 +56,12 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     setPendingDelete(null);
     setDeleting(id);
     try {
-      await fetch(`/api/generation/${id}`, { method: 'DELETE' });
-      setItems((prev) => prev.filter((item) => item.id !== id));
+      const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setItems((prev) => prev.filter((item) => item.id !== id));
+      } else {
+        console.error('Delete failed:', res.status);
+      }
     } finally {
       setDeleting(null);
     }

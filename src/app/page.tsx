@@ -12,7 +12,7 @@ export type Tab = 'studio' | 'gallery' | 'models';
 function parseLoras(loraStr: string | null): LoraEntry[] {
   if (!loraStr) return [];
   return loraStr.split(', ').flatMap((part) => {
-    const m = part.match(/^(.+) \((\d+(?:\.\d+)?)\)$/);
+    const m = part.match(/^(.+) \((-?\d+(?:\.\d+)?)\)$/);
     return m ? [{ name: m[1], weight: parseFloat(m[2]) }] : [];
   });
 }
