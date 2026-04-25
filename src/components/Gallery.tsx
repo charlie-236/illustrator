@@ -27,7 +27,8 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<GenerationRecord | null>(null);
+  // null = closed; number = index of the item currently open in the modal
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -48,20 +49,22 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     load(1, true);
   }, [load, refreshToken]);
 
+  /** Raw delete — no two-tap; used by the modal (which handles its own confirm UI). */
+  async function deleteById(id: string): Promise<void> {
+    const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  /** Two-tap confirm delete for thumbnail action strips. */
   async function handleDelete(id: string) {
-    if (pendingDelete !== id) {
-      setPendingDelete(id);
-      return;
-    }
+    if (pendingDelete !== id) { setPendingDelete(id); return; }
     setPendingDelete(null);
     setDeleting(id);
     try {
-      const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setItems((prev) => prev.filter((item) => item.id !== id));
-      } else {
-        console.error('Delete failed:', res.status);
-      }
+      await deleteById(id);
+    } catch (e) {
+      console.error('Delete failed:', e);
     } finally {
       setDeleting(null);
     }
@@ -69,7 +72,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
 
   if (!loading && items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-zinc-600">
+      <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
         <p className="text-4xl mb-3">✦</p>
         <p>No generations yet — switch to Studio to create one.</p>
       </div>
@@ -79,16 +82,17 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   return (
     <>
       <div className="p-3 grid grid-cols-3 gap-1.5 sm:gap-2">
-        {items.map((item) => (
+        {items.map((item, i) => (
           <div
             key={item.id}
             className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors group"
             onMouseLeave={() => { if (pendingDelete === item.id) setPendingDelete(null); }}
           >
-            {/* Image — tap to view details */}
+            {/* Image — tap to open full-screen modal */}
             <button
-              onClick={() => setSelected(item)}
+              onClick={() => setSelectedIdx(i)}
               className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              aria-label={`View: ${item.promptPos.slice(0, 40)}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -114,11 +118,11 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
                 title="Send to Studio"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 15l-4-4 4-4M8 15l-4-4 4-4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
 
-              {/* Delete */}
+              {/* Delete (two-tap on thumbnail strip) */}
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
                 disabled={deleting === item.id}
@@ -158,8 +162,14 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
         </div>
       )}
 
-      {selected && (
-        <ImageModal record={selected} onClose={() => setSelected(null)} />
+      {selectedIdx !== null && (
+        <ImageModal
+          items={items}
+          startIndex={selectedIdx}
+          onClose={() => setSelectedIdx(null)}
+          onRemix={onRemix}
+          onDelete={deleteById}
+        />
       )}
     </>
   );

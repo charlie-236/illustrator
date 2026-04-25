@@ -54,6 +54,7 @@ export default function Home() {
             onGenerated={() => setRefreshGallery((n) => n + 1)}
             remixParams={remixParams}
             onRemixConsumed={handleRemixConsumed}
+            onRemix={handleRemix}
           />
         </div>
         <div className={tab === 'gallery' ? '' : 'hidden'}>

@@ -5,7 +5,8 @@ import PromptArea from './PromptArea';
 import ModelSelect from './ModelSelect';
 import ParamSlider from './ParamSlider';
 import GenerationProgress from './GenerationProgress';
-import type { CheckpointConfig, GenerationParams } from '@/types';
+import ImageModal from './ImageModal';
+import type { CheckpointConfig, GenerationParams, GenerationRecord } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 
 interface CheckpointDefaults {
@@ -31,6 +32,8 @@ interface State {
   status: 'idle' | 'generating' | 'done' | 'error';
   progress: { value: number; max: number };
   imageUrl: string;
+  generationId: string;
+  record: GenerationRecord | null;
   error: string;
   resolvedSeed: number;
 }
@@ -39,17 +42,21 @@ interface Props {
   onGenerated: () => void;
   remixParams: GenerationParams | null;
   onRemixConsumed: () => void;
+  onRemix: (record: GenerationRecord) => void;
 }
 
-export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Props) {
+export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRemix }: Props) {
   const [p, setP] = useState<GenerationParams>(DEFAULTS);
   const [state, setState] = useState<State>({
     status: 'idle',
     progress: { value: 0, max: 0 },
     imageUrl: '',
+    generationId: '',
+    record: null,
     error: '',
     resolvedSeed: -1,
   });
+  const [modalOpen, setModalOpen] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
 
@@ -58,7 +65,6 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
     if (!remixParams) return;
     setP(remixParams);
     onRemixConsumed();
-    // Fetch checkpoint config just for the hint display — does not overwrite params
     if (remixParams.checkpoint) {
       fetch(`/api/checkpoint-config?name=${encodeURIComponent(remixParams.checkpoint)}`)
         .then((r) => (r.ok ? r.json() as Promise<CheckpointConfig> : null))
@@ -80,17 +86,10 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
 
   async function handleCheckpointChange(newCheckpoint: string) {
     update('checkpoint', newCheckpoint);
-    if (!newCheckpoint) {
-      setCheckpointDefaults(null);
-      return;
-    }
-
+    if (!newCheckpoint) { setCheckpointDefaults(null); return; }
     try {
       const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);
-      if (!res.ok) {
-        setCheckpointDefaults(null);
-        return;
-      }
+      if (!res.ok) { setCheckpointDefaults(null); return; }
       const config = await res.json() as CheckpointConfig;
       setCheckpointDefaults({
         positivePrompt: config.defaultPositivePrompt,
@@ -98,14 +97,22 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
       });
       setP((s) => ({ ...s, width: config.defaultWidth, height: config.defaultHeight }));
     } catch {
-      // Config fetch is non-critical; checkpoint change still applies
+      // non-critical
     }
   }
 
   async function handleGenerate() {
     if (state.status === 'generating') return;
 
-    setState({ status: 'generating', progress: { value: 0, max: p.steps }, imageUrl: '', error: '', resolvedSeed: -1 });
+    setState({
+      status: 'generating',
+      progress: { value: 0, max: p.steps },
+      imageUrl: '',
+      generationId: '',
+      record: null,
+      error: '',
+      resolvedSeed: -1,
+    });
     sseRef.current?.close();
 
     let promptId: string;
@@ -143,11 +150,16 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
 
     sse.addEventListener('complete', (e) => {
       const d = JSON.parse(e.data) as { imageUrl: string; generationId: string };
-      setState((s) => ({ ...s, status: 'done', imageUrl: d.imageUrl }));
-      // Capture the resolved seed so the user can re-run the exact same generation
+      setState((s) => ({ ...s, status: 'done', imageUrl: d.imageUrl, generationId: d.generationId }));
       update('seed', resolvedSeed);
       sse.close();
       onGenerated();
+
+      // Fetch the full record so the modal has complete metadata
+      fetch(`/api/generation/${d.generationId}`)
+        .then((r) => r.json() as Promise<GenerationRecord>)
+        .then((record) => setState((s) => ({ ...s, record })))
+        .catch(() => {});
     });
 
     sse.addEventListener('error', (e) => {
@@ -163,20 +175,53 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
     };
   }
 
+  async function handleStudioDelete(id: string): Promise<void> {
+    const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    setState((s) => ({ ...s, status: 'idle', imageUrl: '', generationId: '', record: null }));
+    onGenerated();
+  }
+
   const isGenerating = state.status === 'generating';
 
   return (
     <div className="p-4 space-y-4">
-      {/* Progress / result — top so the keyboard never obscures it */}
-      {(isGenerating || state.status === 'done') && (
+
+      {/* ── During generation: progress bar ── */}
+      {isGenerating && (
         <div className="card">
-          <GenerationProgress
-            value={state.progress.value}
-            max={state.progress.max}
-            imageUrl={state.imageUrl}
-          />
-          {state.status === 'done' && state.resolvedSeed !== -1 && (
-            <p className="text-xs text-zinc-500 mt-2 text-center tabular-nums">Seed: {state.resolvedSeed}</p>
+          <GenerationProgress value={state.progress.value} max={state.progress.max} />
+        </div>
+      )}
+
+      {/* ── After generation: thumbnail card ── */}
+      {state.status === 'done' && state.imageUrl && (
+        <div className="card">
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors">
+              <button
+                className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                onClick={() => { if (state.record) setModalOpen(true); }}
+                disabled={!state.record}
+                aria-label="View generation"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={state.imageUrl}
+                  alt="Generated"
+                  className="w-full h-full object-cover"
+                />
+              </button>
+              {/* Spinner while record loads */}
+              {!state.record && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-black/20">
+                  <div className="w-5 h-5 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
+                </div>
+              )}
+            </div>
+          </div>
+          {state.resolvedSeed !== -1 && (
+            <p className="text-xs text-zinc-400 mt-2 tabular-nums">Seed: {state.resolvedSeed}</p>
           )}
         </div>
       )}
@@ -187,7 +232,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
         </div>
       )}
 
-      {/* Prompts */}
+      {/* ── Prompts ── */}
       <div className="card space-y-3">
         <PromptArea
           label="Positive Prompt"
@@ -206,7 +251,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
         />
       </div>
 
-      {/* Models */}
+      {/* ── Models ── */}
       <div className="card">
         <ModelSelect
           checkpoint={p.checkpoint}
@@ -216,7 +261,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
         />
       </div>
 
-      {/* Generation params */}
+      {/* ── Generation params ── */}
       <div className="card space-y-4">
         <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
         <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
@@ -254,7 +299,6 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
           </select>
         </div>
 
-        {/* Seed — full-width row with randomize toggle */}
         <div>
           <label className="label">Seed</label>
           <div className="flex gap-2">
@@ -280,7 +324,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
         </div>
       </div>
 
-      {/* Sticky generate button */}
+      {/* ── Sticky generate button ── */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto">
         <button
           onClick={handleGenerate}
@@ -293,6 +337,17 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed }: Pr
           {isGenerating ? `Generating… ${state.progress.value}/${state.progress.max}` : 'Generate'}
         </button>
       </div>
+
+      {/* ── Full-screen image modal ── */}
+      {modalOpen && state.record && (
+        <ImageModal
+          items={[state.record]}
+          startIndex={0}
+          onClose={() => setModalOpen(false)}
+          onRemix={(record) => { onRemix(record); setModalOpen(false); }}
+          onDelete={handleStudioDelete}
+        />
+      )}
     </div>
   );
 }
