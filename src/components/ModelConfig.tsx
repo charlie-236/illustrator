@@ -21,37 +21,179 @@ const LORA_BLANK: Omit<LoraConfig, 'id' | 'loraName'> = {
 
 const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3'];
 
+// ── Shared bottom-sheet picker ────────────────────────────────────────────────
+
+interface SheetProps {
+  title: string;
+  items: string[];
+  selected: string;
+  nameMap: Record<string, string>;
+  onSelect: (value: string) => void;
+  onClose: () => void;
+  emptyMessage?: string;
+}
+
+function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyMessage }: SheetProps) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-zinc-900 rounded-t-2xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
+          <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-3 space-y-2 pb-8">
+          {items.length === 0 && (
+            <p className="text-zinc-500 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
+          )}
+          {items.map((raw) => {
+            const name = nameMap[raw] ?? raw;
+            const isSelected = raw === selected;
+            return (
+              <button
+                key={raw}
+                type="button"
+                onClick={() => { onSelect(raw); onClose(); }}
+                className={`w-full text-left px-4 py-3 rounded-xl min-h-[64px] flex flex-col justify-center transition-colors
+                  ${isSelected
+                    ? 'bg-violet-600/20 border border-violet-600/50'
+                    : 'bg-zinc-800 border border-transparent hover:bg-zinc-700 active:bg-zinc-600'}`}
+              >
+                <span className={`font-medium text-sm leading-snug ${isSelected ? 'text-violet-200' : 'text-zinc-100'}`}>
+                  {name}
+                </span>
+                {name !== raw && (
+                  <span className="text-xs text-zinc-500 mt-0.5 truncate">{raw}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Selector button (the trigger that opens a sheet) ──────────────────────────
+
+interface SelectorButtonProps {
+  label: string;
+  displayName: string;
+  disabled: boolean;
+  onClick: () => void;
+}
+
+function SelectorButton({ label, displayName, disabled, onClick }: SelectorButtonProps) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="input-base text-left flex items-center justify-between min-h-12 w-full px-3 py-3"
+      >
+        <span className={displayName ? 'text-zinc-100 truncate' : 'text-zinc-500'}>
+          {displayName || 'Loading…'}
+        </span>
+        <svg className="w-4 h-4 text-zinc-500 flex-shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function ModelConfig() {
   const [tab, setTab] = useState<'checkpoints' | 'loras'>('checkpoints');
 
-  // ── Checkpoint state ──────────────────────────────────────────────
   const [checkpoints, setCheckpoints] = useState<string[]>([]);
   const [loras, setLoras] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
 
+  // Friendly-name maps populated from the config APIs
+  const [ckptNames, setCkptNames] = useState<Record<string, string>>({});
+  const [loraNames, setLoraNames] = useState<Record<string, string>>({});
+
+  // Sheet open state
+  const [ckptBrowserOpen, setCkptBrowserOpen] = useState(false);
+  const [loraBrowserOpen, setLoraBrowserOpen] = useState(false);
+
+  // ── Checkpoint form state ──────────────────────────────────────────
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
   const [ckptForm, setCkptForm] = useState({ ...CKPT_BLANK });
   const [loadingCkptConfig, setLoadingCkptConfig] = useState(false);
   const [ckptStatus, setCkptStatus] = useState<SaveStatus>('idle');
 
-  // ── LoRA state ────────────────────────────────────────────────────
+  // ── LoRA form state ────────────────────────────────────────────────
   const [selectedLora, setSelectedLora] = useState('');
   const [loraForm, setLoraForm] = useState({ ...LORA_BLANK });
   const [loadingLoraConfig, setLoadingLoraConfig] = useState(false);
   const [loraStatus, setLoraStatus] = useState<SaveStatus>('idle');
 
-  // Fetch model lists once
+  // Fetch model lists + existing friendly names once on mount
   useEffect(() => {
-    fetch('/api/models')
-      .then((r) => r.json())
-      .then((data: ModelInfo) => {
-        setCheckpoints(data.checkpoints);
-        setLoras(data.loras);
-        if (data.checkpoints[0]) setSelectedCheckpoint(data.checkpoints[0]);
-        if (data.loras[0]) setSelectedLora(data.loras[0]);
+    Promise.all([
+      fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
+      fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
+      fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
+    ])
+      .then(([modelData, ckptConfigs, loraConfigs]) => {
+        setCheckpoints(modelData.checkpoints);
+        setLoras(modelData.loras);
+        if (modelData.checkpoints[0]) setSelectedCheckpoint(modelData.checkpoints[0]);
+        if (modelData.loras[0]) setSelectedLora(modelData.loras[0]);
+
+        const ckptMap: Record<string, string> = {};
+        for (const c of ckptConfigs) {
+          if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
+        }
+        setCkptNames(ckptMap);
+
+        const loraMap: Record<string, string> = {};
+        for (const l of loraConfigs) {
+          if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
+        }
+        setLoraNames(loraMap);
       })
       .finally(() => setLoadingModels(false));
   }, []);
+
+  // Reload friendly-name maps after a save so the selector button updates immediately
+  function refreshNames() {
+    Promise.all([
+      fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
+      fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
+    ]).then(([ckptConfigs, loraConfigs]) => {
+      const ckptMap: Record<string, string> = {};
+      for (const c of ckptConfigs) {
+        if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
+      }
+      setCkptNames(ckptMap);
+
+      const loraMap: Record<string, string> = {};
+      for (const l of loraConfigs) {
+        if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
+      }
+      setLoraNames(loraMap);
+    });
+  }
 
   // Load checkpoint config when selection changes
   useEffect(() => {
@@ -103,6 +245,7 @@ export default function ModelConfig() {
         body: JSON.stringify({ checkpointName: selectedCheckpoint, ...ckptForm }),
       });
       setCkptStatus(res.ok ? 'saved' : 'error');
+      if (res.ok) refreshNames();
     } catch {
       setCkptStatus('error');
     }
@@ -118,6 +261,7 @@ export default function ModelConfig() {
         body: JSON.stringify({ loraName: selectedLora, ...loraForm }),
       });
       setLoraStatus(res.ok ? 'saved' : 'error');
+      if (res.ok) refreshNames();
     } catch {
       setLoraStatus('error');
     }
@@ -160,17 +304,25 @@ export default function ModelConfig() {
       {tab === 'checkpoints' && (
         <>
           <div className="card">
-            <label className="label">Checkpoint</label>
-            <select
-              value={selectedCheckpoint}
-              onChange={(e) => setSelectedCheckpoint(e.target.value)}
+            <SelectorButton
+              label="Checkpoint"
+              displayName={loadingModels ? '' : (ckptNames[selectedCheckpoint] ?? selectedCheckpoint)}
               disabled={loadingModels}
-              className="input-base"
-            >
-              {loadingModels && <option>Loading…</option>}
-              {checkpoints.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onClick={() => setCkptBrowserOpen(true)}
+            />
           </div>
+
+          {ckptBrowserOpen && (
+            <ModelSheet
+              title="Select Checkpoint"
+              items={checkpoints}
+              selected={selectedCheckpoint}
+              nameMap={ckptNames}
+              onSelect={setSelectedCheckpoint}
+              onClose={() => setCkptBrowserOpen(false)}
+              emptyMessage="No checkpoints available"
+            />
+          )}
 
           <div className={`card space-y-4 transition-opacity ${loadingCkptConfig ? 'opacity-40 pointer-events-none' : ''}`}>
             <div>
@@ -235,18 +387,28 @@ export default function ModelConfig() {
       {tab === 'loras' && (
         <>
           <div className="card">
-            <label className="label">LoRA</label>
-            <select
-              value={selectedLora}
-              onChange={(e) => setSelectedLora(e.target.value)}
-              disabled={loadingModels}
-              className="input-base"
-            >
-              {loadingModels && <option>Loading…</option>}
-              {loras.length === 0 && !loadingModels && <option value="">No LoRAs found</option>}
-              {loras.map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
+            <SelectorButton
+              label="LoRA"
+              displayName={loadingModels ? '' : (loraNames[selectedLora] ?? selectedLora)}
+              disabled={loadingModels || loras.length === 0}
+              onClick={() => setLoraBrowserOpen(true)}
+            />
+            {!loadingModels && loras.length === 0 && (
+              <p className="text-xs text-zinc-500 mt-2">No LoRAs found in ComfyUI.</p>
+            )}
           </div>
+
+          {loraBrowserOpen && (
+            <ModelSheet
+              title="Select LoRA"
+              items={loras}
+              selected={selectedLora}
+              nameMap={loraNames}
+              onSelect={setSelectedLora}
+              onClose={() => setLoraBrowserOpen(false)}
+              emptyMessage="No LoRAs available"
+            />
+          )}
 
           <div className={`card space-y-4 transition-opacity ${loadingLoraConfig ? 'opacity-40 pointer-events-none' : ''}`}>
             <div>
