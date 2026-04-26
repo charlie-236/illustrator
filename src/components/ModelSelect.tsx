@@ -245,7 +245,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                 </div>
                 {/* Weight slider */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-500 w-6 text-right tabular-nums">-2</span>
+                  <span className="text-xs text-zinc-500 w-6 text-right tabular-nums">-10</span>
                   <input
                     type="range"
                     min={-2}
@@ -255,7 +255,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                     onChange={(e) => updateLora(i, 'weight', parseFloat(e.target.value))}
                     className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
                   />
-                  <span className="text-xs text-zinc-500 w-4 tabular-nums">2</span>
+                  <span className="text-xs text-zinc-500 w-4 tabular-nums">10</span>
                 </div>
                 {/* Trigger word pills — shown when this LoRA has triggerWords in the DB */}
                 {triggerPills.length > 0 && (

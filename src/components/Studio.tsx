@@ -15,7 +15,7 @@ interface CheckpointDefaults {
 }
 
 const DEFAULTS: GenerationParams = {
-  checkpoint: '',
+  checkpoint: 'sdxl_render_engine_v2.safetensors',
   loras: [],
   positivePrompt: '',
   negativePrompt: '',
@@ -33,7 +33,6 @@ const DEFAULTS: GenerationParams = {
 interface State {
   status: 'idle' | 'generating' | 'done' | 'error';
   progress: { value: number; max: number };
-  /** All records returned by the completed generation (one per batch image). */
   records: GenerationRecord[];
   error: string;
   resolvedSeed: number;
@@ -57,6 +56,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
   });
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStartIdx, setModalStartIdx] = useState(0);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
@@ -266,16 +266,6 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
         />
       </div>
 
-      {/* ── Models ── */}
-      <div className="card">
-        <ModelSelect
-          checkpoint={p.checkpoint}
-          loras={p.loras}
-          onCheckpointChange={handleCheckpointChange}
-          onLorasChange={(v) => update('loras', v)}
-        />
-      </div>
-
       {/* ── Base Image (Image-to-Image) ── */}
       <div className="card space-y-3">
         <div className="flex items-center justify-between">
@@ -333,90 +323,27 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
         )}
       </div>
 
-      {/* ── Generation params ── */}
-      <div className="card space-y-4">
-        <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
-        <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
-        <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
+      {/* ── Bottom bar: Settings toggle + Generate ── */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto flex gap-3">
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open settings"
+          className="min-h-12 min-w-14 flex flex-col items-center justify-center gap-0.5 rounded-xl
+                     bg-zinc-800 hover:bg-zinc-700 active:scale-95
+                     border border-zinc-700 text-zinc-300 transition-all flex-shrink-0"
+        >
+          {/* Adjustments / sliders icon */}
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+          </svg>
+        </button>
 
-        <div>
-          <label className="label">High-Res Fix</label>
-          <button
-            type="button"
-            onClick={() => update('highResFix', !p.highResFix)}
-            className={`min-h-12 w-full rounded-lg text-sm font-medium transition-all border
-              ${p.highResFix
-                ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
-                : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
-          >
-            {p.highResFix ? 'HRF On — 2× Upscale' : 'HRF Off'}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Resolution</label>
-            <select
-              value={`${p.width}x${p.height}`}
-              onChange={(e) => {
-                const [w, h] = e.target.value.split('x').map(Number);
-                update('width', w);
-                update('height', h);
-              }}
-              className="input-base"
-            >
-              {RESOLUTIONS.map((r) => (
-                <option key={r.label} value={`${r.w}x${r.h}`}>{r.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="label">Sampler</label>
-            <select value={p.sampler} onChange={(e) => update('sampler', e.target.value)} className="input-base">
-              {SAMPLERS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="label">Scheduler</label>
-          <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
-            {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-
-        <div>
-          <label className="label">Seed</label>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              value={p.seed}
-              onChange={(e) => update('seed', parseInt(e.target.value, 10))}
-              className="input-base flex-1"
-            />
-            <button
-              type="button"
-              onClick={() => update('seed', -1)}
-              disabled={p.seed === -1}
-              title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
-              className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
-                ${p.seed === -1
-                  ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
-                  : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
-            >
-              {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Sticky generate button ── */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto">
         <button
           onClick={handleGenerate}
           disabled={isGenerating || !p.checkpoint}
-          className="w-full py-4 rounded-xl font-semibold text-base transition-all
+          className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
                      bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
                      disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
                      text-white shadow-lg shadow-violet-900/40"
@@ -427,6 +354,145 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
               ? `Generate ×${p.batchSize}`
               : 'Generate'}
         </button>
+      </div>
+
+      {/* ── Drawer overlay (fades in/out without layout recalculation) ── */}
+      <div
+        className={`fixed inset-0 bg-black/60 z-40 transition-opacity duration-300
+          ${drawerOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => setDrawerOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* ── Settings drawer (slides in from the right) ── */}
+      <div
+        className={`fixed top-0 right-0 bottom-0 w-80 max-w-[90vw] z-50 flex flex-col
+                    bg-zinc-900 border-l border-zinc-800
+                    transition-transform duration-300 ease-in-out
+                    ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        aria-label="Generation settings"
+      >
+        {/* Drawer header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
+          <h2 className="text-base font-semibold text-zinc-100">Settings</h2>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(false)}
+            aria-label="Close settings"
+            className="min-h-12 min-w-12 flex items-center justify-center rounded-xl
+                       text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Drawer scrollable content */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* Models section */}
+          <div className="px-4 pt-4 pb-5">
+            <p className="label mb-3">Models</p>
+            <ModelSelect
+              checkpoint={p.checkpoint}
+              loras={p.loras}
+              onCheckpointChange={handleCheckpointChange}
+              onLorasChange={(v) => update('loras', v)}
+            />
+          </div>
+
+          <div className="border-t border-zinc-800" />
+
+          {/* Generation section */}
+          <div className="px-4 pt-4 pb-5 space-y-4">
+            <p className="label">Generation</p>
+
+            <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
+            <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
+            <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
+
+            <div>
+              <label className="label">High-Res Fix</label>
+              <button
+                type="button"
+                onClick={() => update('highResFix', !p.highResFix)}
+                className={`min-h-12 w-full rounded-lg text-sm font-medium transition-all border
+                  ${p.highResFix
+                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                    : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+              >
+                {p.highResFix ? 'HRF On — 2× Upscale' : 'HRF Off'}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-zinc-800" />
+
+          {/* Sampling section */}
+          <div className="px-4 pt-4 pb-5 space-y-3">
+            <p className="label">Sampling</p>
+
+            <div>
+              <label className="label">Resolution</label>
+              <select
+                value={`${p.width}x${p.height}`}
+                onChange={(e) => {
+                  const [w, h] = e.target.value.split('x').map(Number);
+                  update('width', w);
+                  update('height', h);
+                }}
+                className="input-base"
+              >
+                {RESOLUTIONS.map((r) => (
+                  <option key={r.label} value={`${r.w}x${r.h}`}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">Sampler</label>
+              <select value={p.sampler} onChange={(e) => update('sampler', e.target.value)} className="input-base">
+                {SAMPLERS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">Scheduler</label>
+              <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
+                {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="border-t border-zinc-800" />
+
+          {/* Seed section */}
+          <div className="px-4 pt-4 pb-8">
+            <label className="label">Seed</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={p.seed}
+                onChange={(e) => update('seed', parseInt(e.target.value, 10))}
+                className="input-base flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => update('seed', -1)}
+                disabled={p.seed === -1}
+                title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
+                className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
+                  ${p.seed === -1
+                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
+                    : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+              >
+                {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
+              </button>
+            </div>
+          </div>
+
+        </div>
       </div>
 
       {/* ── Full-screen image modal ── */}
