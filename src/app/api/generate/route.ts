@@ -119,7 +119,8 @@ export async function POST(req: NextRequest) {
 
   // Stash original params (not workflowParams) so DB stores the user's typed prompts, not the
   // assembled-with-defaults version. The SSE route picks these up via registerJob().
-  manager.stashJobParams(promptId, params, resolvedSeed);
+  // finalPositive/finalNegative are recorded alongside for forensic reference.
+  manager.stashJobParams(promptId, params, resolvedSeed, finalPositive, finalNegative);
 
   return NextResponse.json({ promptId, resolvedSeed });
 }

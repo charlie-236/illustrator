@@ -20,7 +20,7 @@ function parseLoras(loraStr: string | null): LoraEntry[] {
 function recordToParams(record: GenerationRecord): GenerationParams {
   return {
     checkpoint: record.model,
-    loras: parseLoras(record.lora),
+    loras: record.lorasJson ?? parseLoras(record.lora),
     positivePrompt: record.promptPos,
     negativePrompt: record.promptNeg,
     width: record.width,

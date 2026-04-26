@@ -28,6 +28,9 @@ export interface GenerationRecord {
   promptNeg: string;
   model: string;
   lora: string | null;
+  lorasJson: LoraEntry[] | null;
+  assembledPos: string | null;
+  assembledNeg: string | null;
   seed: string;
   cfg: number;
   steps: number;

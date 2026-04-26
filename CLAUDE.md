@@ -104,23 +104,31 @@ Single model. `npx prisma db push` to apply schema changes (no migration files).
 
 ```prisma
 model Generation {
-  id        String   @id @default(cuid())
-  filePath  String           // e.g. /generations/1714000000000_abc12345.png
-  promptPos String
-  promptNeg String
-  model     String           // checkpoint filename
-  lora      String?          // null when no LoRA used
-  seed      BigInt
-  cfg       Float
-  steps     Int
-  width     Int
-  height    Int
-  sampler   String
-  scheduler String
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  filePath     String           // e.g. /api/images/slug_1714000000000.png
+  promptPos    String           // user's typed positive prompt (stored as-is for remix)
+  promptNeg    String           // user's typed negative prompt
+  model        String           // checkpoint filename
+  lora         String?          // human-readable summary, e.g. "name (1.00), name2 (0.80)"
+  lorasJson    Json?            // structured: [{name: string, weight: number}, ...] or null
+  assembledPos String?          // final positive sent to ComfyUI (defaults + triggers + user); null for legacy records
+  assembledNeg String?          // final negative sent to ComfyUI; null for legacy records
+  seed         BigInt
+  cfg          Float
+  steps        Int
+  width        Int
+  height       Int
+  sampler      String
+  scheduler    String
+  highResFix   Boolean
+  createdAt    DateTime @default(now())
   @@index([createdAt(sort: Desc)])
 }
 ```
+
+**LoRA storage**: `lora` is the human-readable display string written by `finalizeJob`. `lorasJson` is the canonical structured form (`LoraEntry[]`) used for remix — `recordToParams` prefers `lorasJson` and falls back to parsing the string via `parseLoras` for legacy records.
+
+**Assembled prompts**: The DB stores both the user's typed prompts (`promptPos`/`promptNeg`) and the assembled-with-defaults-and-triggers versions sent to ComfyUI (`assembledPos`/`assembledNeg`). Remix uses the typed prompts so the user can edit them; the assembled fields are forensic-only for now. Legacy records will have `null` for these fields.
 
 ## API routes
 

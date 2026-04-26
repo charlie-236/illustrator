@@ -2,12 +2,15 @@ import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
+import type { Prisma } from '@prisma/client';
 import type { GenerationParams } from '@/types';
 
 interface Job {
   promptId: string;
   params: GenerationParams;
   resolvedSeed: number;
+  assembledPos: string;
+  assembledNeg: string;
   controller: ReadableStreamDefaultController<Uint8Array>;
   /** Accumulates every image binary frame for this prompt (one per batch image). */
   imageBuffers: Buffer[];
@@ -98,7 +101,7 @@ class ComfyWSManager {
   private ws: WebSocket | null = null;
   private clientId: string;
   private jobs = new Map<string, Job>();
-  private pendingParams = new Map<string, { params: GenerationParams; resolvedSeed: number; createdAt: number }>();
+  private pendingParams = new Map<string, { params: GenerationParams; resolvedSeed: number; assembledPos: string; assembledNeg: string; createdAt: number }>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private reconnectAttempts = 0;
@@ -274,7 +277,7 @@ class ComfyWSManager {
     if (job.finalized) return;
     job.finalized = true;
     if (job.timeoutId !== null) clearTimeout(job.timeoutId);
-    const { params, resolvedSeed, imageBuffers, controller } = job;
+    const { params, resolvedSeed, assembledPos, assembledNeg, imageBuffers, controller } = job;
     this.jobs.delete(job.promptId);
 
     if (imageBuffers.length === 0) {
@@ -317,6 +320,9 @@ class ComfyWSManager {
             promptNeg: params.negativePrompt,
             model: params.checkpoint,
             lora: loraStr,
+            lorasJson: params.loras.length > 0 ? (params.loras as unknown as Prisma.InputJsonValue) : undefined,
+            assembledPos,
+            assembledNeg,
             seed: BigInt(resolvedSeed),
             cfg: params.cfg,
             steps: params.steps,
@@ -354,7 +360,13 @@ class ComfyWSManager {
     this.jobs.delete(promptId);
   }
 
-  stashJobParams(promptId: string, params: GenerationParams, resolvedSeed: number) {
+  stashJobParams(
+    promptId: string,
+    params: GenerationParams,
+    resolvedSeed: number,
+    assembledPos: string,
+    assembledNeg: string,
+  ) {
     // TTL purge: drop stale entries from tabs that closed before opening SSE
     const now = Date.now();
     for (const [id, entry] of this.pendingParams) {
@@ -363,7 +375,7 @@ class ComfyWSManager {
 
     // Strip baseImage and denoise — not needed in finalizeJob, and baseImage can be several MB
     const { baseImage: _bi, denoise: _d, ...rest } = params;
-    this.pendingParams.set(promptId, { params: rest as GenerationParams, resolvedSeed, createdAt: now });
+    this.pendingParams.set(promptId, { params: rest as GenerationParams, resolvedSeed, assembledPos, assembledNeg, createdAt: now });
   }
 
   registerJob(
@@ -385,6 +397,8 @@ class ComfyWSManager {
       promptId,
       params: entry.params,
       resolvedSeed: entry.resolvedSeed,
+      assembledPos: entry.assembledPos,
+      assembledNeg: entry.assembledNeg,
       controller,
       imageBuffers: [],
       activeNode: null,

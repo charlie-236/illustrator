@@ -8,21 +8,24 @@ datasource db {
 }
 
 model Generation {
-  id        String   @id @default(cuid())
-  filePath  String
-  promptPos String
-  promptNeg String
-  model     String
-  lora      String?
-  seed      BigInt
-  cfg       Float
-  steps     Int
-  width     Int
-  height    Int
-  sampler    String   @default("euler")
-  scheduler  String   @default("normal")
-  highResFix Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  filePath     String
+  promptPos    String
+  promptNeg    String
+  model        String
+  lora         String?                  // human-readable summary, e.g. "name (1.00), name2 (0.80)"
+  lorasJson    Json?                    // structured: [{name: string, weight: number}, ...] or null
+  assembledPos String?                  // final positive prompt sent to ComfyUI (defaults + triggers + user); null for legacy records
+  assembledNeg String?                  // final negative prompt sent to ComfyUI; null for legacy records
+  seed         BigInt
+  cfg          Float
+  steps        Int
+  width        Int
+  height       Int
+  sampler      String   @default("euler")
+  scheduler    String   @default("normal")
+  highResFix   Boolean  @default(false)
+  createdAt    DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
 }
