@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { CheckpointConfig, LoraConfig, ModelInfo } from '@/types';
+import IngestPanel from '@/components/IngestPanel';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -125,7 +126,7 @@ function SelectorButton({ label, displayName, disabled, onClick }: SelectorButto
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
-  const [tab, setTab] = useState<'checkpoints' | 'loras'>('checkpoints');
+  const [tab, setTab] = useState<'checkpoints' | 'loras' | 'add'>('checkpoints');
 
   const [checkpoints, setCheckpoints] = useState<string[]>([]);
   const [loras, setLoras] = useState<string[]>([]);
@@ -318,14 +319,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
       {/* Tab switcher */}
       <div className="flex gap-1 p-1 bg-zinc-800/60 rounded-xl">
-        {(['checkpoints', 'loras'] as const).map((t) => (
+        {(['checkpoints', 'loras', 'add'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors capitalize
+            className={`flex-1 min-h-12 rounded-lg text-sm font-medium transition-colors
               ${tab === t ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
           >
-            {t}
+            {t === 'checkpoints' ? 'Checkpoints' : t === 'loras' ? 'LoRAs' : 'Add Models'}
           </button>
         ))}
       </div>
@@ -445,6 +446,11 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
             <SaveRow status={ckptStatus} onSave={saveCheckpoint} disabled={!selectedCheckpoint} />
           </div>
         </>
+      )}
+
+      {/* ── Add Models tab ──────────────────────────────────────────── */}
+      {tab === 'add' && (
+        <IngestPanel onIngestComplete={() => { onSaved?.(); refreshModelLists(); }} />
       )}
 
       {/* ── LoRAs tab ────────────────────────────────────────────────── */}

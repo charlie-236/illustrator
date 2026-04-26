@@ -228,6 +228,8 @@ src/
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
     Gallery.tsx         3-col image grid, load-more pagination, opens ImageModal
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields
+    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Add Models; saves trigger onSaved (increments modelConfigVersion)
+    IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
 ```
 
 ## Workflow node graph
@@ -257,6 +259,10 @@ Node IDs used in the ComfyUI API workflow:
 - `.label` = uppercase xs tracking-wide zinc-400 label
 
 ## Model ingestion workflow
+
+**Primary path: in-app UI.** Models tab → Add Models sub-tab. Single mode pastes one CivitAI URL and streams live progress; batch mode accepts up to 20 URLs and processes them sequentially with per-row progress. Backed by `/api/models/ingest` and `/api/models/ingest-batch`. Successful ingestion automatically refreshes Studio's ModelSelect via the `modelConfigVersion` mechanism — no manual refresh needed.
+
+**Desktop fallback: `add_model.sh`** — batch processing from the desktop terminal using a queue-file format. Posts to `/api/models/register` directly, bypassing the SSE infrastructure. Use this for large batches from the desktop, or as a recovery path if the in-app UI breaks.
 
 `add_model.sh` takes a queue file and batch-processes every line: downloading each model to the Azure VM and registering its metadata in the local DB.
 
