@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CheckpointConfig, LoraConfig, LoraEntry, ModelInfo } from '@/types';
 
 interface Props {
@@ -35,9 +35,11 @@ interface SheetProps {
   onSelect: (value: string) => void;
   onClose: () => void;
   emptyMessage?: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
-function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyMessage }: SheetProps) {
+function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyMessage, onRefresh, refreshing }: SheetProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-sm"
@@ -49,14 +51,29 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
           <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-            aria-label="Close"
-          >
-            <CloseIcon />
-          </button>
+          <div className="flex items-center gap-1">
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+                className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                aria-label="Refresh list"
+              >
+                <svg className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              aria-label="Close"
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
         <div className="overflow-y-auto flex-1 p-3 space-y-2 pb-8">
           {items.length === 0 && (
@@ -101,7 +118,8 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
   // null = closed; number = index of the LoRA slot being picked
   const [loraPickerIndex, setLoraPickerIndex] = useState<number | null>(null);
 
-  useEffect(() => {
+  const refreshLists = useCallback(() => {
+    setLoading(true);
     Promise.all([
       fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
       fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
@@ -121,7 +139,6 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
         const triggerMap: Record<string, string> = {};
         for (const l of loraConfigs) {
           if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
-          // Store trigger words even if empty so we can distinguish "no config" from "no triggers"
           if (l.triggerWords && l.triggerWords.trim()) {
             triggerMap[l.loraName] = l.triggerWords;
           }
@@ -132,7 +149,10 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
       .catch(() => setError('Could not reach ComfyUI'))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshToken]);
+  }, [checkpoint, onCheckpointChange]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshLists(); }, [refreshToken]);
 
   function addLora() {
     if (!models.loras[0]) return;
@@ -182,6 +202,8 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
           onSelect={onCheckpointChange}
           onClose={() => setCkptBrowserOpen(false)}
           emptyMessage="No checkpoints available"
+          onRefresh={refreshLists}
+          refreshing={loading}
         />
       )}
 
@@ -285,6 +307,8 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
           onSelect={(raw) => updateLora(loraPickerIndex, 'name', raw)}
           onClose={() => setLoraPickerIndex(null)}
           emptyMessage="No LoRAs available"
+          onRefresh={refreshLists}
+          refreshing={loading}
         />
       )}
     </div>

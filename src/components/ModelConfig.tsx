@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CheckpointConfig, LoraConfig, ModelInfo } from '@/types';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -151,8 +151,8 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [loadingLoraConfig, setLoadingLoraConfig] = useState(false);
   const [loraStatus, setLoraStatus] = useState<SaveStatus>('idle');
 
-  // Fetch model lists + existing friendly names once on mount
-  useEffect(() => {
+  const refreshModelLists = useCallback(() => {
+    setLoadingModels(true);
     Promise.all([
       fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
       fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
@@ -161,8 +161,8 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
       .then(([modelData, ckptConfigs, loraConfigs]) => {
         setCheckpoints(modelData.checkpoints);
         setLoras(modelData.loras);
-        if (modelData.checkpoints[0]) setSelectedCheckpoint(modelData.checkpoints[0]);
-        if (modelData.loras[0]) setSelectedLora(modelData.loras[0]);
+        setSelectedCheckpoint((prev) => prev || modelData.checkpoints[0] || '');
+        setSelectedLora((prev) => prev || modelData.loras[0] || '');
 
         const ckptMap: Record<string, string> = {};
         for (const c of ckptConfigs) {
@@ -178,6 +178,9 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
       })
       .finally(() => setLoadingModels(false));
   }, []);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshModelLists(); }, []);
 
   // Reload friendly-name maps after a save so the selector button updates immediately
   function refreshNames() {
@@ -294,7 +297,20 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   return (
     <div className="p-4 space-y-4">
       <div className="card space-y-1">
-        <h2 className="text-base font-semibold text-zinc-200">Model Settings</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-zinc-200">Model Settings</h2>
+          <button
+            type="button"
+            onClick={refreshModelLists}
+            disabled={loadingModels}
+            className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+            aria-label="Refresh model lists"
+          >
+            <svg className={`w-5 h-5 ${loadingModels ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <p className="text-xs text-zinc-400">
           Assign friendly names, trigger words, and defaults to your models.
         </p>

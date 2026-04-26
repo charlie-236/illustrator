@@ -1,2 +1,8 @@
 TYPE|MODEL_ID|PARENT_URL_ID
-checkpoint | 290640   | 257749
+lora       | 2844381   | 2133603
+lora       | 985537    | 880396
+lora       | 1625138   | 1437578
+lora       | 578875    | 521015
+lora       | 303904    | 269575
+lora       | 708275    | 633524
+

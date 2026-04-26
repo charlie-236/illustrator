@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -75,7 +74,6 @@ export async function POST(req: NextRequest) {
         },
         update: { friendlyName, description, url },
       });
-      revalidatePath('/', 'layout');
       return NextResponse.json({ ok: true, record });
     } else {
       const record = await prisma.loraConfig.upsert({
@@ -90,7 +88,6 @@ export async function POST(req: NextRequest) {
         },
         update: { friendlyName, triggerWords, baseModel, description, url },
       });
-      revalidatePath('/', 'layout');
       return NextResponse.json({ ok: true, record });
     }
   } catch (err) {

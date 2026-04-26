@@ -178,7 +178,7 @@ Body: `{ filename, type, modelId?, parentUrlId?, civitaiMetadata? }`
 | `civitaiMetadata.model.description` (or `.description`) | `description` | HTML stripped server-side |
 | `parentUrlId` + `modelId` | `url` | `https://civitai.com/models/{parentUrlId}?modelVersionId={modelId}` |
 
-Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Calls `revalidatePath('/', 'layout')` after write so the Studio picker updates instantly. Checkpoint width/height default to 512; update in ModelConfig after ingestion if needed. Returns `{ ok: true, record }` on success.
+Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Returns `{ ok: true, record }` on success. After ingestion, tap the Refresh button (↺) in the ModelSelect picker or ModelConfig header to reload the model lists — `revalidatePath` has no effect on client-side fetches and is not used here. Checkpoint width/height default to 512; update in ModelConfig after ingestion if needed.
 
 ## Source layout
 
@@ -207,7 +207,7 @@ src/
     TabNav.tsx          sticky header with Studio / Gallery tabs
     Studio.tsx          full generation form; owns all GenerationParams state + SSE lifecycle
     PromptArea.tsx      labelled textarea
-    ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves)
+    ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves) or when the user taps the Refresh button in the picker sheet
     ParamSlider.tsx     range slider + number input pair
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
     Gallery.tsx         3-col image grid, load-more pagination, opens ImageModal
@@ -269,7 +269,7 @@ The header row (`TYPE|…`), blank lines, and lines starting with `#` are silent
 4. Uses `jq` to wrap the raw CivitAI JSON as `civitaiMetadata` in the request body and `curl`s it to `POST /api/models/register`.
 5. Prints a per-model status line and a final summary (`N succeeded, N failed`).
 
-After the script completes, models are immediately available in Studio's model pickers, their friendly names and trigger words are pre-populated in ModelConfig, and the Next.js router cache is purged so no hard refresh is needed.
+After the script completes, tap the Refresh button (↺) in Studio's model picker sheet or in the ModelConfig header to reload the model lists. The newly ingested models will then appear with their friendly names and trigger words pre-populated.
 
 **Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is read from `.env` (`CIVITAI_TOKEN`); the script will refuse to run if it's missing. Per-item failures (validation, download, registration) are logged and skipped; the script always processes the entire queue and prints a summary of successes and failures at the end.
 
