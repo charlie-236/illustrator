@@ -106,15 +106,20 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
 
   # Fetch metadata from CivitAI via the Azure VM (not geoblocked)
   echo "   ==> Fetching metadata from CivitAI via Azure proxy …"
-  CIVIT_META=$(ssh -i "$SSH_KEY" \
+  CIVIT_META=$(ssh -n -i "$SSH_KEY" \
       -o StrictHostKeyChecking=no \
       -o BatchMode=yes \
       "$VM_USER@$VM_IP" \
       "curl -4 -s -H 'Authorization: Bearer $CIVIT_TOKEN' 'https://civitai.com/api/v1/model-versions/$MODEL_ID'")
 
-  # Sanity-check: confirm we got a JSON object, not an error page
-  if ! echo "$CIVIT_META" | jq -e 'type == "object"' &>/dev/null; then
-    echo "[line $LINE_NUM] SKIP — CivitAI metadata fetch failed or returned non-JSON" >&2
+  # Validate: require a proper model-version object, not a JSON error response
+  if ! echo "$CIVIT_META" | jq -e '
+      type == "object"
+      and (.id | type == "number")
+      and (.model | type == "object")
+      and (.model.name | type == "string")
+    ' &>/dev/null; then
+    echo "[line $LINE_NUM] SKIP — CivitAI response is not a valid model-version object" >&2
     echo "   raw response: ${CIVIT_META:0:200}" >&2
     FAIL=$(( FAIL + 1 ))
     continue
@@ -138,13 +143,40 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
 
   # Download to Azure VM
   echo "   ==> Downloading …"
-  ssh -i "$SSH_KEY" \
+  if ! ssh -n -i "$SSH_KEY" \
+          -o StrictHostKeyChecking=no \
+          -o BatchMode=yes \
+          "$VM_USER@$VM_IP" \
+          "wget -q --show-progress --progress=bar:force:noscroll \
+            \"https://civitai.red/api/download/models/$MODEL_ID?token=$CIVIT_TOKEN\" \
+            -O \"$REMOTE_PATH\""; then
+    echo "[line $LINE_NUM] SKIP — wget failed (network, auth, or disk error)" >&2
+    FAIL=$(( FAIL + 1 ))
+    continue
+  fi
+
+  # Validate the downloaded file is a real model, not an error page
+  echo "   ==> Validating download …"
+  FILE_SIZE=$(ssh -n -i "$SSH_KEY" \
       -o StrictHostKeyChecking=no \
       -o BatchMode=yes \
       "$VM_USER@$VM_IP" \
-      "wget -q --show-progress --progress=bar:force:noscroll \
-        \"https://civitai.red/api/download/models/$MODEL_ID?token=$CIVIT_TOKEN\" \
-        -O \"$REMOTE_PATH\""
+      "stat -c %s \"$REMOTE_PATH\" 2>/dev/null || echo 0")
+
+  FILE_SIZE=$(trim "$FILE_SIZE")
+  if ! [[ "$FILE_SIZE" =~ ^[0-9]+$ ]]; then
+    FILE_SIZE=0
+  fi
+
+  MIN_SIZE=$((1024 * 1024))   # 1 MB
+  if [ "$FILE_SIZE" -lt "$MIN_SIZE" ]; then
+    echo "[line $LINE_NUM] SKIP — downloaded file is suspiciously small (${FILE_SIZE} bytes); likely an error page" >&2
+    echo "   File at $VM_IP:$REMOTE_PATH may need manual cleanup." >&2
+    FAIL=$(( FAIL + 1 ))
+    continue
+  fi
+
+  echo "   size     : $FILE_SIZE bytes"
 
   # Register metadata in local DB
   echo "   ==> Registering metadata …"
@@ -158,7 +190,8 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
   if ! RESPONSE=$(echo "$PAYLOAD" | curl -sf -X POST "$NEXT_API_URL" \
     -H "Content-Type: application/json" \
     --data-binary @-); then
-    echo "[line $LINE_NUM] FAIL — API registration failed (curl exit $?)" >&2
+    echo "[line $LINE_NUM] SKIP — registration POST to $NEXT_API_URL failed" >&2
+    echo "   Note: model file is on the VM at $REMOTE_PATH but no DB entry was created." >&2
     FAIL=$(( FAIL + 1 ))
     continue
   fi

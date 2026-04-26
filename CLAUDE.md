@@ -265,13 +265,13 @@ The header row (`TYPE|…`), blank lines, and lines starting with `#` are silent
 **What each line does:**
 1. SSHes into `a100-core` and runs `curl -4` to fetch `https://civitai.com/api/v1/model-versions/{MODEL_ID}` (the VM is in Poland and is not geoblocked; the local Mint PC in the UK gets HTTP 451). Validates the response is a JSON object.
 2. Generates a random 12-char hex filename (e.g., `a3f9bc12d04e.safetensors`) to obfuscate the origin.
-3. SSHes into `a100-core` again and runs `wget` to download from `https://civitai.red/api/download/models/{MODEL_ID}?token=…` directly to `/models/ComfyUI/models/checkpoints/` or `/models/ComfyUI/models/loras/`.
+3. SSHes into `a100-core` again and runs `wget` to download from `https://civitai.red/api/download/models/{MODEL_ID}?token=…` directly to `/models/ComfyUI/models/checkpoints/` or `/models/ComfyUI/models/loras/`. After download, runs a remote `stat` to verify the file is at least 1 MB — if smaller, treats it as a failed download (likely an HTML error page) and skips the item.
 4. Uses `jq` to wrap the raw CivitAI JSON as `civitaiMetadata` in the request body and `curl`s it to `POST /api/models/register`.
 5. Prints a per-model status line and a final summary (`N succeeded, N failed`).
 
 After the script completes, models are immediately available in Studio's model pickers, their friendly names and trigger words are pre-populated in ModelConfig, and the Next.js router cache is purged so no hard refresh is needed.
 
-**Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is read from `.env` (`CIVITAI_TOKEN`); the script will refuse to run if it's missing.
+**Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is read from `.env` (`CIVITAI_TOKEN`); the script will refuse to run if it's missing. Per-item failures (validation, download, registration) are logged and skipped; the script always processes the entire queue and prints a summary of successes and failures at the end.
 
 ---
 

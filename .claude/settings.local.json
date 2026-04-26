@@ -13,7 +13,9 @@
       "Bash(npm run *)",
       "Bash(pm2 status *)",
       "Bash(xargs ls *)",
-      "Bash(chmod +x /home/charlie/illustrator/add_model.sh)"
+      "Bash(chmod +x /home/charlie/illustrator/add_model.sh)",
+      "Bash(bash -n /home/charlie/illustrator/add_model.sh)",
+      "Bash(shellcheck /home/charlie/illustrator/add_model.sh)"
     ]
   }
 }
