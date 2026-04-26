@@ -14,8 +14,8 @@ export function parseCivitaiUrl(input: string): ParsedCivitaiUrl | { error: stri
     return { error: 'Not a valid URL' };
   }
 
-  if (!url.hostname.endsWith('civitai.com')) {
-    return { error: 'URL must be a civitai.com link' };
+  if (!url.hostname.endsWith('civitai.com') && !url.hostname.endsWith('civitai.red')) {
+    return { error: 'URL must be a civitai.com or civitai.red link' };
   }
 
   const pathMatch = url.pathname.match(/^\/models\/(\d+)/);

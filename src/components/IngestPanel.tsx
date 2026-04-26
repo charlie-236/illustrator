@@ -132,12 +132,13 @@ function currentlyProcessingIndex(rows: BatchRow[]): number {
   return idx >= 0 ? idx + 1 : 0;
 }
 
-function applyUrlParse(value: string): Pick<SingleState, 'parsedIds' | 'parseError'> {
-  if (!value.trim()) return { parsedIds: null, parseError: null };
+function applyUrlParse(value: string): { urlInput: string; parsedIds: { parentUrlId: number; modelId: number } | null; parseError: string | null } {
+  if (!value.trim()) return { urlInput: value, parsedIds: null, parseError: null };
   const result = parseCivitaiUrl(value);
-  return 'error' in result
-    ? { parsedIds: null, parseError: result.error }
-    : { parsedIds: result, parseError: null };
+  if ('error' in result) return { urlInput: value, parsedIds: null, parseError: result.error };
+  // Normalize civitai.red (and any other accepted mirror) to canonical civitai.com URL
+  const urlInput = `https://civitai.com/models/${result.parentUrlId}?modelVersionId=${result.modelId}`;
+  return { urlInput, parsedIds: result, parseError: null };
 }
 
 // ── Phase rendering ───────────────────────────────────────────────────────────
@@ -169,7 +170,7 @@ function PhaseIcon({ state }: { state: 'spinning' | 'success' | 'error' | 'pendi
   return <div className={`${base} rounded-full border-2 border-zinc-600`} />;
 }
 
-function PhaseLine({ event }: { event: PhaseEvent }) {
+function PhaseLine({ event, freezeSpinner = false }: { event: PhaseEvent; freezeSpinner?: boolean }) {
   const isError = event.phase === 'error';
   const isDone = event.phase === 'done';
 
@@ -187,9 +188,12 @@ function PhaseLine({ event }: { event: PhaseEvent }) {
   else if (event.phase === 'done')                                        { label = 'Complete'; icon = 'success'; }
   else if (event.phase === 'error')                                       { label = event.message ?? 'Unknown error'; icon = 'error'; }
 
+  // Stop any spinner once the stream has reached a terminal state
+  const displayIcon = icon === 'spinning' && freezeSpinner ? 'pending' : icon;
+
   return (
     <div className={`flex items-start gap-2 text-sm ${isError ? 'text-red-300' : isDone ? 'text-emerald-300' : 'text-zinc-300'}`}>
-      <PhaseIcon state={icon} />
+      <PhaseIcon state={displayIcon} />
       <div className="flex-1 min-w-0">
         <p className="leading-snug">{label}</p>
         {isError && event.orphanPath && (
@@ -203,9 +207,20 @@ function PhaseLine({ event }: { event: PhaseEvent }) {
 }
 
 function PhaseList({ events }: { events: PhaseEvent[] }) {
+  // Keep only the last event per phase so each step shows its final state
+  // (e.g. 'fetching' is replaced by 'ok' in place rather than both appearing)
+  const dedupedMap = new Map<string, PhaseEvent>();
+  for (const event of events) dedupedMap.set(event.phase, event);
+  const deduped = [...dedupedMap.values()];
+
+  // Once a terminal event arrives, freeze any step still showing a spinner
+  const hasTerminal = deduped.some((e) => e.phase === 'error' || e.phase === 'done');
+
   return (
     <div className="space-y-1.5 pt-1 border-t border-zinc-800 mt-3">
-      {events.map((event, i) => <PhaseLine key={i} event={event} />)}
+      {deduped.map((event) => (
+        <PhaseLine key={event.phase} event={event} freezeSpinner={hasTerminal} />
+      ))}
     </div>
   );
 }
@@ -299,7 +314,7 @@ function SingleMode({ onIngestComplete }: { onIngestComplete: () => void }) {
   });
 
   function handleUrlChange(value: string) {
-    setState((s) => ({ ...s, urlInput: value, ...applyUrlParse(value) }));
+    setState((s) => ({ ...s, ...applyUrlParse(value) }));
   }
 
   async function handleSubmit() {
@@ -392,7 +407,7 @@ function BatchRowCard({ row, rowNumber, canRemove, onChange, onRemove }: BatchRo
   const locked = row.finalState !== 'pending';
 
   function handleUrlChange(value: string) {
-    onChange({ urlInput: value, ...applyUrlParse(value) });
+    onChange(applyUrlParse(value));
   }
 
   return (
