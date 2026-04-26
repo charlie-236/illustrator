@@ -35,6 +35,7 @@ export async function PUT(req: NextRequest) {
     defaultHeight: number;
     defaultPositivePrompt: string;
     defaultNegativePrompt: string;
+    description?: string;
   };
   try {
     body = await req.json();
@@ -42,10 +43,17 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { checkpointName, friendlyName, defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt } = body;
+  const { checkpointName, friendlyName, defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt, description } = body;
   if (!checkpointName) return NextResponse.json({ error: 'checkpointName required' }, { status: 400 });
 
-  const data = { friendlyName: friendlyName ?? '', defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt };
+  const data = {
+    friendlyName: friendlyName ?? '',
+    defaultWidth,
+    defaultHeight,
+    defaultPositivePrompt,
+    defaultNegativePrompt,
+    description: description?.trim() || null,
+  };
   try {
     const config = await prisma.checkpointConfig.upsert({
       where: { checkpointName },

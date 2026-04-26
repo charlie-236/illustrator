@@ -6,12 +6,45 @@ import type { GenerationParams } from '@/types';
 
 const COMFYUI = process.env.COMFYUI_URL ?? 'http://localhost:8188';
 
+async function uploadBaseImage(dataUrl: string): Promise<string | undefined> {
+  try {
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx === -1) return undefined;
+    const meta = dataUrl.slice(0, commaIdx); // e.g. "data:image/jpeg;base64"
+    const base64 = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = meta.match(/^data:([^;]+)/);
+    const mimeType = mimeMatch?.[1] ?? 'image/jpeg';
+    const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+
+    const imageBuffer = Buffer.from(base64, 'base64');
+    const blob = new Blob([imageBuffer], { type: mimeType });
+
+    const form = new FormData();
+    form.append('image', blob, `upload.${ext}`);
+    form.append('type', 'input');
+    form.append('overwrite', 'true');
+
+    const res = await fetch(`${COMFYUI}/upload/image`, { method: 'POST', body: form });
+    if (!res.ok) return undefined;
+    const data = await res.json() as { name: string; subfolder?: string };
+    return data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(req: NextRequest) {
   let params: GenerationParams;
   try {
     params = await req.json() as GenerationParams;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  // Upload base image to ComfyUI before building the workflow
+  let uploadedFilename: string | undefined;
+  if (params.baseImage) {
+    uploadedFilename = await uploadBaseImage(params.baseImage);
   }
 
   // Assemble final prompts server-side; original user prompts go to DB/filename
@@ -57,7 +90,7 @@ export async function POST(req: NextRequest) {
   };
 
   const manager = getComfyWSManager();
-  const workflow = buildWorkflow(workflowParams);
+  const workflow = buildWorkflow(workflowParams, uploadedFilename);
   const resolvedSeed = extractSeedFromWorkflow(workflow as Record<string, unknown>);
 
   let comfyRes: Response;

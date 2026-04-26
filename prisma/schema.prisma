@@ -35,6 +35,8 @@ model CheckpointConfig {
   defaultHeight         Int      @default(512)
   defaultPositivePrompt String   @default("")
   defaultNegativePrompt String   @default("")
+  description           String?
+  url                   String?
   updatedAt             DateTime @updatedAt
 }
 
@@ -44,5 +46,7 @@ model LoraConfig {
   friendlyName String   @default("")
   triggerWords String   @default("")
   baseModel    String   @default("")
+  description  String?
+  url          String?
   updatedAt    DateTime @updatedAt
 }

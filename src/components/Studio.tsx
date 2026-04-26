@@ -58,6 +58,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStartIdx, setModalStartIdx] = useState(0);
   const sseRef = useRef<EventSource | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
 
   // Apply remix data when received from Gallery
@@ -82,6 +83,25 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
 
   function update<K extends keyof GenerationParams>(key: K, val: GenerationParams[K]) {
     setP((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function handleBaseImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setP((prev) => ({
+        ...prev,
+        baseImage: reader.result as string,
+        denoise: prev.denoise ?? 0.65,
+      }));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  function clearBaseImage() {
+    setP((prev) => ({ ...prev, baseImage: undefined, denoise: undefined }));
   }
 
   async function handleCheckpointChange(newCheckpoint: string) {
@@ -254,6 +274,63 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
           onCheckpointChange={handleCheckpointChange}
           onLorasChange={(v) => update('loras', v)}
         />
+      </div>
+
+      {/* ── Base Image (Image-to-Image) ── */}
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="label mb-0">Base Image</label>
+          {p.baseImage && (
+            <button
+              type="button"
+              onClick={clearBaseImage}
+              className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              aria-label="Clear base image"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {p.baseImage ? (
+          <div className="rounded-xl overflow-hidden border border-zinc-700 bg-zinc-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.baseImage} alt="Base image" className="w-full max-h-48 object-contain" />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full min-h-24 rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 flex flex-col items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 transition-colors active:scale-[0.99]"
+          >
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <span className="text-sm">Tap to select from camera roll</span>
+          </button>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleBaseImageChange}
+        />
+
+        {p.baseImage && (
+          <ParamSlider
+            label="Denoise Strength"
+            value={p.denoise ?? 0.65}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(v) => update('denoise', v)}
+            format={(v) => v.toFixed(2)}
+          />
+        )}
       </div>
 
       {/* ── Generation params ── */}

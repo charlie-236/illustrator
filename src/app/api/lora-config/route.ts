@@ -31,6 +31,7 @@ export async function PUT(req: NextRequest) {
     friendlyName: string;
     triggerWords: string;
     baseModel: string;
+    description?: string;
   };
   try {
     body = await req.json();
@@ -38,13 +39,14 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { loraName, friendlyName, triggerWords, baseModel } = body;
+  const { loraName, friendlyName, triggerWords, baseModel, description } = body;
   if (!loraName) return NextResponse.json({ error: 'loraName required' }, { status: 400 });
 
   const data = {
     friendlyName: friendlyName ?? '',
     triggerWords: triggerWords ?? '',
     baseModel: baseModel ?? '',
+    description: description?.trim() || null,
   };
   try {
     const config = await prisma.loraConfig.upsert({

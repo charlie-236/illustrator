@@ -10,7 +10,8 @@
       "Bash(pm2 show *)",
       "Bash(pm2 restart *)",
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(pm2 status *)"
     ]
   }
 }

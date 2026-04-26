@@ -17,6 +17,8 @@ export interface GenerationParams {
   scheduler: string;
   batchSize: number;
   highResFix?: boolean;
+  baseImage?: string;
+  denoise?: number;
 }
 
 export interface GenerationRecord {
@@ -45,6 +47,8 @@ export interface CheckpointConfig {
   defaultHeight: number;
   defaultPositivePrompt: string;
   defaultNegativePrompt: string;
+  description?: string | null;
+  url?: string | null;
 }
 
 export interface LoraConfig {
@@ -53,6 +57,8 @@ export interface LoraConfig {
   friendlyName: string;
   triggerWords: string;
   baseModel: string;
+  description?: string | null;
+  url?: string | null;
 }
 
 export interface ModelInfo {

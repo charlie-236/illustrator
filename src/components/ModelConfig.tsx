@@ -5,18 +5,22 @@ import type { CheckpointConfig, LoraConfig, ModelInfo } from '@/types';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-const CKPT_BLANK: Omit<CheckpointConfig, 'id' | 'checkpointName'> = {
+const CKPT_BLANK = {
   friendlyName: '',
   defaultWidth: 512,
   defaultHeight: 512,
   defaultPositivePrompt: '',
   defaultNegativePrompt: '',
+  description: '',
+  url: '' as string | null | undefined,
 };
 
-const LORA_BLANK: Omit<LoraConfig, 'id' | 'loraName'> = {
+const LORA_BLANK = {
   friendlyName: '',
   triggerWords: '',
   baseModel: '',
+  description: '',
+  url: '' as string | null | undefined,
 };
 
 const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3'];
@@ -211,6 +215,8 @@ export default function ModelConfig() {
               defaultHeight: config.defaultHeight,
               defaultPositivePrompt: config.defaultPositivePrompt,
               defaultNegativePrompt: config.defaultNegativePrompt,
+              description: config.description ?? '',
+              url: config.url,
             }
           : { ...CKPT_BLANK });
       })
@@ -228,7 +234,13 @@ export default function ModelConfig() {
       .then((r) => (r.status === 404 ? null : r.json() as Promise<LoraConfig>))
       .then((config) => {
         setLoraForm(config
-          ? { friendlyName: config.friendlyName, triggerWords: config.triggerWords, baseModel: config.baseModel }
+          ? {
+              friendlyName: config.friendlyName,
+              triggerWords: config.triggerWords,
+              baseModel: config.baseModel,
+              description: config.description ?? '',
+              url: config.url,
+            }
           : { ...LORA_BLANK });
       })
       .catch(() => setLoraForm({ ...LORA_BLANK }))
@@ -239,10 +251,11 @@ export default function ModelConfig() {
     if (!selectedCheckpoint) return;
     setCkptStatus('saving');
     try {
+      const { url: _ckptUrl, ...ckptSaveFields } = ckptForm;
       const res = await fetch('/api/checkpoint-config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ checkpointName: selectedCheckpoint, ...ckptForm }),
+        body: JSON.stringify({ checkpointName: selectedCheckpoint, ...ckptSaveFields }),
       });
       setCkptStatus(res.ok ? 'saved' : 'error');
       if (res.ok) refreshNames();
@@ -255,10 +268,11 @@ export default function ModelConfig() {
     if (!selectedLora) return;
     setLoraStatus('saving');
     try {
+      const { url: _loraUrl, ...loraSaveFields } = loraForm;
       const res = await fetch('/api/lora-config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loraName: selectedLora, ...loraForm }),
+        body: JSON.stringify({ loraName: selectedLora, ...loraSaveFields }),
       });
       setLoraStatus(res.ok ? 'saved' : 'error');
       if (res.ok) refreshNames();
@@ -388,6 +402,30 @@ export default function ModelConfig() {
               />
             </div>
 
+            <div>
+              <label className="label">Description</label>
+              <textarea rows={3}
+                value={ckptForm.description ?? ''}
+                onChange={(e) => ckptField('description', e.target.value)}
+                placeholder="Notes about this checkpoint — architecture, training data, use cases…"
+                className="input-base resize-none leading-relaxed"
+              />
+            </div>
+
+            {ckptForm.url && (
+              <div>
+                <label className="label">URL</label>
+                <a
+                  href={ckptForm.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-blue-400 text-sm break-all hover:text-blue-300 underline underline-offset-2 transition-colors"
+                >
+                  {ckptForm.url}
+                </a>
+              </div>
+            )}
+
             <SaveRow status={ckptStatus} onSave={saveCheckpoint} disabled={!selectedCheckpoint} />
           </div>
         </>
@@ -467,6 +505,30 @@ export default function ModelConfig() {
                 ))}
               </select>
             </div>
+
+            <div>
+              <label className="label">Description</label>
+              <textarea rows={3}
+                value={loraForm.description ?? ''}
+                onChange={(e) => loraField('description', e.target.value)}
+                placeholder="Notes about this LoRA — style, subject, recommended weight…"
+                className="input-base resize-none leading-relaxed"
+              />
+            </div>
+
+            {loraForm.url && (
+              <div>
+                <label className="label">URL</label>
+                <a
+                  href={loraForm.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-blue-400 text-sm break-all hover:text-blue-300 underline underline-offset-2 transition-colors"
+                >
+                  {loraForm.url}
+                </a>
+              </div>
+            )}
 
             <SaveRow status={loraStatus} onSave={saveLora} disabled={!selectedLora} />
           </div>
