@@ -46,9 +46,10 @@ interface Props {
   remixParams: GenerationParams | null;
   onRemixConsumed: () => void;
   onRemix: (record: GenerationRecord) => void;
+  modelConfigVersion: number;
 }
 
-export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed, onRemix }: Props) {
+export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed, onRemix, modelConfigVersion }: Props) {
   const [p, setP] = useState<GenerationParams>(DEFAULTS);
   const [state, setState] = useState<State>({
     status: 'idle',
@@ -194,7 +195,6 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     sse.addEventListener('complete', (e) => {
       const d = JSON.parse(e.data) as { records: GenerationRecord[] };
       setState((s) => ({ ...s, status: 'done', records: d.records }));
-      update('seed', resolvedSeed);
       sse.close();
       onGenerated();
     });
@@ -430,6 +430,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
               loras={p.loras}
               onCheckpointChange={handleCheckpointChange}
               onLorasChange={(v) => update('loras', v)}
+              refreshToken={modelConfigVersion}
             />
           </div>
 
@@ -521,6 +522,18 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
                 {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
               </button>
             </div>
+            {state.resolvedSeed !== -1 && (
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-xs text-zinc-400 tabular-nums">Last seed: {state.resolvedSeed}</span>
+                <button
+                  type="button"
+                  onClick={() => update('seed', state.resolvedSeed)}
+                  className="min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95"
+                >
+                  ♻ Reuse
+                </button>
+              </div>
+            )}
           </div>
 
         </div>

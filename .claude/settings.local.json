@@ -11,7 +11,8 @@
       "Bash(pm2 restart *)",
       "Bash(npx tsc *)",
       "Bash(npm run *)",
-      "Bash(pm2 status *)"
+      "Bash(pm2 status *)",
+      "Bash(xargs ls *)"
     ]
   }
 }

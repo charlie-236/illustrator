@@ -147,7 +147,7 @@ SSE events emitted by the manager:
 | event | data shape |
 |-------|-----------|
 | `progress` | `{ value: number, max: number }` |
-| `complete` | `{ imageUrl: string, generationId: string }` |
+| `complete` | `{ records: GenerationRecord[] }` |
 | `error` | `{ message: string }` |
 
 ### `GET /api/models`
@@ -168,7 +168,7 @@ Returns a single `GenerationRecord` or 404.
 src/
   app/
     layout.tsx          root layout, sets dark theme + viewport meta
-    page.tsx            tab state (studio | gallery), passes refreshToken to Gallery
+    page.tsx            tab state (studio | gallery | models); passes refreshToken to Gallery, modelConfigVersion to Studio, onSaved to ModelConfig
     globals.css         Tailwind directives + utility classes: .input-base, .label, .card
     api/
       models/           GET — checkpoint + lora lists from ComfyUI
@@ -178,7 +178,7 @@ src/
       generation/[id]/  GET — single record
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
-    workflow.ts         buildWorkflow() + extractSeedFromWorkflow()
+    workflow.ts         buildWorkflow()
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
   types/
@@ -188,7 +188,7 @@ src/
     TabNav.tsx          sticky header with Studio / Gallery tabs
     Studio.tsx          full generation form; owns all GenerationParams state + SSE lifecycle
     PromptArea.tsx      labelled textarea
-    ModelSelect.tsx     checkpoint + LoRA dropdowns; fetches /api/models on mount
+    ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves)
     ParamSlider.tsx     range slider + number input pair
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
     Gallery.tsx         3-col image grid, load-more pagination, opens ImageModal

@@ -39,6 +39,7 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>('studio');
   const [refreshGallery, setRefreshGallery] = useState(0);
   const [remixParams, setRemixParams] = useState<GenerationParams | null>(null);
+  const [modelConfigVersion, setModelConfigVersion] = useState(0);
 
   const handleRemix = useCallback((record: GenerationRecord) => {
     setRemixParams(recordToParams(record));
@@ -58,13 +59,14 @@ export default function Home() {
             remixParams={remixParams}
             onRemixConsumed={handleRemixConsumed}
             onRemix={handleRemix}
+            modelConfigVersion={modelConfigVersion}
           />
         </div>
         <div className={tab === 'gallery' ? '' : 'hidden'}>
           <Gallery refreshToken={refreshGallery} onRemix={handleRemix} />
         </div>
         <div className={tab === 'models' ? '' : 'hidden'}>
-          <ModelConfig />
+          <ModelConfig onSaved={() => setModelConfigVersion((n) => n + 1)} />
         </div>
       </main>
     </div>

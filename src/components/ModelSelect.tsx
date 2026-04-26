@@ -8,6 +8,7 @@ interface Props {
   loras: LoraEntry[];
   onCheckpointChange: (v: string) => void;
   onLorasChange: (loras: LoraEntry[]) => void;
+  refreshToken?: number;
 }
 
 function ChevronDown() {
@@ -61,7 +62,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
           {items.length === 0 && (
             <p className="text-zinc-400 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
           )}
-          {items.map((raw) => {
+          {[...items].sort((a, b) => (nameMap[a] ?? a).toLowerCase().localeCompare((nameMap[b] ?? b).toLowerCase())).map((raw) => {
             const name = nameMap[raw] ?? raw;
             const isSelected = raw === selected;
             return (
@@ -89,7 +90,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
   );
 }
 
-export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange }: Props) {
+export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange, refreshToken }: Props) {
   const [models, setModels] = useState<ModelInfo>({ checkpoints: [], loras: [] });
   const [checkpointNames, setCheckpointNames] = useState<Record<string, string>>({});
   const [loraNames, setLoraNames] = useState<Record<string, string>>({});
@@ -131,7 +132,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
       .catch(() => setError('Could not reach ComfyUI'))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshToken]);
 
   function addLora() {
     if (!models.loras[0]) return;

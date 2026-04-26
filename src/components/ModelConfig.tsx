@@ -64,7 +64,7 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
           {items.length === 0 && (
             <p className="text-zinc-400 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
           )}
-          {items.map((raw) => {
+          {[...items].sort((a, b) => (nameMap[a] ?? a).toLowerCase().localeCompare((nameMap[b] ?? b).toLowerCase())).map((raw) => {
             const name = nameMap[raw] ?? raw;
             const isSelected = raw === selected;
             return (
@@ -124,7 +124,7 @@ function SelectorButton({ label, displayName, disabled, onClick }: SelectorButto
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ModelConfig() {
+export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [tab, setTab] = useState<'checkpoints' | 'loras'>('checkpoints');
 
   const [checkpoints, setCheckpoints] = useState<string[]>([]);
@@ -258,7 +258,7 @@ export default function ModelConfig() {
         body: JSON.stringify({ checkpointName: selectedCheckpoint, ...ckptSaveFields }),
       });
       setCkptStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) refreshNames();
+      if (res.ok) { refreshNames(); onSaved?.(); }
     } catch {
       setCkptStatus('error');
     }
@@ -275,7 +275,7 @@ export default function ModelConfig() {
         body: JSON.stringify({ loraName: selectedLora, ...loraSaveFields }),
       });
       setLoraStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) refreshNames();
+      if (res.ok) { refreshNames(); onSaved?.(); }
     } catch {
       setLoraStatus('error');
     }
