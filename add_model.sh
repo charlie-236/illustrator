@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
-set -euo pipefail
+#set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 VM_USER="charlie"
 VM_IP="100.96.99.94"
 SSH_KEY="$HOME/.ssh/a100-key.pem"
 NEXT_API_URL="http://127.0.0.1:3001/api/models/register"
+
+# Load CIVITAI_TOKEN from .env (must be in the same directory as this script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "Error: .env not found at $ENV_FILE" >&2
+  echo "Add CIVITAI_TOKEN=<your-token> to .env and try again." >&2
+  exit 1
+fi
+
+# grep/cut/tr reads CIVITAI_TOKEN without sourcing .env (avoids executing arbitrary shell)
+# Handles plain, "double-quoted", and 'single-quoted' values
+CIVIT_TOKEN=$(grep -E '^CIVITAI_TOKEN=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+
+if [ -z "$CIVIT_TOKEN" ]; then
+  echo "Error: CIVITAI_TOKEN not set in $ENV_FILE" >&2
+  exit 1
+fi
 
 # ── Arguments ─────────────────────────────────────────────────────────────────
 if [ $# -ne 1 ]; then
@@ -136,9 +155,13 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
     --argjson parentUrlId "$PARENT_URL_ID" \
     '{filename: $filename, type: $type, modelId: $modelId, parentUrlId: $parentUrlId, civitaiMetadata: .}')
 
-  RESPONSE=$(curl -sf -X POST "$NEXT_API_URL" \
+  if ! RESPONSE=$(echo "$PAYLOAD" | curl -sf -X POST "$NEXT_API_URL" \
     -H "Content-Type: application/json" \
-    -d "$PAYLOAD")
+    --data-binary @-); then
+    echo "[line $LINE_NUM] FAIL — API registration failed (curl exit $?)" >&2
+    FAIL=$(( FAIL + 1 ))
+    continue
+  fi
 
   echo "   ==> Registered: $RESPONSE"
   SUCCESS=$(( SUCCESS + 1 ))

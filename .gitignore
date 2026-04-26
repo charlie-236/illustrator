@@ -1,6 +1,7 @@
 .next/
 node_modules/
 .env
+.env.*
 public/generations/*
 !public/generations/.gitkeep
 prisma/migrations/

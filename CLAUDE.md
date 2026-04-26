@@ -28,6 +28,7 @@ This is a tablet-first application. Every interactive element MUST have a minimu
 DATABASE_URL=postgresql://...        # local Postgres
 COMFYUI_URL=http://localhost:8188    # ComfyUI HTTP API
 COMFYUI_WS_URL=ws://localhost:8188   # ComfyUI WebSocket
+CIVITAI_TOKEN=...                    # CivitAI API token, used by add_model.sh
 ```
 
 First-time setup:
@@ -270,7 +271,7 @@ The header row (`TYPE|…`), blank lines, and lines starting with `#` are silent
 
 After the script completes, models are immediately available in Studio's model pickers, their friendly names and trigger words are pre-populated in ModelConfig, and the Next.js router cache is purged so no hard refresh is needed.
 
-**Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is embedded directly in the script.
+**Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is read from `.env` (`CIVITAI_TOKEN`); the script will refuse to run if it's missing.
 
 ---
 
