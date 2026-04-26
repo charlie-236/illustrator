@@ -31,6 +31,7 @@ function recordToParams(record: GenerationRecord): GenerationParams {
     sampler: record.sampler,
     scheduler: record.scheduler,
     batchSize: 1,
+    highResFix: record.highResFix,
   };
 }
 

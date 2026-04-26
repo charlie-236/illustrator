@@ -27,6 +27,7 @@ const DEFAULTS: GenerationParams = {
   sampler: 'euler',
   scheduler: 'karras',
   batchSize: 1,
+  highResFix: false,
 };
 
 interface State {
@@ -260,6 +261,20 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
         <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
         <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
         <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
+
+        <div>
+          <label className="label">High-Res Fix</label>
+          <button
+            type="button"
+            onClick={() => update('highResFix', !p.highResFix)}
+            className={`min-h-12 w-full rounded-lg text-sm font-medium transition-all border
+              ${p.highResFix
+                ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+          >
+            {p.highResFix ? 'HRF On — 2× Upscale' : 'HRF Off'}
+          </button>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>

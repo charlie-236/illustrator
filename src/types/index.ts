@@ -16,6 +16,7 @@ export interface GenerationParams {
   sampler: string;
   scheduler: string;
   batchSize: number;
+  highResFix?: boolean;
 }
 
 export interface GenerationRecord {
@@ -32,6 +33,7 @@ export interface GenerationRecord {
   height: number;
   sampler: string;
   scheduler: string;
+  highResFix: boolean;
   createdAt: string;
 }
 

@@ -19,9 +19,10 @@ model Generation {
   steps     Int
   width     Int
   height    Int
-  sampler   String   @default("euler")
-  scheduler String   @default("normal")
-  createdAt DateTime @default(now())
+  sampler    String   @default("euler")
+  scheduler  String   @default("normal")
+  highResFix Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
 }

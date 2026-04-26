@@ -190,6 +190,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           <span className="text-xs text-zinc-400">CFG {record.cfg}</span>
           <span className="text-xs text-zinc-400 tabular-nums">Seed {record.seed}</span>
           <span className="text-xs text-zinc-400">{record.sampler}/{record.scheduler}</span>
+          {record.highResFix && <span className="text-xs text-violet-400 font-medium">HRF 2×</span>}
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
       </div>

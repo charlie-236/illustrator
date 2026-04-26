@@ -228,6 +228,7 @@ class ComfyWSManager {
             height: params.height,
             sampler: params.sampler,
             scheduler: params.scheduler,
+            highResFix: params.highResFix ?? false,
           },
         });
 

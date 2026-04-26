@@ -63,9 +63,34 @@ export function buildWorkflow(params: GenerationParams): Record<string, unknown>
     },
   };
 
+  let vaeInput: [string, number] = ['5', 0];
+
+  if (params.highResFix) {
+    nodes['8'] = {
+      class_type: 'LatentUpscaleBy',
+      inputs: { samples: ['5', 0], upscale_method: 'nearest-exact', scale_by: 2.0 },
+    };
+    nodes['9'] = {
+      class_type: 'KSampler',
+      inputs: {
+        model: modelRef,
+        positive: ['3', 0],
+        negative: ['4', 0],
+        latent_image: ['8', 0],
+        seed,
+        steps: params.steps,
+        cfg: params.cfg,
+        sampler_name: params.sampler,
+        scheduler: params.scheduler,
+        denoise: 0.55,
+      },
+    };
+    vaeInput = ['9', 0];
+  }
+
   nodes['6'] = {
     class_type: 'VAEDecode',
-    inputs: { samples: ['5', 0], vae: ['1', 2] },
+    inputs: { samples: vaeInput, vae: ['1', 2] },
   };
 
   // SaveImageWebsocket sends image over WS without writing to remote disk
