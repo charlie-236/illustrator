@@ -79,7 +79,8 @@ Browser → GET  /api/progress/[promptId] (SSE)
 
 - Connects to ComfyUI WS with a stable `clientId` (UUID generated once at startup). The `client_id` is passed in every `/prompt` POST so ComfyUI routes events back to this client only.
 - Reconnects automatically after 4 s on drop; increments `reconnectAttempts`.
-- On reconnect (`reconnectAttempts > 0`), calls `flushJobsOnReconnect()` which sends `error` SSE to every pending job and clears the map — in-flight jobs cannot be recovered after a WS drop.
+- On reconnect (`reconnectAttempts > 0`), calls `flushJobsOnReconnect()` (async, fire-and-forget). For each pending job it fetches `/history/{promptId}` from ComfyUI (5 s timeout): `status_str === 'success'` → the prompt finished but the binary frame was lost into the dead socket — send a "completed but image lost, please retry" error SSE; `status_str === 'error'` → send a "failed on GPU server" error SSE; anything else (empty response, still running, fetch failure) → **leave the job in place** so events can resume on the new connection. A 10-minute per-job watchdog (`expireJob`) reaps any job that goes permanently silent.
+- `execution_success` **and** `executing` with `node === null` are both treated as end-of-prompt terminators, so older ComfyUI builds that omit `execution_success` still finalize correctly. A `finalized` flag on each job prevents double-finalization if both arrive.
 
 ### Binary image extraction
 

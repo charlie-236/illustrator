@@ -12,9 +12,13 @@ interface Job {
   /** Accumulates every image binary frame for this prompt (one per batch image). */
   imageBuffers: Buffer[];
   activeNode: string | null;
+  finalized: boolean;
+  timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://localhost:8188';
+const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://localhost:8188';
+const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — covers batch=4 + high-res on A100
 const encoder = new TextEncoder();
 
 function sseChunk(event: string, data: unknown): Uint8Array {
@@ -112,7 +116,7 @@ class ComfyWSManager {
 
     ws.on('open', () => {
       if (this.reconnectAttempts > 0) {
-        this.flushJobsOnReconnect();
+        void this.flushJobsOnReconnect();
       }
       this.connected = true;
       this.reconnectAttempts = 0;
@@ -151,14 +155,44 @@ class ComfyWSManager {
     }, 4000);
   }
 
-  private flushJobsOnReconnect() {
-    for (const job of this.jobs.values()) {
-      job.controller.enqueue(
-        sseChunk('error', { message: 'Connection lost — please retry' }),
-      );
-      try { job.controller.close(); } catch { /* already closed */ }
+  private async flushJobsOnReconnect() {
+    // Snapshot keys — we'll mutate the map per-job below.
+    const promptIds = [...this.jobs.keys()];
+    for (const promptId of promptIds) {
+      const job = this.jobs.get(promptId);
+      if (!job) continue;
+      try {
+        const res = await fetch(`${COMFYUI_HTTP}/history/${promptId}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        const history = await res.json() as Record<string, { status?: { status_str?: string } }>;
+        const statusStr = history[promptId]?.status?.status_str;
+
+        if (statusStr === 'success') {
+          // Prompt finished during the disconnect; binary frame was sent into the dead socket.
+          job.finalized = true;
+          if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+          job.controller.enqueue(sseChunk('error', {
+            message: 'Generation completed during reconnection but the image was lost. Please retry.',
+          }));
+          try { job.controller.close(); } catch { /* already closed */ }
+          this.jobs.delete(promptId);
+        } else if (statusStr === 'error') {
+          job.finalized = true;
+          if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+          job.controller.enqueue(sseChunk('error', {
+            message: 'Generation failed on the GPU server.',
+          }));
+          try { job.controller.close(); } catch { /* already closed */ }
+          this.jobs.delete(promptId);
+        }
+        // Empty object, unknown status, or still running → leave job in place.
+        // ComfyUI will resume sending events on the new connection (stable clientId).
+        // The per-job watchdog will reap it if events never resume.
+      } catch {
+        // /history fetch failed — leave job in place and let the watchdog handle it.
+      }
     }
-    this.jobs.clear();
   }
 
   private onBinary(buf: Buffer) {
@@ -203,7 +237,15 @@ class ComfyWSManager {
 
     if (type === 'executing') {
       const job = this.jobs.get(data.prompt_id as string);
-      if (job) job.activeNode = (data.node as string | null) ?? null;
+      if (job) {
+        const node = (data.node as string | null) ?? null;
+        if (node === null) {
+          // Older ComfyUI / some forks use executing{node:null} as the end-of-prompt sentinel
+          this.finalizeJob(job);
+        } else {
+          job.activeNode = node;
+        }
+      }
       return;
     }
 
@@ -216,6 +258,8 @@ class ComfyWSManager {
     if (type === 'execution_error') {
       const job = this.jobs.get(data.prompt_id as string);
       if (job) {
+        job.finalized = true;
+        if (job.timeoutId !== null) clearTimeout(job.timeoutId);
         job.controller.enqueue(
           sseChunk('error', { message: data.exception_message ?? 'Generation failed' }),
         );
@@ -227,6 +271,9 @@ class ComfyWSManager {
   }
 
   private async finalizeJob(job: Job) {
+    if (job.finalized) return;
+    job.finalized = true;
+    if (job.timeoutId !== null) clearTimeout(job.timeoutId);
     const { params, resolvedSeed, imageBuffers, controller } = job;
     this.jobs.delete(job.promptId);
 
@@ -297,6 +344,16 @@ class ComfyWSManager {
     }
   }
 
+  private expireJob(promptId: string) {
+    const job = this.jobs.get(promptId);
+    if (!job || job.finalized) return;
+    job.finalized = true;
+    job.timeoutId = null;
+    job.controller.enqueue(sseChunk('error', { message: 'Generation timed out after 10 minutes' }));
+    try { job.controller.close(); } catch { /* already closed */ }
+    this.jobs.delete(promptId);
+  }
+
   stashJobParams(promptId: string, params: GenerationParams, resolvedSeed: number) {
     // TTL purge: drop stale entries from tabs that closed before opening SSE
     const now = Date.now();
@@ -322,6 +379,8 @@ class ComfyWSManager {
       return;
     }
 
+    const timeoutId = setTimeout(() => this.expireJob(promptId), JOB_TIMEOUT_MS);
+
     this.jobs.set(promptId, {
       promptId,
       params: entry.params,
@@ -329,10 +388,14 @@ class ComfyWSManager {
       controller,
       imageBuffers: [],
       activeNode: null,
+      finalized: false,
+      timeoutId,
     });
   }
 
   removeJob(promptId: string) {
+    const job = this.jobs.get(promptId);
+    if (job?.timeoutId != null) clearTimeout(job.timeoutId);
     this.jobs.delete(promptId);
   }
 
