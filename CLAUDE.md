@@ -83,15 +83,15 @@ Browser → GET  /api/progress/[promptId] (SSE)
 
 ### Binary image extraction
 
-ComfyUI binary WS frames have a variable-length header (4 or 8 bytes depending on version). Rather than hard-coding an offset, `extractImage()` scans the first 32 bytes of the buffer for PNG magic bytes (`89 50 4E 47`) or JPEG magic bytes (`FF D8 FF`) and slices from there. This is robust against header format differences.
+ComfyUI binary frames carry a format-type word at bytes 4–7 (BE uint32): `2` = PNG (emitted by `SaveImageWebsocket`), `1` = JPEG (live previews from taesd/latent2rgb/auto). `parseImageFrame()` reads that byte, slices from offset 8, and verifies the image magic bytes. If magic doesn't match the declared format it falls back to scanning the first 32 bytes — defensive against protocol drift. JPEG preview frames are dropped at the call site (`onBinary`); only PNG frames are pushed to `imageBuffers`. A `// TODO` marks where JPEG frames should be forwarded to a `preview` SSE event once live previews are wired up.
 
 ### SSE job registration split
 
-`POST /api/generate` builds and submits the workflow, gets back `promptId` + `resolvedSeed`, and returns immediately. The browser then opens `GET /api/progress/[promptId]?params=...&seed=...` which registers the job with the WS manager. The `GenerationParams` and `resolvedSeed` are passed as query params on the SSE URL so the manager has them for the DB insert when the image arrives.
+`POST /api/generate` builds and submits the workflow, gets back `promptId` + `resolvedSeed`, calls `manager.stashJobParams(promptId, params, resolvedSeed)` to store the params server-side (with a 60-second TTL and `baseImage`/`denoise` stripped), and returns immediately. The browser then opens `GET /api/progress/[promptId]` (no query params) which calls `manager.registerJob(promptId, controller)`. `registerJob` looks up and deletes the stashed entry, populating the `Job` record; if the entry has expired or is missing it sends an `error` SSE and closes. This avoids round-tripping `GenerationParams` through the URL, which would exceed header limits when a base image (~1–4 MB base64) is attached.
 
 ### Seed resolution
 
-`params.seed === -1` means random. The seed is resolved in `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `extractSeedFromWorkflow()` reads it back from `workflow['5'].inputs.seed`. The resolved seed travels: workflow.ts → `/api/generate` response → SSE URL query param → `registerJob()` → `prisma.generation.create()`.
+`params.seed === -1` means random. The seed is resolved in `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `extractSeedFromWorkflow()` reads it back from `workflow['5'].inputs.seed`. The resolved seed travels: workflow.ts → `/api/generate` response → `stashJobParams()` → `registerJob()` → `prisma.generation.create()`.
 
 ### BigInt serialization
 
@@ -131,8 +131,7 @@ Body: `GenerationParams` JSON.
 - No timeout on the ComfyUI fetch — ComfyUI usually responds immediately with a queue ID.
 
 ### `GET /api/progress/[promptId]`
-Query params: `params` (JSON-encoded `GenerationParams`), `seed` (resolved seed as string).
-Returns an SSE stream. Calls `manager.registerJob(promptId, genParams, resolvedSeed, controller)`.
+Returns an SSE stream. Calls `manager.registerJob(promptId, controller)`. Params and seed are looked up from the server-side stash populated by `/api/generate`.
 
 SSE events emitted by the manager:
 | event | data shape |
