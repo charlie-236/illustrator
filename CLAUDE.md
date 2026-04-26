@@ -162,6 +162,23 @@ Paginated. `limit` capped at 50. Returns:
 ### `GET /api/generation/[id]`
 Returns a single `GenerationRecord` or 404.
 
+### `POST /api/models/register`
+Called by `add_model.sh` after each successful download. Receives pre-fetched CivitAI metadata (fetched via the Azure VM proxy — the local Mint PC is geoblocked, the VM is not).
+
+Body: `{ filename, type, modelId?, parentUrlId?, civitaiMetadata? }`
+
+`civitaiMetadata` is the raw JSON object returned by `GET https://civitai.com/api/v1/model-versions/{id}`.
+
+| CivitAI field | Prisma field | Notes |
+|---|---|---|
+| `civitaiMetadata.model.name` (or `.name`) | `friendlyName` | |
+| `civitaiMetadata.trainedWords[]` joined by `, ` | `triggerWords` | LoRA only |
+| `civitaiMetadata.baseModel` | `baseModel` | LoRA only |
+| `civitaiMetadata.model.description` (or `.description`) | `description` | HTML stripped server-side |
+| `parentUrlId` + `modelId` | `url` | `https://civitai.com/models/{parentUrlId}?modelVersionId={modelId}` |
+
+Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Calls `revalidatePath('/', 'layout')` after write so the Studio picker updates instantly. Checkpoint width/height default to 512; update in ModelConfig after ingestion if needed. Returns `{ ok: true, record }` on success.
+
 ## Source layout
 
 ```
@@ -176,6 +193,7 @@ src/
       progress/[promptId]/  GET — SSE stream
       gallery/          GET — paginated DB query
       generation/[id]/  GET — single record
+      models/register/  POST — fetch CivitAI metadata and upsert CheckpointConfig/LoraConfig
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
     workflow.ts         buildWorkflow()
@@ -220,6 +238,41 @@ Node IDs used in the ComfyUI API workflow:
 - `.card` = `bg-zinc-900 border border-zinc-800 rounded-xl p-4`
 - `.input-base` = full-width styled input/select/textarea with violet focus ring
 - `.label` = uppercase xs tracking-wide zinc-400 label
+
+## Model ingestion workflow
+
+`add_model.sh` takes a queue file and batch-processes every line: downloading each model to the Azure VM and registering its metadata in the local DB.
+
+```bash
+./add_model.sh queue.txt
+```
+
+**Queue file format** — pipe-delimited, one model per line. No manual metadata — it's fetched automatically from CivitAI via the Azure VM proxy.
+```
+TYPE|MODEL_ID|PARENT_URL_ID
+lora|1234567|111111
+checkpoint|9876543|222222
+```
+
+Fields:
+- `TYPE`: `lora` or `checkpoint`
+- `MODEL_ID`: numeric CivitAI model **version** ID (download URL + `?modelVersionId=` param)
+- `PARENT_URL_ID`: numeric CivitAI base model ID (`/models/{id}` URL path)
+
+The header row (`TYPE|…`), blank lines, and lines starting with `#` are silently skipped.
+
+**What each line does:**
+1. SSHes into `a100-core` and runs `curl -4` to fetch `https://civitai.com/api/v1/model-versions/{MODEL_ID}` (the VM is in Poland and is not geoblocked; the local Mint PC in the UK gets HTTP 451). Validates the response is a JSON object.
+2. Generates a random 12-char hex filename (e.g., `a3f9bc12d04e.safetensors`) to obfuscate the origin.
+3. SSHes into `a100-core` again and runs `wget` to download from `https://civitai.red/api/download/models/{MODEL_ID}?token=…` directly to `/models/ComfyUI/models/checkpoints/` or `/models/ComfyUI/models/loras/`.
+4. Uses `jq` to wrap the raw CivitAI JSON as `civitaiMetadata` in the request body and `curl`s it to `POST /api/models/register`.
+5. Prints a per-model status line and a final summary (`N succeeded, N failed`).
+
+After the script completes, models are immediately available in Studio's model pickers, their friendly names and trigger words are pre-populated in ModelConfig, and the Next.js router cache is purged so no hard refresh is needed.
+
+**Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is embedded directly in the script.
+
+---
 
 ## Not yet implemented (planned features)
 
