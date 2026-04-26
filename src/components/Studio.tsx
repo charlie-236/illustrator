@@ -17,7 +17,7 @@ interface CheckpointDefaults {
 }
 
 const DEFAULTS: GenerationParams = {
-  checkpoint: 'sdxl_render_engine_v2.safetensors',
+  checkpoint: '',
   loras: [],
   positivePrompt: '',
   negativePrompt: '',

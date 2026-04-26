@@ -1,2 +1,2 @@
 TYPE|MODEL_ID|PARENT_URL_ID
-checkpoint|2865451|885893
+checkpoint | 290640   | 257749
