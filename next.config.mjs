@@ -2,7 +2,7 @@
 
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['ws', '@prisma/client'],
+    serverComponentsExternalPackages: ['ws', '@prisma/client', 'node-ssh'],
   },
   images: {
     unoptimized: true,

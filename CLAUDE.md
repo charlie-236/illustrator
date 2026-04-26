@@ -28,7 +28,10 @@ This is a tablet-first application. Every interactive element MUST have a minimu
 DATABASE_URL=postgresql://...        # local Postgres
 COMFYUI_URL=http://localhost:8188    # ComfyUI HTTP API
 COMFYUI_WS_URL=ws://localhost:8188   # ComfyUI WebSocket
-CIVITAI_TOKEN=...                    # CivitAI API token, used by add_model.sh
+CIVITAI_TOKEN=...                    # CivitAI API token, used by add_model.sh and ingest API
+A100_VM_USER=charlie                 # SSH username for the Azure VM
+A100_VM_IP=100.96.99.94              # Tailscale IP of the Azure VM
+A100_SSH_KEY_PATH=/home/charlie/.ssh/a100-key.pem  # Private key for VM SSH
 ```
 
 First-time setup:
@@ -178,7 +181,15 @@ Body: `{ filename, type, modelId?, parentUrlId?, civitaiMetadata? }`
 | `civitaiMetadata.model.description` (or `.description`) | `description` | HTML stripped server-side |
 | `parentUrlId` + `modelId` | `url` | `https://civitai.com/models/{parentUrlId}?modelVersionId={modelId}` |
 
-Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Returns `{ ok: true, record }` on success. After ingestion, tap the Refresh button (↺) in the ModelSelect picker or ModelConfig header to reload the model lists — `revalidatePath` has no effect on client-side fetches and is not used here. Checkpoint width/height default to 512; update in ModelConfig after ingestion if needed.
+Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Returns `{ ok: true, record }` on success. After ingestion, tap the Refresh button (↺) in the ModelSelect picker or ModelConfig header to reload the model lists — `revalidatePath` has no effect on client-side fetches and is not used here. Checkpoint width/height default to 512; update in ModelConfig after ingestion if needed. Core upsert logic lives in `src/lib/registerModel.ts`; this route is a thin HTTP wrapper.
+
+### `POST /api/models/ingest`
+SSE-streamed single-model ingestion. Body: `{ type: 'checkpoint' | 'lora', modelId: number, parentUrlId: number }`. Performs metadata fetch + download to A100 VM + size validation + DB upsert via SSH, emitting per-phase progress events. Used by the in-app ingestion UI; `add_model.sh` remains as a desktop fallback that posts to `/api/models/register` directly.
+
+Phase events: `metadata`, `download`, `validate`, `register`, `done`, `error`. Error events may include an `orphanPath` field pointing to a file that exists on the VM but has no DB entry.
+
+### `POST /api/models/ingest-batch`
+Same as `/ingest` but accepts `{ items: [...] }` with up to 20 items. Each item extends the single-item body with a caller-supplied `clientId` string. Processes items sequentially and emits `item` events tagged with `clientId`, plus a final `summary` event with `{ succeeded, failed, total }`.
 
 ## Source layout
 
@@ -194,12 +205,17 @@ src/
       progress/[promptId]/  GET — SSE stream
       gallery/          GET — paginated DB query
       generation/[id]/  GET — single record
-      models/register/  POST — fetch CivitAI metadata and upsert CheckpointConfig/LoraConfig
+      models/register/       POST — thin wrapper over registerModel; used by add_model.sh
+      models/ingest/         POST — SSE single-model ingestion
+      models/ingest-batch/   POST — SSE batch ingestion
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
     workflow.ts         buildWorkflow()
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
+    civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM
+    civitaiUrl.ts       parseCivitaiUrl(input) — extracts modelId + parentUrlId
+    registerModel.ts    DB upsert logic shared by /api/models/register and ingest
   types/
     index.ts            GenerationParams, GenerationRecord, ModelInfo, SSEEvent,
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants
