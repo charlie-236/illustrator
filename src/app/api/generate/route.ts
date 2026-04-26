@@ -117,6 +117,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No prompt_id in ComfyUI response' }, { status: 500 });
   }
 
-  // The SSE route will register the job; we return the promptId so the client can subscribe.
+  // Stash original params (not workflowParams) so DB stores the user's typed prompts, not the
+  // assembled-with-defaults version. The SSE route picks these up via registerJob().
+  manager.stashJobParams(promptId, params, resolvedSeed);
+
   return NextResponse.json({ promptId, resolvedSeed });
 }

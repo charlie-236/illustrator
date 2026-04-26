@@ -154,11 +154,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
 
     setState((s) => ({ ...s, resolvedSeed }));
 
-    const url = new URL(`/api/progress/${promptId}`, window.location.origin);
-    url.searchParams.set('params', JSON.stringify(p));
-    url.searchParams.set('seed', String(resolvedSeed));
-
-    const sse = new EventSource(url.toString());
+    const sse = new EventSource(`/api/progress/${promptId}`);
     sseRef.current = sse;
 
     sse.addEventListener('progress', (e) => {

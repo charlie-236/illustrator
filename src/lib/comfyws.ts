@@ -21,18 +21,61 @@ function sseChunk(event: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function extractImage(buf: Buffer): Buffer | null {
-  const PNG = [0x89, 0x50, 0x4e, 0x47];
-  const JPEG = [0xff, 0xd8, 0xff];
-  const limit = Math.min(buf.length - 4, 32);
-  for (let i = 0; i <= limit; i++) {
-    if (buf[i] === PNG[0] && buf[i + 1] === PNG[1] && buf[i + 2] === PNG[2] && buf[i + 3] === PNG[3]) {
-      return buf.subarray(i);
+// ComfyUI binary frame layout (server.py `send_image` / `encode_bytes`):
+//   bytes 0-3  BE uint32  event type  (always 1 on the wire)
+//   bytes 4-7  BE uint32  format type (1 = JPEG preview, 2 = PNG final)
+//   bytes 8+              raw image data
+function parseImageFrame(buf: Buffer): { format: 'png' | 'jpeg'; image: Buffer } | null {
+  if (buf.length < 8) return null;
+
+  const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
+  const JPEG_MAGIC = [0xff, 0xd8, 0xff];
+
+  function scanForPng(b: Buffer): Buffer | null {
+    const limit = Math.min(b.length - 4, 32);
+    for (let i = 0; i <= limit; i++) {
+      if (b[i] === PNG_MAGIC[0] && b[i + 1] === PNG_MAGIC[1] && b[i + 2] === PNG_MAGIC[2] && b[i + 3] === PNG_MAGIC[3]) {
+        return b.subarray(i);
+      }
     }
-    if (buf[i] === JPEG[0] && buf[i + 1] === JPEG[1] && buf[i + 2] === JPEG[2]) {
-      return buf.subarray(i);
-    }
+    return null;
   }
+
+  function scanForJpeg(b: Buffer): Buffer | null {
+    const limit = Math.min(b.length - 3, 32);
+    for (let i = 0; i <= limit; i++) {
+      if (b[i] === JPEG_MAGIC[0] && b[i + 1] === JPEG_MAGIC[1] && b[i + 2] === JPEG_MAGIC[2]) {
+        return b.subarray(i);
+      }
+    }
+    return null;
+  }
+
+  const formatType = buf.readUInt32BE(4);
+
+  if (formatType === 2) {
+    // SaveImageWebsocket always emits PNG
+    const slice = buf.subarray(8);
+    if (slice[0] === PNG_MAGIC[0] && slice[1] === PNG_MAGIC[1] && slice[2] === PNG_MAGIC[2] && slice[3] === PNG_MAGIC[3]) {
+      return { format: 'png', image: slice };
+    }
+    console.warn('[ComfyWS] formatType=2 but no PNG magic at offset 8; scanning...');
+    const found = scanForPng(buf);
+    return found ? { format: 'png', image: found } : null;
+  }
+
+  if (formatType === 1) {
+    // Live preview frames from taesd/latent2rgb/auto are JPEG
+    const slice = buf.subarray(8);
+    if (slice[0] === JPEG_MAGIC[0] && slice[1] === JPEG_MAGIC[1] && slice[2] === JPEG_MAGIC[2]) {
+      return { format: 'jpeg', image: slice };
+    }
+    console.warn('[ComfyWS] formatType=1 but no JPEG magic at offset 8; scanning...');
+    const found = scanForJpeg(buf);
+    return found ? { format: 'jpeg', image: found } : null;
+  }
+
+  console.warn(`[ComfyWS] Unknown binary frame formatType: ${formatType}`);
   return null;
 }
 
@@ -51,6 +94,7 @@ class ComfyWSManager {
   private ws: WebSocket | null = null;
   private clientId: string;
   private jobs = new Map<string, Job>();
+  private pendingParams = new Map<string, { params: GenerationParams; resolvedSeed: number; createdAt: number }>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private reconnectAttempts = 0;
@@ -118,14 +162,19 @@ class ComfyWSManager {
   }
 
   private onBinary(buf: Buffer) {
-    const image = extractImage(buf);
-    if (!image) return;
+    const result = parseImageFrame(buf);
+    if (!result) return;
 
-    // Binary frames aren't tagged with prompt_id; attach to the actively executing job.
+    if (result.format === 'jpeg') {
+      // TODO: forward to 'preview' SSE event when live previews are wired up (see CLAUDE.md)
+      return;
+    }
+
+    // PNG — binary frames aren't tagged with prompt_id; attach to the actively executing job.
     // For batches, multiple frames arrive for a single job — push each one.
     for (const job of this.jobs.values()) {
       if (job.activeNode !== null) {
-        job.imageBuffers.push(Buffer.from(image)); // copy to avoid shared buffer issues
+        job.imageBuffers.push(Buffer.from(result.image)); // copy to avoid shared buffer issues
         return;
       }
     }
@@ -204,7 +253,7 @@ class ComfyWSManager {
 
       for (let i = 0; i < imageBuffers.length; i++) {
         const buf = imageBuffers[i];
-        const ext = buf[0] === 0x89 ? 'png' : 'jpg';
+        const ext = 'png'; // SaveImageWebsocket always emits PNG; only PNG frames reach imageBuffers
         // Batch images get a _1, _2 … suffix so filenames stay unique.
         const filename = isBatch
           ? `${slug}_${timestamp}_${i + 1}.${ext}`
@@ -248,16 +297,35 @@ class ComfyWSManager {
     }
   }
 
+  stashJobParams(promptId: string, params: GenerationParams, resolvedSeed: number) {
+    // TTL purge: drop stale entries from tabs that closed before opening SSE
+    const now = Date.now();
+    for (const [id, entry] of this.pendingParams) {
+      if (now - entry.createdAt > 60_000) this.pendingParams.delete(id);
+    }
+
+    // Strip baseImage and denoise — not needed in finalizeJob, and baseImage can be several MB
+    const { baseImage: _bi, denoise: _d, ...rest } = params;
+    this.pendingParams.set(promptId, { params: rest as GenerationParams, resolvedSeed, createdAt: now });
+  }
+
   registerJob(
     promptId: string,
-    params: GenerationParams,
-    resolvedSeed: number,
     controller: ReadableStreamDefaultController<Uint8Array>,
   ) {
+    const entry = this.pendingParams.get(promptId);
+    this.pendingParams.delete(promptId);
+
+    if (!entry) {
+      controller.enqueue(sseChunk('error', { message: 'Job parameters expired or not found' }));
+      try { controller.close(); } catch { /* already closed */ }
+      return;
+    }
+
     this.jobs.set(promptId, {
       promptId,
-      params,
-      resolvedSeed,
+      params: entry.params,
+      resolvedSeed: entry.resolvedSeed,
       controller,
       imageBuffers: [],
       activeNode: null,
