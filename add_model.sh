@@ -6,7 +6,6 @@ VM_USER="charlie"
 VM_IP="100.96.99.94"
 SSH_KEY="$HOME/.ssh/a100-key.pem"
 NEXT_API_URL="http://127.0.0.1:3001/api/models/register"
-CIVIT_TOKEN="472d219d415fd55e19f9cae3093e1497"
 
 # ── Arguments ─────────────────────────────────────────────────────────────────
 if [ $# -ne 1 ]; then
