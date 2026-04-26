@@ -8,6 +8,8 @@ import GenerationProgress from './GenerationProgress';
 import ImageModal from './ImageModal';
 import type { CheckpointConfig, GenerationParams, GenerationRecord } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
+import type { Tab } from '@/app/page';
+import { imgSrc } from '@/lib/imageSrc';
 
 interface CheckpointDefaults {
   positivePrompt: string;
@@ -39,13 +41,14 @@ interface State {
 }
 
 interface Props {
+  tab: Tab;
   onGenerated: () => void;
   remixParams: GenerationParams | null;
   onRemixConsumed: () => void;
   onRemix: (record: GenerationRecord) => void;
 }
 
-export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRemix }: Props) {
+export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed, onRemix }: Props) {
   const [p, setP] = useState<GenerationParams>(DEFAULTS);
   const [state, setState] = useState<State>({
     status: 'idle',
@@ -57,9 +60,31 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStartIdx, setModalStartIdx] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sseRef = useRef<EventSource | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
+
+  // Close drawer when the user navigates away from Studio
+  useEffect(() => {
+    if (tab !== 'studio') setDrawerOpen(false);
+  }, [tab]);
+
+  // Lift the Generate bar above the iOS soft keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    function handleViewport() {
+      const offset = window.innerHeight - vv!.height - vv!.offsetTop;
+      setKeyboardOffset(Math.max(0, offset));
+    }
+    vv.addEventListener('resize', handleViewport);
+    vv.addEventListener('scroll', handleViewport);
+    return () => {
+      vv.removeEventListener('resize', handleViewport);
+      vv.removeEventListener('scroll', handleViewport);
+    };
+  }, []);
 
   // Apply remix data when received from Gallery
   useEffect(() => {
@@ -123,6 +148,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
 
   async function handleGenerate() {
     if (state.status === 'generating') return;
+    setDrawerOpen(false);
 
     setState({
       status: 'generating',
@@ -226,7 +252,7 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
                   aria-label={`View generation ${i + 1}`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={rec.filePath} alt="Generated" className="w-full h-full object-cover" />
+                  <img src={imgSrc(rec.filePath)} alt="Generated" className="w-full h-full object-cover" />
                 </button>
               </div>
             ))}
@@ -320,7 +346,13 @@ export default function Studio({ onGenerated, remixParams, onRemixConsumed, onRe
       </div>
 
       {/* ── Bottom bar: Settings toggle + Generate ── */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto flex gap-3">
+      <div
+        className="fixed bottom-0 left-0 right-0 px-4 pt-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto flex gap-3 transition-transform duration-150 ease-out"
+        style={{
+          transform: `translateY(-${keyboardOffset}px)`,
+          paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+        }}
+      >
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}

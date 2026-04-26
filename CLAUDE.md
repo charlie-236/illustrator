@@ -171,6 +171,7 @@ src/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
     workflow.ts         buildWorkflow() + extractSeedFromWorkflow()
     prisma.ts           Prisma client singleton (global.__prisma)
+    imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
   types/
     index.ts            GenerationParams, GenerationRecord, ModelInfo, SSEEvent,
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants

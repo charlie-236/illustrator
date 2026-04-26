@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { GenerationRecord } from '@/types';
-
-function imgSrc(filePath: string): string {
-  return filePath.startsWith('/generations/')
-    ? `/api/images/${filePath.slice('/generations/'.length)}`
-    : filePath;
-}
+import { imgSrc } from '@/lib/imageSrc';
 
 interface Props {
   items: GenerationRecord[];
@@ -24,6 +19,17 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const touchStartX = useRef<number | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearConfirmTimer() {
+    if (confirmTimerRef.current !== null) {
+      clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = null;
+    }
+  }
+
+  // Clear any armed delete timer on unmount
+  useEffect(() => clearConfirmTimer, []);
 
   // Keep a ref to items.length so the keyboard handler never captures a stale value
   const itemsLenRef = useRef(items.length);
@@ -40,7 +46,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
   }, [onClose]);
 
   // Reset confirmation state whenever the user navigates to a different image
-  useEffect(() => { setConfirmDelete(false); }, [idx]);
+  useEffect(() => { clearConfirmTimer(); setConfirmDelete(false); }, [idx]);
 
   const record = items[idx] ?? null;
 
@@ -50,7 +56,16 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
 
   async function handleDelete() {
     if (!record) return;
-    if (!confirmDelete) { setConfirmDelete(true); return; }
+    if (!confirmDelete) {
+      clearConfirmTimer();
+      setConfirmDelete(true);
+      confirmTimerRef.current = setTimeout(() => {
+        setConfirmDelete(false);
+        confirmTimerRef.current = null;
+      }, 3500);
+      return;
+    }
+    clearConfirmTimer();
     setDeleting(true);
     try {
       await onDelete(record.id);

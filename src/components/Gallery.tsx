@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import ImageModal from './ImageModal';
 import type { GenerationRecord } from '@/types';
+import { imgSrc } from '@/lib/imageSrc';
 
 interface GalleryResponse {
   items: GenerationRecord[];
@@ -16,12 +17,6 @@ interface Props {
   onRemix: (record: GenerationRecord) => void;
 }
 
-function imgSrc(filePath: string): string {
-  return filePath.startsWith('/generations/')
-    ? `/api/images/${filePath.slice('/generations/'.length)}`
-    : filePath;
-}
-
 export default function Gallery({ refreshToken, onRemix }: Props) {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [page, setPage] = useState(1);
@@ -31,6 +26,17 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearPendingTimer() {
+    if (pendingDeleteTimerRef.current !== null) {
+      clearTimeout(pendingDeleteTimerRef.current);
+      pendingDeleteTimerRef.current = null;
+    }
+  }
+
+  // Clear any armed delete timer on unmount
+  useEffect(() => clearPendingTimer, []);
 
   const load = useCallback(async (p: number, reset = false) => {
     setLoading(true);
@@ -58,7 +64,16 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
 
   /** Two-tap confirm delete for thumbnail action strips. */
   async function handleDelete(id: string) {
-    if (pendingDelete !== id) { setPendingDelete(id); return; }
+    if (pendingDelete !== id) {
+      clearPendingTimer();
+      setPendingDelete(id);
+      pendingDeleteTimerRef.current = setTimeout(() => {
+        setPendingDelete(null);
+        pendingDeleteTimerRef.current = null;
+      }, 3500);
+      return;
+    }
+    clearPendingTimer();
     setPendingDelete(null);
     setDeleting(id);
     try {

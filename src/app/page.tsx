@@ -53,6 +53,7 @@ export default function Home() {
       <main className="flex-1 overflow-y-auto pb-24">
         <div className={tab === 'studio' ? '' : 'hidden'}>
           <Studio
+            tab={tab}
             onGenerated={() => setRefreshGallery((n) => n + 1)}
             remixParams={remixParams}
             onRemixConsumed={handleRemixConsumed}
