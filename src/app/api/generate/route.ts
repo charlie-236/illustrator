@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildWorkflow, extractSeedFromWorkflow } from '@/lib/workflow';
+import { buildWorkflow } from '@/lib/workflow';
 import { getComfyWSManager } from '@/lib/comfyws';
 import { prisma } from '@/lib/prisma';
 import type { GenerationParams } from '@/types';
@@ -90,8 +90,7 @@ export async function POST(req: NextRequest) {
   };
 
   const manager = getComfyWSManager();
-  const workflow = buildWorkflow(workflowParams, uploadedFilename);
-  const resolvedSeed = extractSeedFromWorkflow(workflow as Record<string, unknown>);
+  const { workflow, resolvedSeed } = buildWorkflow(workflowParams, uploadedFilename);
 
   let comfyRes: Response;
   try {

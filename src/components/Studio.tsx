@@ -65,9 +65,12 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
 
-  // Close drawer when the user navigates away from Studio
+  // Close drawer and clear stale post-generation results when navigating away from Studio
   useEffect(() => {
-    if (tab !== 'studio') setDrawerOpen(false);
+    if (tab !== 'studio') {
+      setDrawerOpen(false);
+      setState((s) => ({ ...s, records: [], status: s.status === 'done' ? 'idle' : s.status }));
+    }
   }, [tab]);
 
   // Lift the Generate bar above the iOS soft keyboard

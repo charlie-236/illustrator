@@ -81,6 +81,7 @@ Browser → GET  /api/progress/[promptId] (SSE)
 - Reconnects automatically after 4 s on drop; increments `reconnectAttempts`.
 - On reconnect (`reconnectAttempts > 0`), calls `flushJobsOnReconnect()` (async, fire-and-forget). For each pending job it fetches `/history/{promptId}` from ComfyUI (5 s timeout): `status_str === 'success'` → the prompt finished but the binary frame was lost into the dead socket — send a "completed but image lost, please retry" error SSE; `status_str === 'error'` → send a "failed on GPU server" error SSE; anything else (empty response, still running, fetch failure) → **leave the job in place** so events can resume on the new connection. A 10-minute per-job watchdog (`expireJob`) reaps any job that goes permanently silent.
 - `execution_success` **and** `executing` with `node === null` are both treated as end-of-prompt terminators, so older ComfyUI builds that omit `execution_success` still finalize correctly. A `finalized` flag on each job prevents double-finalization if both arrive.
+- Binary image frames are routed to the active job via the manager's `activePromptId` field, which is set from `executing` events (non-null node → set to that prompt_id; null node → clear). The per-job `activeNode` field is still used by the `executing` handler to distinguish progress events from terminators, but no longer drives binary routing.
 
 ### Binary image extraction
 
@@ -92,7 +93,7 @@ ComfyUI binary frames carry a format-type word at bytes 4–7 (BE uint32): `2` =
 
 ### Seed resolution
 
-`params.seed === -1` means random. The seed is resolved in `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `extractSeedFromWorkflow()` reads it back from `workflow['5'].inputs.seed`. The resolved seed travels: workflow.ts → `/api/generate` response → `stashJobParams()` → `registerJob()` → `prisma.generation.create()`.
+`params.seed === -1` means random. The seed is resolved inside `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `buildWorkflow` returns `{ workflow, resolvedSeed }` — the seed is returned directly from the same scope where it was generated, not extracted from the node graph after the fact. The resolved seed travels: `buildWorkflow()` return value → `/api/generate` response → `stashJobParams()` → `registerJob()` → `prisma.generation.create()`.
 
 ### BigInt serialization
 

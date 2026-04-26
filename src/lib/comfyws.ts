@@ -105,6 +105,7 @@ class ComfyWSManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private reconnectAttempts = 0;
+  private activePromptId: string | null = null;
 
   constructor() {
     this.clientId = uuidv4();
@@ -175,6 +176,7 @@ class ComfyWSManager {
           // Prompt finished during the disconnect; binary frame was sent into the dead socket.
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+          if (this.activePromptId === promptId) this.activePromptId = null;
           job.controller.enqueue(sseChunk('error', {
             message: 'Generation completed during reconnection but the image was lost. Please retry.',
           }));
@@ -183,6 +185,7 @@ class ComfyWSManager {
         } else if (statusStr === 'error') {
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+          if (this.activePromptId === promptId) this.activePromptId = null;
           job.controller.enqueue(sseChunk('error', {
             message: 'Generation failed on the GPU server.',
           }));
@@ -207,14 +210,11 @@ class ComfyWSManager {
       return;
     }
 
-    // PNG — binary frames aren't tagged with prompt_id; attach to the actively executing job.
-    // For batches, multiple frames arrive for a single job — push each one.
-    for (const job of this.jobs.values()) {
-      if (job.activeNode !== null) {
-        job.imageBuffers.push(Buffer.from(result.image)); // copy to avoid shared buffer issues
-        return;
-      }
-    }
+    // Route PNG frame directly to the active prompt — no iteration needed.
+    if (this.activePromptId === null) return;
+    const job = this.jobs.get(this.activePromptId);
+    if (!job) return;
+    job.imageBuffers.push(Buffer.from(result.image));
   }
 
   private onText(raw: string) {
@@ -239,13 +239,16 @@ class ComfyWSManager {
     }
 
     if (type === 'executing') {
-      const job = this.jobs.get(data.prompt_id as string);
+      const promptId = data.prompt_id as string;
+      const job = this.jobs.get(promptId);
       if (job) {
         const node = (data.node as string | null) ?? null;
         if (node === null) {
           // Older ComfyUI / some forks use executing{node:null} as the end-of-prompt sentinel
+          this.activePromptId = null;
           this.finalizeJob(job);
         } else {
+          this.activePromptId = promptId;
           job.activeNode = node;
         }
       }
@@ -253,21 +256,26 @@ class ComfyWSManager {
     }
 
     if (type === 'execution_success') {
-      const job = this.jobs.get(data.prompt_id as string);
-      if (job) this.finalizeJob(job);
+      const promptId = data.prompt_id as string;
+      const job = this.jobs.get(promptId);
+      if (job) {
+        if (this.activePromptId === promptId) this.activePromptId = null;
+        this.finalizeJob(job);
+      }
       return;
     }
 
     if (type === 'execution_error') {
-      const job = this.jobs.get(data.prompt_id as string);
+      const promptId = data.prompt_id as string;
+      const job = this.jobs.get(promptId);
       if (job) {
         job.finalized = true;
         if (job.timeoutId !== null) clearTimeout(job.timeoutId);
-        job.controller.enqueue(
-          sseChunk('error', { message: data.exception_message ?? 'Generation failed' }),
-        );
+        if (this.activePromptId === promptId) this.activePromptId = null;
+        const message = data.exception_message != null ? String(data.exception_message) : 'Generation failed';
+        job.controller.enqueue(sseChunk('error', { message }));
         try { job.controller.close(); } catch { /* already closed */ }
-        this.jobs.delete(data.prompt_id as string);
+        this.jobs.delete(promptId);
       }
       return;
     }
@@ -298,48 +306,49 @@ class ComfyWSManager {
       const loraStr = params.loras.length > 0
         ? params.loras.map((l) => `${l.name} (${l.weight.toFixed(2)})`).join(', ')
         : null;
+      const lorasJsonValue = params.loras.length > 0
+        ? (params.loras as unknown as Prisma.InputJsonValue)
+        : undefined;
 
-      const records = [];
+      const records = await Promise.all(
+        imageBuffers.map(async (buf, i) => {
+          const ext = 'png'; // SaveImageWebsocket always emits PNG; only PNG frames reach imageBuffers
+          // Batch images get a _1, _2 … suffix so filenames stay unique.
+          const filename = isBatch
+            ? `${slug}_${timestamp}_${i + 1}.${ext}`
+            : `${slug}_${timestamp}.${ext}`;
 
-      for (let i = 0; i < imageBuffers.length; i++) {
-        const buf = imageBuffers[i];
-        const ext = 'png'; // SaveImageWebsocket always emits PNG; only PNG frames reach imageBuffers
-        // Batch images get a _1, _2 … suffix so filenames stay unique.
-        const filename = isBatch
-          ? `${slug}_${timestamp}_${i + 1}.${ext}`
-          : `${slug}_${timestamp}.${ext}`;
+          await writeFile(path.join(dir, filename), buf);
+          const filePath = `/api/images/${filename}`;
 
-        await writeFile(path.join(dir, filename), buf);
+          const record = await prisma.generation.create({
+            data: {
+              filePath,
+              promptPos: params.positivePrompt,
+              promptNeg: params.negativePrompt,
+              model: params.checkpoint,
+              lora: loraStr,
+              lorasJson: lorasJsonValue,
+              assembledPos,
+              assembledNeg,
+              seed: BigInt(resolvedSeed),
+              cfg: params.cfg,
+              steps: params.steps,
+              width: params.width,
+              height: params.height,
+              sampler: params.sampler,
+              scheduler: params.scheduler,
+              highResFix: params.highResFix ?? false,
+            },
+          });
 
-        const filePath = `/api/images/${filename}`;
-
-        const record = await prisma.generation.create({
-          data: {
-            filePath,
-            promptPos: params.positivePrompt,
-            promptNeg: params.negativePrompt,
-            model: params.checkpoint,
-            lora: loraStr,
-            lorasJson: params.loras.length > 0 ? (params.loras as unknown as Prisma.InputJsonValue) : undefined,
-            assembledPos,
-            assembledNeg,
-            seed: BigInt(resolvedSeed),
-            cfg: params.cfg,
-            steps: params.steps,
-            width: params.width,
-            height: params.height,
-            sampler: params.sampler,
-            scheduler: params.scheduler,
-            highResFix: params.highResFix ?? false,
-          },
-        });
-
-        records.push({
-          ...record,
-          seed: record.seed.toString(),
-          createdAt: record.createdAt.toISOString(),
-        });
-      }
+          return {
+            ...record,
+            seed: record.seed.toString(),
+            createdAt: record.createdAt.toISOString(),
+          };
+        }),
+      );
 
       controller.enqueue(sseChunk('complete', { records }));
     } catch (err) {
@@ -355,6 +364,7 @@ class ComfyWSManager {
     if (!job || job.finalized) return;
     job.finalized = true;
     job.timeoutId = null;
+    if (this.activePromptId === promptId) this.activePromptId = null;
     job.controller.enqueue(sseChunk('error', { message: 'Generation timed out after 10 minutes' }));
     try { job.controller.close(); } catch { /* already closed */ }
     this.jobs.delete(promptId);

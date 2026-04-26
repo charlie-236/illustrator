@@ -1,6 +1,9 @@
 import type { GenerationParams } from '@/types';
 
-export function buildWorkflow(params: GenerationParams, uploadedFilename?: string): Record<string, unknown> {
+export function buildWorkflow(
+  params: GenerationParams,
+  uploadedFilename?: string,
+): { workflow: Record<string, unknown>; resolvedSeed: number } {
   const seed = params.seed === -1
     ? Math.floor(Math.random() * 2 ** 32)
     : params.seed;
@@ -115,10 +118,5 @@ export function buildWorkflow(params: GenerationParams, uploadedFilename?: strin
     inputs: { images: ['6', 0] },
   };
 
-  return nodes;
-}
-
-export function extractSeedFromWorkflow(workflow: Record<string, unknown>): number {
-  const sampler = workflow['5'] as { inputs?: { seed?: number } } | undefined;
-  return sampler?.inputs?.seed ?? -1;
+  return { workflow: nodes, resolvedSeed: seed };
 }
