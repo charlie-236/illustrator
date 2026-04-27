@@ -157,6 +157,28 @@ SSE events emitted by the manager:
 ### `GET /api/models`
 Returns `{ checkpoints: string[], loras: string[] }` by calling ComfyUI's `/object_info/CheckpointLoaderSimple` and `/object_info/LoraLoader`. 5-second timeout via `AbortSignal.timeout(5000)`. Returns empty arrays on failure so the UI degrades gracefully.
 
+### `POST /api/services/control`
+SSH-based remote service control. Body: `{ serviceName: string, action: 'start' | 'stop' }`.
+
+Opens a NodeSSH connection to `A100_VM_IP` using `A100_SSH_KEY_PATH`, then runs `sudo systemctl {action} {unit}`. Returns `{ ok: true }` on success or `{ ok: false, error: string }` if systemctl fails. Returns HTTP 500 on SSH connection failure.
+
+Service name → systemctl unit mapping:
+| serviceName | systemctl unit |
+|---|---|
+| `comfy-illustrator` | `comfy-illustrator.service` |
+| `aphrodite-architect` | `aphrodite-architect` |
+| `aphrodite-janitor` | `aphrodite-janitor` |
+| `aphrodite-writer` | `aphrodite-writer` |
+
+**Stacks are mutually exclusive.** The Illustrator Stack (comfy-illustrator + aphrodite-writer) and Architect Stack (aphrodite-architect + aphrodite-janitor) never run simultaneously. The UI enforces awareness of this via group layout; no server-side interlock is enforced.
+
+### `GET /api/services/status`
+SSH-based service status check. Opens a single SSH session, runs `systemctl is-active {unit}` for all four services in one command, and returns:
+```ts
+{ statuses: Record<ServiceName, 'active' | 'inactive' | 'unknown'> }
+```
+Exit code `0` from `systemctl is-active` → `active`; anything else → `inactive`. If SSH fails entirely, returns HTTP 500. `ServiceName` is one of the four keys in the table above.
+
 ### `GET /api/gallery?page=1&limit=20`
 Paginated. `limit` capped at 50. Returns:
 ```ts
@@ -181,7 +203,7 @@ Body: `{ filename, type, modelId?, parentUrlId?, civitaiMetadata? }`
 | `civitaiMetadata.model.description` (or `.description`) | `description` | HTML stripped server-side |
 | `parentUrlId` + `modelId` | `url` | `https://civitai.com/models/{parentUrlId}?modelVersionId={modelId}` |
 
-Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Returns `{ ok: true, record }` on success. After ingestion, tap the Refresh button (↺) in the ModelSelect picker or ModelConfig header to reload the model lists — `revalidatePath` has no effect on client-side fetches and is not used here. Checkpoint width/height default to 512; update in ModelConfig after ingestion if needed. Core upsert logic lives in `src/lib/registerModel.ts`; this route is a thin HTTP wrapper.
+Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Returns `{ ok: true, record }` on success. After ingestion, tap the Refresh button (↺) in the ModelSelect picker or ModelConfig header to reload the model lists — `revalidatePath` has no effect on client-side fetches and is not used here. Checkpoint width/height default to 1024; update in ModelConfig after ingestion if needed. Core upsert logic lives in `src/lib/registerModel.ts`; this route is a thin HTTP wrapper.
 
 ### `POST /api/models/ingest`
 SSE-streamed single-model ingestion. Body: `{ type: 'checkpoint' | 'lora', modelId: number, parentUrlId: number }`. Performs metadata fetch + download to A100 VM + size validation + DB upsert via SSH, emitting per-phase progress events. Used by the in-app ingestion UI; `add_model.sh` remains as a desktop fallback that posts to `/api/models/register` directly.
@@ -197,7 +219,7 @@ Same as `/ingest` but accepts `{ items: [...] }` with up to 20 items. Each item 
 src/
   app/
     layout.tsx          root layout, sets dark theme + viewport meta
-    page.tsx            tab state (studio | gallery | models); passes refreshToken to Gallery, modelConfigVersion to Studio, onSaved to ModelConfig
+    page.tsx            tab state (studio | gallery | models | admin); passes refreshToken to Gallery, modelConfigVersion to Studio, onSaved to ModelConfig
     globals.css         Tailwind directives + utility classes: .input-base, .label, .card
     api/
       models/           GET — checkpoint + lora lists from ComfyUI
@@ -208,6 +230,8 @@ src/
       models/register/       POST — thin wrapper over registerModel; used by add_model.sh
       models/ingest/         POST — SSE single-model ingestion
       models/ingest-batch/   POST — SSE batch ingestion
+      services/control/      POST — SSH sudo systemctl start/stop on Core VM
+      services/status/       GET  — SSH systemctl is-active for all four services
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
     workflow.ts         buildWorkflow()
@@ -230,6 +254,7 @@ src/
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Add Models; saves trigger onSaved (increments modelConfigVersion)
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
+    ServerBay.tsx       Admin tab; Start/Stop buttons + status dots for the four Core VM services
 ```
 
 ## Workflow node graph

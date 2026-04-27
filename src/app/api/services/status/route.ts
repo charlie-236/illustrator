@@ -1,0 +1,65 @@
+import { NodeSSH } from 'node-ssh';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const VM_USER = process.env.A100_VM_USER ?? 'charlie';
+const VM_IP = process.env.A100_VM_IP ?? '100.96.99.94';
+const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
+
+type ServiceName = 'comfy-illustrator' | 'aphrodite-architect' | 'aphrodite-janitor' | 'aphrodite-writer';
+type ServiceStatus = 'active' | 'inactive' | 'unknown';
+
+const SERVICE_UNITS: Record<ServiceName, string> = {
+  'comfy-illustrator': 'comfy-illustrator.service',
+  'aphrodite-architect': 'aphrodite-architect',
+  'aphrodite-janitor': 'aphrodite-janitor',
+  'aphrodite-writer': 'aphrodite-writer',
+};
+
+const SERVICES: ServiceName[] = [
+  'comfy-illustrator',
+  'aphrodite-architect',
+  'aphrodite-janitor',
+  'aphrodite-writer',
+];
+
+export async function GET() {
+  if (!SSH_KEY_PATH) {
+    return Response.json({ error: 'A100_SSH_KEY_PATH not configured' }, { status: 500 });
+  }
+
+  const ssh = new NodeSSH();
+  try {
+    await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });
+
+    // Run all checks in a single SSH round-trip; each line emits "name:exitcode"
+    const cmd = SERVICES
+      .map((name) => `systemctl is-active ${SERVICE_UNITS[name]} >/dev/null 2>&1; echo "${name}:$?"`)
+      .join('; ');
+
+    const result = await ssh.execCommand(cmd);
+
+    const statuses: Record<ServiceName, ServiceStatus> = {
+      'comfy-illustrator': 'unknown',
+      'aphrodite-architect': 'unknown',
+      'aphrodite-janitor': 'unknown',
+      'aphrodite-writer': 'unknown',
+    };
+
+    for (const line of result.stdout.split('\n')) {
+      for (const name of SERVICES) {
+        if (line.startsWith(`${name}:`)) {
+          const code = line.slice(name.length + 1).trim();
+          statuses[name] = code === '0' ? 'active' : 'inactive';
+        }
+      }
+    }
+
+    return Response.json({ statuses });
+  } catch (err) {
+    return Response.json({ error: `SSH error: ${String(err)}` }, { status: 500 });
+  } finally {
+    ssh.dispose();
+  }
+}

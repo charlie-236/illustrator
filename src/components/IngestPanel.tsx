@@ -20,10 +20,16 @@ interface PhaseEvent {
   orphanPath?: string;
 }
 
+interface ParsedIds {
+  parentUrlId: number;
+  modelId: number;
+  hostname: string;
+}
+
 interface SingleState {
   type: ItemType;
   urlInput: string;
-  parsedIds: { parentUrlId: number; modelId: number } | null;
+  parsedIds: ParsedIds | null;
   parseError: string | null;
   ingesting: boolean;
   events: PhaseEvent[];
@@ -34,7 +40,7 @@ interface BatchRow {
   clientId: string;
   type: ItemType;
   urlInput: string;
-  parsedIds: { parentUrlId: number; modelId: number } | null;
+  parsedIds: ParsedIds | null;
   parseError: string | null;
   events: PhaseEvent[];
   finalState: 'pending' | 'in-flight' | 'success' | 'error';
@@ -132,13 +138,12 @@ function currentlyProcessingIndex(rows: BatchRow[]): number {
   return idx >= 0 ? idx + 1 : 0;
 }
 
-function applyUrlParse(value: string): { urlInput: string; parsedIds: { parentUrlId: number; modelId: number } | null; parseError: string | null } {
+function applyUrlParse(value: string): { urlInput: string; parsedIds: ParsedIds | null; parseError: string | null } {
   if (!value.trim()) return { urlInput: value, parsedIds: null, parseError: null };
   const result = parseCivitaiUrl(value);
   if ('error' in result) return { urlInput: value, parsedIds: null, parseError: result.error };
-  // Normalize civitai.red (and any other accepted mirror) to canonical civitai.com URL
-  const urlInput = `https://civitai.com/models/${result.parentUrlId}?modelVersionId=${result.modelId}`;
-  return { urlInput, parsedIds: result, parseError: null };
+  // Preserve the user's original URL (including civitai.red) — do not rewrite the domain
+  return { urlInput: value.trim(), parsedIds: result, parseError: null };
 }
 
 // ── Phase rendering ───────────────────────────────────────────────────────────
@@ -332,6 +337,7 @@ function SingleMode({ onIngestComplete }: { onIngestComplete: () => void }) {
           type,
           modelId: parsedIds.modelId,
           parentUrlId: parsedIds.parentUrlId,
+          sourceHostname: parsedIds.hostname,
         }),
       });
 
@@ -499,6 +505,7 @@ function BatchMode({ onIngestComplete }: { onIngestComplete: () => void }) {
             type: r.type,
             modelId: r.parsedIds!.modelId,
             parentUrlId: r.parsedIds!.parentUrlId,
+            sourceHostname: r.parsedIds!.hostname,
           })),
         }),
       });

@@ -11,6 +11,7 @@ const TAB_LABELS: Record<Tab, string> = {
   studio: 'Studio',
   gallery: 'Gallery',
   models: 'Models',
+  admin: 'Admin',
 };
 
 export default function TabNav({ active, onChange }: Props) {

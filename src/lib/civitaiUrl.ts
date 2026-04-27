@@ -1,6 +1,7 @@
 export interface ParsedCivitaiUrl {
   parentUrlId: number;
   modelId: number;
+  hostname: string;
 }
 
 export function parseCivitaiUrl(input: string): ParsedCivitaiUrl | { error: string } {
@@ -32,5 +33,5 @@ export function parseCivitaiUrl(input: string): ParsedCivitaiUrl | { error: stri
     return { error: 'IDs must be numeric' };
   }
 
-  return { parentUrlId, modelId };
+  return { parentUrlId, modelId, hostname: url.hostname };
 }

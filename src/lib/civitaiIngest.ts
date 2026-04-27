@@ -24,6 +24,7 @@ export interface IngestRequest {
   type: 'checkpoint' | 'lora';
   modelId: number;
   parentUrlId: number;
+  sourceHostname?: string;
 }
 
 export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPhase> {
@@ -102,10 +103,11 @@ export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPha
     const downloadResult = await ssh.execCommand(wgetCmd);
 
     if (downloadResult.code !== 0) {
+      // wget may leave a 0-byte ghost file; remove it so ComfyUI doesn't see it
+      await ssh.execCommand(`rm -f "${remotePath}"`);
       yield {
         phase: 'error',
         message: `Download failed: ${downloadResult.stderr || 'wget exited non-zero'}`,
-        orphanPath: remotePath,
       };
       return;
     }
@@ -116,29 +118,29 @@ export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPha
 
     const statResult = await ssh.execCommand(`stat -c %s "${remotePath}"`);
     if (statResult.code !== 0) {
+      await ssh.execCommand(`rm -f "${remotePath}"`);
       yield {
         phase: 'error',
         message: `Could not stat downloaded file: ${statResult.stderr}`,
-        orphanPath: remotePath,
       };
       return;
     }
 
     const sizeBytes = parseInt(statResult.stdout.trim(), 10);
     if (!Number.isFinite(sizeBytes)) {
+      await ssh.execCommand(`rm -f "${remotePath}"`);
       yield {
         phase: 'error',
         message: `Could not parse file size: ${statResult.stdout}`,
-        orphanPath: remotePath,
       };
       return;
     }
 
     if (sizeBytes < MIN_FILE_SIZE) {
+      await ssh.execCommand(`rm -f "${remotePath}"`);
       yield {
         phase: 'error',
         message: `Downloaded file is suspiciously small (${sizeBytes} bytes); likely an error page`,
-        orphanPath: remotePath,
       };
       return;
     }
@@ -153,6 +155,7 @@ export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPha
       modelId: req.modelId,
       parentUrlId: req.parentUrlId,
       civitaiMetadata: metadata,
+      sourceHostname: req.sourceHostname,
     });
 
     if (!result.ok) {

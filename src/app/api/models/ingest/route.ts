@@ -25,6 +25,10 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(body.modelId) || !Number.isFinite(body.parentUrlId)) {
     return new Response(JSON.stringify({ error: 'modelId and parentUrlId must be numbers' }), { status: 400 });
   }
+  // sourceHostname is optional; only passed when the user's input URL used a non-default domain
+  if (body.sourceHostname !== undefined && typeof body.sourceHostname !== 'string') {
+    return new Response(JSON.stringify({ error: 'sourceHostname must be a string' }), { status: 400 });
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

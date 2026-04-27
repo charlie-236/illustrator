@@ -8,8 +8,8 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const CKPT_BLANK = {
   friendlyName: '',
-  defaultWidth: 512,
-  defaultHeight: 512,
+  defaultWidth: 1024,
+  defaultHeight: 1024,
   defaultPositivePrompt: '',
   defaultNegativePrompt: '',
   description: '',

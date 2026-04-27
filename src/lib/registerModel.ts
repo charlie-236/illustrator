@@ -18,6 +18,7 @@ export interface RegisterModelInput {
   modelId?: number;
   parentUrlId?: number;
   civitaiMetadata?: CivitAIMetadata;
+  sourceHostname?: string;
 }
 
 function stripHtml(html: string | null | undefined): string {
@@ -43,9 +44,11 @@ export async function registerModel(
   const triggerWords = (civitaiMetadata.trainedWords ?? []).join(', ');
   const baseModel = (civitaiMetadata.baseModel ?? '').trim();
   const description = stripHtml(civitaiMetadata.model?.description ?? civitaiMetadata.description) || null;
+  // Preserve the source domain (civitai.red vs civitai.com) from the user's original URL input
+  const host = input.sourceHostname ?? 'civitai.com';
   const url =
     parentUrlId != null && modelId != null
-      ? `https://civitai.com/models/${parentUrlId}?modelVersionId=${modelId}`
+      ? `https://${host}/models/${parentUrlId}?modelVersionId=${modelId}`
       : null;
 
   try {
@@ -55,8 +58,8 @@ export async function registerModel(
         create: {
           checkpointName: filename,
           friendlyName,
-          defaultWidth: 512,
-          defaultHeight: 512,
+          defaultWidth: 1024,
+          defaultHeight: 1024,
           defaultPositivePrompt: '',
           defaultNegativePrompt: '',
           description,

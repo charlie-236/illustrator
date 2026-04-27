@@ -4,10 +4,11 @@ import { useState, useCallback } from 'react';
 import Studio from '@/components/Studio';
 import Gallery from '@/components/Gallery';
 import ModelConfig from '@/components/ModelConfig';
+import ServerBay from '@/components/ServerBay';
 import TabNav from '@/components/TabNav';
 import type { GenerationParams, GenerationRecord, LoraEntry } from '@/types';
 
-export type Tab = 'studio' | 'gallery' | 'models';
+export type Tab = 'studio' | 'gallery' | 'models' | 'admin';
 
 function parseLoras(loraStr: string | null): LoraEntry[] {
   if (!loraStr) return [];
@@ -67,6 +68,9 @@ export default function Home() {
         </div>
         <div className={tab === 'models' ? '' : 'hidden'}>
           <ModelConfig onSaved={() => setModelConfigVersion((n) => n + 1)} />
+        </div>
+        <div className={tab === 'admin' ? '' : 'hidden'}>
+          <ServerBay />
         </div>
       </main>
     </div>

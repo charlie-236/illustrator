@@ -150,6 +150,9 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
           "wget -q --show-progress --progress=bar:force:noscroll \
             \"https://civitai.red/api/download/models/$MODEL_ID?token=$CIVIT_TOKEN\" \
             -O \"$REMOTE_PATH\""; then
+    # wget may leave a 0-byte ghost file; remove it so ComfyUI doesn't scan it
+    ssh -n -i "$SSH_KEY" -o StrictHostKeyChecking=no -o BatchMode=yes \
+        "$VM_USER@$VM_IP" "rm -f \"$REMOTE_PATH\"" 2>/dev/null || true
     echo "[line $LINE_NUM] SKIP — wget failed (network, auth, or disk error)" >&2
     FAIL=$(( FAIL + 1 ))
     continue
@@ -170,8 +173,10 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
 
   MIN_SIZE=$((1024 * 1024))   # 1 MB
   if [ "$FILE_SIZE" -lt "$MIN_SIZE" ]; then
+    # Remove the ghost file so ComfyUI doesn't see a corrupt/empty entry
+    ssh -n -i "$SSH_KEY" -o StrictHostKeyChecking=no -o BatchMode=yes \
+        "$VM_USER@$VM_IP" "rm -f \"$REMOTE_PATH\"" 2>/dev/null || true
     echo "[line $LINE_NUM] SKIP — downloaded file is suspiciously small (${FILE_SIZE} bytes); likely an error page" >&2
-    echo "   File at $VM_IP:$REMOTE_PATH may need manual cleanup." >&2
     FAIL=$(( FAIL + 1 ))
     continue
   fi
