@@ -16,6 +16,8 @@ interface PhaseEvent {
   remotePath?: string;
   sizeBytes?: number;
   recordId?: string;
+  baseModel?: string;
+  triggerWords?: string;
   message?: string;
   orphanPath?: string;
 }
@@ -190,7 +192,13 @@ function PhaseLine({ event, freezeSpinner = false }: { event: PhaseEvent; freeze
   else if (event.phase === 'validate' && event.status === 'ok')           { label = `File valid (${formatBytes(event.sizeBytes!)})`; icon = 'success'; }
   else if (event.phase === 'register' && event.status === 'writing')      { label = 'Saving to database…'; icon = 'spinning'; }
   else if (event.phase === 'register' && event.status === 'ok')           { label = 'Saved'; icon = 'success'; }
-  else if (event.phase === 'done')                                        { label = 'Complete'; icon = 'success'; }
+  else if (event.phase === 'done') {
+    const parts: string[] = [`Added: ${event.friendlyName || 'model'}`];
+    if (event.baseModel) parts.push(`Base: ${event.baseModel}`);
+    if (event.triggerWords) parts.push(`Trigger: ${event.triggerWords}`);
+    label = parts.join(' | ');
+    icon = 'success';
+  }
   else if (event.phase === 'error')                                       { label = event.message ?? 'Unknown error'; icon = 'error'; }
 
   // Stop any spinner once the stream has reached a terminal state

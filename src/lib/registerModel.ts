@@ -35,9 +35,16 @@ function stripHtml(html: string | null | undefined): string {
     .trim();
 }
 
+export interface RegisteredModelInfo {
+  id: string;
+  friendlyName: string;
+  baseModel: string;
+  triggerWords: string;
+}
+
 export async function registerModel(
   input: RegisterModelInput,
-): Promise<{ ok: true; record: { id: string } } | { ok: false; error: string }> {
+): Promise<{ ok: true; record: RegisteredModelInfo } | { ok: false; error: string }> {
   const { filename, type, modelId, parentUrlId, civitaiMetadata = {} } = input;
 
   const friendlyName = (civitaiMetadata.model?.name ?? civitaiMetadata.name ?? '').trim();
@@ -67,7 +74,7 @@ export async function registerModel(
         },
         update: { friendlyName, description, url },
       });
-      return { ok: true, record };
+      return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else {
       const record = await prisma.loraConfig.upsert({
         where: { loraName: filename },
@@ -81,7 +88,7 @@ export async function registerModel(
         },
         update: { friendlyName, triggerWords, baseModel, description, url },
       });
-      return { ok: true, record };
+      return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     }
   } catch (err) {
     console.error('[registerModel] DB write failed:', err);

@@ -17,7 +17,7 @@ export type IngestPhase =
   | { phase: 'validate'; status: 'ok'; sizeBytes: number }
   | { phase: 'register'; status: 'writing' }
   | { phase: 'register'; status: 'ok' }
-  | { phase: 'done'; recordId: string }
+  | { phase: 'done'; recordId: string; friendlyName: string; baseModel: string; triggerWords: string }
   | { phase: 'error'; message: string; orphanPath?: string };
 
 export interface IngestRequest {
@@ -164,7 +164,13 @@ export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPha
     }
 
     yield { phase: 'register', status: 'ok' };
-    yield { phase: 'done', recordId: result.record.id };
+    yield {
+      phase: 'done',
+      recordId: result.record.id,
+      friendlyName: result.record.friendlyName,
+      baseModel: result.record.baseModel,
+      triggerWords: result.record.triggerWords,
+    };
   } finally {
     ssh.dispose();
   }
