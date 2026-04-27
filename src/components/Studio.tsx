@@ -6,7 +6,7 @@ import ModelSelect from './ModelSelect';
 import ParamSlider from './ParamSlider';
 import GenerationProgress from './GenerationProgress';
 import ImageModal from './ImageModal';
-import type { CheckpointConfig, GenerationParams, GenerationRecord } from '@/types';
+import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
@@ -237,12 +237,26 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     setPolishError(null);
     if (polishErrorTimer.current) clearTimeout(polishErrorTimer.current);
     try {
+      let triggerWords: string[] = [];
+      if (p.loras.length > 0) {
+        try {
+          const loraConfigs = await fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>);
+          const activeNames = new Set(p.loras.map((l) => l.name));
+          triggerWords = loraConfigs
+            .filter((c) => activeNames.has(c.loraName) && c.triggerWords?.trim())
+            .flatMap((c) => c.triggerWords.split(',').map((w) => w.trim()).filter(Boolean));
+        } catch {
+          // non-critical — proceed without trigger words
+        }
+      }
+
       const res = await fetch('/api/generate/polish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           positivePrompt: p.positivePrompt,
           negativePrompt: p.negativePrompt,
+          ...(triggerWords.length > 0 && { triggerWords }),
         }),
       });
       const data = await res.json() as { positive?: string; negative?: string; error?: string };
