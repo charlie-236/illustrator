@@ -16,7 +16,12 @@
       "Bash(chmod +x /home/charlie/illustrator/add_model.sh)",
       "Bash(bash -n /home/charlie/illustrator/add_model.sh)",
       "Bash(shellcheck /home/charlie/illustrator/add_model.sh)",
-      "Bash(xargs cat *)"
+      "Bash(xargs cat *)",
+      "Bash(pm2 logs *)",
+      "Bash(python3 -c ' *)",
+      "Bash(tee /tmp/ac2.txt)",
+      "Bash(python3 -c \"print\\('x' * 501\\)\")",
+      "Bash(tee /dev/stderr)"
     ]
   }
 }

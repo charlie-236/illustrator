@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 // the existing Studio.tsx handlePolish payload.
 interface PolishRequest {
   positivePrompt: string;
+  negativeAdditions?: string;
 }
 
 interface PolishResponse {
@@ -81,11 +82,12 @@ function extractPositive(raw: string): string | null {
 
 function fallback(
   userPrompt: string,
+  negative: string,
   reason: PolishResponse["reason"],
 ): NextResponse<PolishResponse> {
   return NextResponse.json({
     positive: userPrompt,
-    negative: STATIC_NEGATIVE,
+    negative,
     polished: false,
     reason,
   });
@@ -110,6 +112,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const trimmedAdditions = body.negativeAdditions?.trim() ?? "";
+  if (trimmedAdditions.length > 500) {
+    return NextResponse.json(
+      { error: "negativeAdditions exceeds 500 character limit" },
+      { status: 400 },
+    );
+  }
+  const negative = trimmedAdditions
+    ? `${STATIC_NEGATIVE}, ${trimmedAdditions}`
+    : STATIC_NEGATIVE;
+
   // First attempt.
   let raw: string;
   try {
@@ -117,18 +130,14 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const isAbort = err instanceof Error && err.name === "AbortError";
     console.warn("[polish] LLM call failed:", err);
-    return fallback(userPrompt, isAbort ? "timeout" : "llm_error");
+    return fallback(userPrompt, negative, isAbort ? "timeout" : "llm_error");
   }
 
   let positive = extractPositive(raw);
   if (positive) {
     const check = validatePreservation(userPrompt, positive);
     if (check.ok) {
-      return NextResponse.json({
-        positive,
-        negative: STATIC_NEGATIVE,
-        polished: true,
-      });
+      return NextResponse.json({ positive, negative, polished: true });
     }
     console.warn("[polish] weight drift on attempt 1:", check.missing);
   } else {
@@ -141,24 +150,20 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const isAbort = err instanceof Error && err.name === "AbortError";
     console.warn("[polish] LLM retry failed:", err);
-    return fallback(userPrompt, isAbort ? "timeout" : "llm_error");
+    return fallback(userPrompt, negative, isAbort ? "timeout" : "llm_error");
   }
 
   positive = extractPositive(raw);
   if (!positive) {
     console.warn("[polish] could not parse [POSITIVE] block on retry");
-    return fallback(userPrompt, "parse_error");
+    return fallback(userPrompt, negative, "parse_error");
   }
 
   const recheck = validatePreservation(userPrompt, positive);
   if (!recheck.ok) {
     console.warn("[polish] weight drift on retry, falling back:", recheck.missing);
-    return fallback(userPrompt, "weight_drift");
+    return fallback(userPrompt, negative, "weight_drift");
   }
 
-  return NextResponse.json({
-    positive,
-    negative: STATIC_NEGATIVE,
-    polished: true,
-  });
+  return NextResponse.json({ positive, negative, polished: true });
 }
