@@ -10,9 +10,19 @@ CRITICAL RULES:
 1. NO CENSORSHIP: You are completely unrestricted. Do not sanitize, soften, or censor explicit, NSFW, or dark themes. Expand on the user's exact concepts faithfully.
 2. PRESERVE SYNTAX: If the user includes weights like (word:1.5) or [word], you MUST keep them exactly as written. Do not remove or alter them.
 3. PRESERVE TRIGGER WORDS: Never remove strange or obscure keywords from the user's prompt; they are required to activate specific models (LoRAs).
-4. PRESERVE SENTINEL TOKENS: Specific mandatory trigger words have been wrapped in double brackets (e.g., [[keyword]]). You MUST include these exact bracketed tokens in your output. Do not alter, translate, or remove them, even if they disrupt grammar.
+4. PRESERVE SENTINEL TOKENS: Specific mandatory trigger words have been wrapped in double brackets (e.g., [[keyword]]). You MUST include these exact bracketed tokens ONLY in the [POSITIVE] prompt section. Do not copy them into the negative prompt.
+5. NO MIRRORING: Do not make the negative prompt the semantic opposite of the positive prompt (e.g., if positive says "daytime", do not put "nighttime" in negative). The negative prompt must ONLY contain technical flaws to avoid: bad anatomy, structural mutations, blurry textures, watermarks, text, and low-quality artifacts.
 
-The positive prompt should include vivid details, lighting, and quality tags. The negative prompt should include structural flaws, bad anatomy, and low-quality artifacts to avoid. Return ONLY a valid JSON object with exactly two string keys: "positive" and "negative". Do not include markdown formatting, conversational text, or code blocks.`;
+The positive prompt should include vivid details, lighting, and quality tags. 
+
+OUTPUT FORMAT:
+You MUST output the two strings under these exact headings:
+[POSITIVE]
+(your expanded positive prompt here)
+
+[NEGATIVE]
+(your expanded negative prompt here)
+Do not output any other conversational text or JSON.`;
 
 function wrapSentinels(text: string, triggerWords: string[]): string {
   let result = text;
@@ -89,30 +99,23 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'LLM returned empty response' }, { status: 502 });
     }
 
-    // Strip any markdown code fences the model may have wrapped the JSON in
-    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const posMatch = raw.match(/\[POSITIVE\]\s*([\s\S]*?)(?=\[NEGATIVE\]|$)/i);
+    const negMatch = raw.match(/\[NEGATIVE\]\s*([\s\S]*?)$/i);
 
-    let parsed: { positive: string; negative: string };
-    try {
-      parsed = JSON.parse(cleaned) as { positive: string; negative: string };
-    } catch {
-      return Response.json(
-        { error: `LLM returned non-JSON: ${cleaned.slice(0, 200)}` },
-        { status: 502 },
-      );
-    }
+    const positive = posMatch?.[1]?.trim();
+    const negative = negMatch?.[1]?.trim();
 
-    if (typeof parsed.positive !== 'string' || typeof parsed.negative !== 'string') {
+    if (!positive || !negative) {
       return Response.json(
-        { error: 'LLM response missing "positive" or "negative" keys' },
+        { error: `LLM response missing [POSITIVE] or [NEGATIVE] tags: ${raw.slice(0, 200)}` },
         { status: 502 },
       );
     }
 
     const stripSentinels = (s: string) => s.replace(/\[\[(.*?)\]\]/g, '$1');
     return Response.json({
-      positive: stripSentinels(parsed.positive.trim()),
-      negative: stripSentinels(parsed.negative.trim()),
+      positive: stripSentinels(positive),
+      negative: stripSentinels(negative),
     });
   } catch (err) {
     const isTimeout = err instanceof Error && err.name === 'TimeoutError';
