@@ -19,8 +19,8 @@ interface Job {
   timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
-const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://localhost:8188';
-const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://localhost:8188';
+const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://127.0.0.1:8188';
+const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — covers batch=4 + high-res on A100
 const encoder = new TextEncoder();
 

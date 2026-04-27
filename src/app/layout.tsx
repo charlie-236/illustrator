@@ -4,6 +4,12 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Illustrator',
   description: 'ComfyUI Generation Studio',
+  appleWebApp: {
+    capable: true,
+    title: 'Illustrator',
+    statusBarStyle: 'black-translucent',
+  },
+  manifest: '/manifest.json',
 };
 
 export const viewport: Viewport = {

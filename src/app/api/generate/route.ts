@@ -4,7 +4,7 @@ import { getComfyWSManager } from '@/lib/comfyws';
 import { prisma } from '@/lib/prisma';
 import type { GenerationParams } from '@/types';
 
-const COMFYUI = process.env.COMFYUI_URL ?? 'http://localhost:8188';
+const COMFYUI = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 
 async function uploadBaseImage(dataUrl: string): Promise<string | undefined> {
   try {

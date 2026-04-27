@@ -20,6 +20,14 @@ The remote Azure A100 VM has severely limited disk space. ComfyUI must **NEVER**
 ### 3. Tablet-first application
 This is a tablet-first application. Every interactive element MUST have a minimum touch target of 48x48 pixels. Use Tailwind classes like min-h-12, min-w-12, p-3, or p-4 to ensure they are easily tappable.
 
+### 4. Network & API Routing Rules
+All communication between the Next.js frontend/backend and the A100 Core VM MUST route through the established local SSH tunnels. The Next.js API should NEVER attempt to contact `100.96.99.94` directly. 
+
+Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
+* **ComfyUI (Image Generation):** `http://127.0.0.1:8188`
+* **Midnight-Miqu (Prompt Polish/LLM):** `http://127.0.0.1:21434/v1/chat/completions`
+
+**Note:** For UI or Client-Side requests that need to reach ComfyUI directly from the browser/tablet, rely on the host machine's IP, as the SSH tunnel exposes port 8188 to the local network via `0.0.0.0`.
 ---
 
 ## Environment
@@ -157,6 +165,13 @@ SSE events emitted by the manager:
 ### `GET /api/models`
 Returns `{ checkpoints: string[], loras: string[] }` by calling ComfyUI's `/object_info/CheckpointLoaderSimple` and `/object_info/LoraLoader`. 5-second timeout via `AbortSignal.timeout(5000)`. Returns empty arrays on failure so the UI degrades gracefully.
 
+### `POST /api/generate/polish`
+LLM-powered prompt expansion. Body: `{ prompt: string }`. Returns `{ result: string }`.
+
+Calls `http://127.0.0.1:21434/v1/chat/completions` (OpenAI-compatible endpoint; Midnight-Miqu via Aphrodite, forwarded through the SSH tunnel). Model defaults to `midnight-miqu`; override with the `POLISH_LLM_MODEL` env var. Uses a 90-second `AbortSignal.timeout` — returns HTTP 504 with a user-facing message on timeout, 502 on other LLM errors.
+
+System prompt instructs the model to expand a short concept into a detailed, comma-separated SD prompt without conversational filler. The `✨ Polish` button in PromptArea (positive prompt only) calls this route and replaces the textarea content with the result.
+
 ### `POST /api/services/control`
 SSH-based remote service control. Body: `{ serviceName: string, action: 'start' | 'stop' }`.
 
@@ -232,6 +247,7 @@ src/
       models/ingest-batch/   POST — SSE batch ingestion
       services/control/      POST — SSH sudo systemctl start/stop on Core VM
       services/status/       GET  — SSH systemctl is-active for all four services
+      generate/polish/       POST — LLM prompt expansion via Midnight-Miqu at :21434
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
     workflow.ts         buildWorkflow()
@@ -255,6 +271,27 @@ src/
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Add Models; saves trigger onSaved (increments modelConfigVersion)
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Start/Stop buttons + status dots for the four Core VM services
+
+```
+public/
+  manifest.json       PWA manifest (standalone display, zinc-950 theme/bg, /icon reference)
+src/app/
+  icon.tsx            Next.js ImageResponse icon — violet "I" on dark bg, served at /icon (512×512 PNG)
+```
+
+## PWA / home-screen install
+
+`layout.tsx` sets `appleWebApp: { capable, title, statusBarStyle: 'black-translucent' }` and `manifest: '/manifest.json'`. When saved to an iPad/iPhone home screen the app launches standalone with no browser chrome. `icon.tsx` generates the app icon automatically via Next.js's file-convention route — no manual favicon wrangling needed.
+
+## Polish button (LLM prompt expansion)
+
+`PromptArea` accepts an optional `showPolish` boolean prop. When true (positive prompt only), a `✨ Polish` button appears in the weight toolbar. Tapping it:
+1. POSTs the current textarea content to `/api/generate/polish`.
+2. Shows a spinner while the LLM generates (up to 90 s).
+3. Replaces the textarea value with the expanded comma-separated prompt on success.
+4. Displays a red error message (auto-clears after 5 s) on failure or timeout.
+
+The LLM endpoint is `http://127.0.0.1:21434/v1/chat/completions` — the Aphrodite Writer service (Midnight-Miqu) tunnelled to `mint-pc:21434`. Override the model name with the `POLISH_LLM_MODEL` env var if the loaded model identifier differs.
 ```
 
 ## Workflow node graph

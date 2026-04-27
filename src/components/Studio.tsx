@@ -281,6 +281,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           placeholder="A dog sunning itself on a shag rug."
           rows={4}
           hint={checkpointDefaults?.positivePrompt || undefined}
+          showPolish
         />
         <PromptArea
           label="Negative Prompt"

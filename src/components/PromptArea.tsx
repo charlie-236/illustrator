@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 
 interface Sel { start: number; end: number }
 
@@ -140,13 +140,52 @@ interface Props {
   placeholder?: string;
   rows?: number;
   hint?: string;
+  showPolish?: boolean;
 }
 
-export default function PromptArea({ label, value, onChange, placeholder, rows = 3, hint }: Props) {
+export default function PromptArea({ label, value, onChange, placeholder, rows = 3, hint, showPolish = false }: Props) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Persists last selection even after the textarea loses focus (e.g. when a
   // toolbar button is tapped on mobile, which blurs the textarea first).
   const savedSel = useRef<Sel>({ start: 0, end: 0 });
+
+  const [polishing, setPolishing] = useState(false);
+  const [polishError, setPolishError] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
+  async function handlePolish() {
+    if (!value.trim() || polishing) return;
+    setPolishing(true);
+    setPolishError(null);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    try {
+      const res = await fetch('/api/generate/polish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: value }),
+      });
+      const data = await res.json() as { result?: string; error?: string };
+      if (!res.ok || data.error) {
+        const msg = data.error ?? `Error ${res.status}`;
+        setPolishError(msg);
+        errorTimerRef.current = setTimeout(() => setPolishError(null), 5000);
+        return;
+      }
+      if (data.result) onChange(data.result);
+    } catch (err) {
+      const msg = String(err);
+      setPolishError(msg);
+      errorTimerRef.current = setTimeout(() => setPolishError(null), 5000);
+    } finally {
+      setPolishing(false);
+    }
+  }
 
   function saveSel() {
     const ta = taRef.current;
@@ -229,8 +268,41 @@ export default function PromptArea({ label, value, onChange, placeholder, rows =
           Clear
         </button>
 
+        {showPolish && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void handlePolish()}
+            disabled={polishing || !value.trim()}
+            className="min-h-12 px-3 flex items-center justify-center gap-1.5 rounded-lg
+                       bg-violet-600/10 hover:bg-violet-600/20 active:scale-95
+                       border border-violet-600/30 hover:border-violet-500/50
+                       text-violet-300 text-sm font-medium
+                       transition-all select-none disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Expand prompt with AI"
+          >
+            {polishing ? (
+              <>
+                <svg className="w-3.5 h-3.5 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                </svg>
+                Polishing…
+              </>
+            ) : (
+              <>✨ Polish</>
+            )}
+          </button>
+        )}
+
         <span className="ml-auto text-xs text-zinc-600 select-none">select text first</span>
       </div>
+
+      {polishError && (
+        <p className="mt-1 text-xs text-red-400 leading-relaxed truncate" title={polishError}>
+          Polish failed: {polishError}
+        </p>
+      )}
 
       {hint && (
         <p className="mt-1 text-xs text-zinc-400 leading-relaxed">

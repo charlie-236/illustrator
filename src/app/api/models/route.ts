@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const COMFYUI = process.env.COMFYUI_URL ?? 'http://localhost:8188';
+const COMFYUI = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 
 async function getNodeInputList(nodeType: string, inputName: string): Promise<string[]> {
   const res = await fetch(`${COMFYUI}/object_info/${nodeType}`, {
