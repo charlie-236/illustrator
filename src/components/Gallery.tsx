@@ -136,6 +136,16 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
           <p className="text-4xl mb-3">✦</p>
           <p>{favoritesOnly ? 'No favorites yet — tap the heart on any image.' : 'No generations yet — switch to Studio to create one.'}</p>
         </div>
+        {page < pages && (
+          <div className="flex justify-center p-4">
+            <button
+              onClick={() => load(page + 1, false, favoritesOnly)}
+              className="px-6 min-h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 transition-colors"
+            >
+              Load more
+            </button>
+          </div>
+        )}
       </>
     );
   }
