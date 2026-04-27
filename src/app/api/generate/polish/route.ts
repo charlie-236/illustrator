@@ -5,18 +5,21 @@ export const dynamic = 'force-dynamic';
 
 const POLISH_URL = 'http://127.0.0.1:21434/v1/chat/completions';
 const SYSTEM_PROMPT =
-  "You are an expert Stable Diffusion prompt engineer. Take the user's short concept and expand it into a highly detailed, comma-separated image generation prompt. Include vivid environmental details, dynamic lighting, camera angles, and quality tags. Do not use conversational filler. Return ONLY the final comma-separated prompt string.";
+  'You are an expert Stable Diffusion prompt engineer. You will receive a positive concept and a negative concept. Expand both into highly detailed, comma-separated strings. The positive prompt should include vivid details, lighting, and quality tags. The negative prompt should include structural flaws, bad anatomy, and low-quality artifacts to avoid. Return ONLY a valid JSON object with exactly two string keys: "positive" and "negative". Do not include markdown formatting, conversational text, or code blocks.';
 
 export async function POST(req: NextRequest) {
-  let body: { prompt: string };
+  let body: { positivePrompt: string; negativePrompt: string };
   try {
-    body = await req.json() as { prompt: string };
+    body = await req.json() as { positivePrompt: string; negativePrompt: string };
   } catch {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  if (typeof body.prompt !== 'string' || !body.prompt.trim()) {
-    return Response.json({ error: 'prompt is required' }, { status: 400 });
+  if (typeof body.positivePrompt !== 'string' || !body.positivePrompt.trim()) {
+    return Response.json({ error: 'positivePrompt is required' }, { status: 400 });
+  }
+  if (typeof body.negativePrompt !== 'string') {
+    return Response.json({ error: 'negativePrompt is required' }, { status: 400 });
   }
 
   const signal = AbortSignal.timeout(90_000);
@@ -26,12 +29,14 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: process.env.POLISH_LLM_MODEL ?? 'midnight-miqu',
+        model: process.env.POLISH_LLM_MODEL ?? '/models/midnight-miqu/Midnight-Miqu-70B-v1.5-Q8_0.gguf',
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: body.prompt.trim() },
+          {
+            role: 'user',
+            content: `${SYSTEM_PROMPT}\n\nPositive: ${body.positivePrompt.trim()}\nNegative: ${body.negativePrompt.trim()}`,
+          },
         ],
-        max_tokens: 400,
+        max_tokens: 600,
         temperature: 0.75,
         stream: false,
       }),
@@ -50,12 +55,32 @@ export async function POST(req: NextRequest) {
       choices?: { message?: { content?: string } }[];
     };
 
-    const result = data.choices?.[0]?.message?.content?.trim();
-    if (!result) {
+    const raw = data.choices?.[0]?.message?.content?.trim();
+    if (!raw) {
       return Response.json({ error: 'LLM returned empty response' }, { status: 502 });
     }
 
-    return Response.json({ result });
+    // Strip any markdown code fences the model may have wrapped the JSON in
+    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+    let parsed: { positive: string; negative: string };
+    try {
+      parsed = JSON.parse(cleaned) as { positive: string; negative: string };
+    } catch {
+      return Response.json(
+        { error: `LLM returned non-JSON: ${cleaned.slice(0, 200)}` },
+        { status: 502 },
+      );
+    }
+
+    if (typeof parsed.positive !== 'string' || typeof parsed.negative !== 'string') {
+      return Response.json(
+        { error: 'LLM response missing "positive" or "negative" keys' },
+        { status: 502 },
+      );
+    }
+
+    return Response.json({ positive: parsed.positive.trim(), negative: parsed.negative.trim() });
   } catch (err) {
     const isTimeout = err instanceof Error && err.name === 'TimeoutError';
     return Response.json(

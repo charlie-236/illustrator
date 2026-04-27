@@ -65,6 +65,9 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const sseRef = useRef<EventSource | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
+  const [polishing, setPolishing] = useState(false);
+  const [polishError, setPolishError] = useState<string | null>(null);
+  const polishErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Close drawer and clear stale post-generation results when navigating away from Studio
   useEffect(() => {
@@ -228,6 +231,38 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     onGenerated();
   }
 
+  async function handlePolish() {
+    if (polishing || isGenerating) return;
+    setPolishing(true);
+    setPolishError(null);
+    if (polishErrorTimer.current) clearTimeout(polishErrorTimer.current);
+    try {
+      const res = await fetch('/api/generate/polish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          positivePrompt: p.positivePrompt,
+          negativePrompt: p.negativePrompt,
+        }),
+      });
+      const data = await res.json() as { positive?: string; negative?: string; error?: string };
+      if (!res.ok || data.error) {
+        const msg = data.error ?? `Error ${res.status}`;
+        setPolishError(msg);
+        polishErrorTimer.current = setTimeout(() => setPolishError(null), 5000);
+        return;
+      }
+      if (data.positive) update('positivePrompt', data.positive);
+      if (data.negative) update('negativePrompt', data.negative);
+    } catch (err) {
+      const msg = String(err);
+      setPolishError(msg);
+      polishErrorTimer.current = setTimeout(() => setPolishError(null), 5000);
+    } finally {
+      setPolishing(false);
+    }
+  }
+
   const isGenerating = state.status === 'generating';
 
   return (
@@ -281,7 +316,6 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           placeholder="A dog sunning itself on a shag rug."
           rows={4}
           hint={checkpointDefaults?.positivePrompt || undefined}
-          showPolish
         />
         <PromptArea
           label="Negative Prompt"
@@ -349,43 +383,71 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         )}
       </div>
 
-      {/* ── Bottom bar: Settings toggle + Generate ── */}
+      {/* ── Bottom bar: Settings toggle + Polish + Generate ── */}
       <div
-        className="fixed bottom-0 left-0 right-0 px-4 pt-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto flex gap-3 transition-transform duration-150 ease-out"
+        className="fixed bottom-0 left-0 right-0 px-4 pt-3 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto transition-transform duration-150 ease-out"
         style={{
           transform: `translateY(-${keyboardOffset}px)`,
           paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
         }}
       >
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open settings"
-          className="min-h-12 min-w-14 flex flex-col items-center justify-center gap-0.5 rounded-xl
-                     bg-zinc-800 hover:bg-zinc-700 active:scale-95
-                     border border-zinc-700 text-zinc-300 transition-all flex-shrink-0"
-        >
-          {/* Adjustments / sliders icon */}
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round"
-              d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-          </svg>
-        </button>
+        {polishError && (
+          <p className="text-xs text-red-400 mb-2 truncate">✨ {polishError}</p>
+        )}
+        <div className="flex gap-3">
+          {/* Settings */}
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open settings"
+            className="min-h-12 min-w-14 flex flex-col items-center justify-center gap-0.5 rounded-xl
+                       bg-zinc-800 hover:bg-zinc-700 active:scale-95
+                       border border-zinc-700 text-zinc-300 transition-all flex-shrink-0"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+            </svg>
+          </button>
 
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating || !p.checkpoint}
-          className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
-                     bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
-                     disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
-                     text-white shadow-lg shadow-violet-900/40"
-        >
-          {isGenerating
-            ? `Generating… ${state.progress.value}/${state.progress.max}`
-            : p.batchSize > 1
-              ? `Generate ×${p.batchSize}`
-              : 'Generate'}
-        </button>
+          {/* Polish */}
+          <button
+            type="button"
+            onClick={() => void handlePolish()}
+            disabled={polishing || isGenerating || !p.positivePrompt.trim()}
+            aria-label="Polish prompts with AI"
+            className="min-h-12 min-w-14 flex flex-col items-center justify-center rounded-xl
+                       bg-violet-600/10 hover:bg-violet-600/20 active:scale-95
+                       border border-violet-600/30 hover:border-violet-500/50
+                       text-violet-300 transition-all flex-shrink-0
+                       disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+          >
+            {polishing ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+              </svg>
+            ) : (
+              <span className="text-lg leading-none">✨</span>
+            )}
+          </button>
+
+          {/* Generate */}
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating || !p.checkpoint}
+            className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
+                       bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
+                       disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
+                       text-white shadow-lg shadow-violet-900/40"
+          >
+            {isGenerating
+              ? `Generating… ${state.progress.value}/${state.progress.max}`
+              : p.batchSize > 1
+                ? `Generate ×${p.batchSize}`
+                : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {/* ── Drawer overlay (fades in/out without layout recalculation) ── */}
