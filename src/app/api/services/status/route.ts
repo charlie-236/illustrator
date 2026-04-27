@@ -7,21 +7,19 @@ const VM_USER = process.env.A100_VM_USER ?? 'charlie';
 const VM_IP = process.env.A100_VM_IP ?? '100.96.99.94';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
 
-type ServiceName = 'comfy-illustrator' | 'aphrodite-architect' | 'aphrodite-janitor' | 'aphrodite-writer';
+type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher';
 type ServiceStatus = 'active' | 'inactive' | 'unknown';
 
 const SERVICE_UNITS: Record<ServiceName, string> = {
   'comfy-illustrator': 'comfy-illustrator.service',
-  'aphrodite-architect': 'aphrodite-architect',
-  'aphrodite-janitor': 'aphrodite-janitor',
   'aphrodite-writer': 'aphrodite-writer',
+  'aphrodite-illustrator-polisher': 'aphrodite-illustrator-polisher',
 };
 
 const SERVICES: ServiceName[] = [
   'comfy-illustrator',
-  'aphrodite-architect',
-  'aphrodite-janitor',
   'aphrodite-writer',
+  'aphrodite-illustrator-polisher',
 ];
 
 export async function GET() {
@@ -42,9 +40,8 @@ export async function GET() {
 
     const statuses: Record<ServiceName, ServiceStatus> = {
       'comfy-illustrator': 'unknown',
-      'aphrodite-architect': 'unknown',
-      'aphrodite-janitor': 'unknown',
       'aphrodite-writer': 'unknown',
+      'aphrodite-illustrator-polisher': 'unknown',
     };
 
     for (const line of result.stdout.split('\n')) {

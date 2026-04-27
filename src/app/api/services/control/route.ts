@@ -11,9 +11,8 @@ const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
 // Exact systemctl unit names per service key
 const SERVICE_UNITS: Record<string, string> = {
   'comfy-illustrator': 'comfy-illustrator.service',
-  'aphrodite-architect': 'aphrodite-architect',
-  'aphrodite-janitor': 'aphrodite-janitor',
   'aphrodite-writer': 'aphrodite-writer',
+  'aphrodite-illustrator-polisher': 'aphrodite-illustrator-polisher',
 };
 
 export async function POST(req: NextRequest) {

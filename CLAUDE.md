@@ -185,18 +185,15 @@ Service name → systemctl unit mapping:
 | serviceName | systemctl unit |
 |---|---|
 | `comfy-illustrator` | `comfy-illustrator.service` |
-| `aphrodite-architect` | `aphrodite-architect` |
-| `aphrodite-janitor` | `aphrodite-janitor` |
 | `aphrodite-writer` | `aphrodite-writer` |
-
-**Stacks are mutually exclusive.** The Illustrator Stack (comfy-illustrator + aphrodite-writer) and Architect Stack (aphrodite-architect + aphrodite-janitor) never run simultaneously. The UI enforces awareness of this via group layout; no server-side interlock is enforced.
+| `aphrodite-illustrator-polisher` | `aphrodite-illustrator-polisher` |
 
 ### `GET /api/services/status`
-SSH-based service status check. Opens a single SSH session, runs `systemctl is-active {unit}` for all four services in one command, and returns:
+SSH-based service status check. Opens a single SSH session, runs `systemctl is-active {unit}` for all three services in one command, and returns:
 ```ts
 { statuses: Record<ServiceName, 'active' | 'inactive' | 'unknown'> }
 ```
-Exit code `0` from `systemctl is-active` → `active`; anything else → `inactive`. If SSH fails entirely, returns HTTP 500. `ServiceName` is one of the four keys in the table above.
+Exit code `0` from `systemctl is-active` → `active`; anything else → `inactive`. If SSH fails entirely, returns HTTP 500. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher'`.
 
 ### `GET /api/gallery?page=1&limit=20`
 Paginated. `limit` capped at 50. Returns:
@@ -276,7 +273,7 @@ src/
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Add Models; saves trigger onSaved (increments modelConfigVersion)
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
-    ServerBay.tsx       Admin tab; Start/Stop buttons + status dots for the four Core VM services
+    ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
 
 ```
 public/
