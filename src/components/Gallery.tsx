@@ -17,11 +17,22 @@ interface Props {
   onRemix: (record: GenerationRecord) => void;
 }
 
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+      fill={filled ? 'currentColor' : 'none'}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+    </svg>
+  );
+}
+
 export default function Gallery({ refreshToken, onRemix }: Props) {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   // null = closed; number = index of the item currently open in the modal
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -38,10 +49,12 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   // Clear any armed delete timer on unmount
   useEffect(() => clearPendingTimer, []);
 
-  const load = useCallback(async (p: number, reset = false) => {
+  const load = useCallback(async (p: number, reset = false, onlyFavs = false) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/gallery?page=${p}&limit=20`);
+      const params = new URLSearchParams({ page: String(p), limit: '20' });
+      if (onlyFavs) params.set('isFavorite', 'true');
+      const res = await fetch(`/api/gallery?${params}`);
       const data = await res.json() as GalleryResponse;
       setItems((prev) => reset ? data.items : [...prev, ...data.items]);
       setPages(data.pages);
@@ -51,15 +64,33 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     }
   }, []);
 
+  // Reload from page 1 when refreshToken or favoritesOnly changes
   useEffect(() => {
-    load(1, true);
-  }, [load, refreshToken]);
+    load(1, true, favoritesOnly);
+  }, [load, refreshToken, favoritesOnly]);
 
-  /** Raw delete — no two-tap; used by the modal (which handles its own confirm UI). */
+  /** Raw delete — used by the modal (which handles its own confirm UI). */
   async function deleteById(id: string): Promise<void> {
     const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
     setItems((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  async function handleFavoriteToggle(id: string): Promise<void> {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+    const newVal = !item.isFavorite;
+    const res = await fetch(`/api/generation/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isFavorite: newVal }),
+    });
+    if (!res.ok) return;
+    setItems((prev) => {
+      const updated = prev.map((i) => i.id === id ? { ...i, isFavorite: newVal } : i);
+      // In favorites-only view, unfavoring removes the item from the visible list
+      return favoritesOnly && !newVal ? updated.filter((i) => i.id !== id) : updated;
+    });
   }
 
   /** Two-tap confirm delete for thumbnail action strips. */
@@ -87,15 +118,44 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
 
   if (!loading && items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-        <p className="text-4xl mb-3">✦</p>
-        <p>No generations yet — switch to Studio to create one.</p>
-      </div>
+      <>
+        {/* Filter bar — always rendered so the user can toggle off the favorites filter */}
+        <div className="flex items-center justify-end px-3 pt-3 pb-1">
+          <button
+            onClick={() => setFavoritesOnly((f) => !f)}
+            className={`min-h-12 px-4 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors
+              ${favoritesOnly
+                ? 'bg-red-600/20 text-red-300 border border-red-600/40'
+                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700'}`}
+          >
+            <HeartIcon filled={favoritesOnly} />
+            Favorites
+          </button>
+        </div>
+        <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
+          <p className="text-4xl mb-3">✦</p>
+          <p>{favoritesOnly ? 'No favorites yet — tap the heart on any image.' : 'No generations yet — switch to Studio to create one.'}</p>
+        </div>
+      </>
     );
   }
 
   return (
     <>
+      {/* Filter bar */}
+      <div className="flex items-center justify-end px-3 pt-3 pb-1">
+        <button
+          onClick={() => setFavoritesOnly((f) => !f)}
+          className={`min-h-12 px-4 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors
+            ${favoritesOnly
+              ? 'bg-red-600/20 text-red-300 border border-red-600/40'
+              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700'}`}
+        >
+          <HeartIcon filled={favoritesOnly} />
+          Favorites
+        </button>
+      </div>
+
       <div className="p-3 grid grid-cols-3 gap-1.5 sm:gap-2">
         {items.map((item, i) => (
           <div
@@ -116,6 +176,19 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
                 className="w-full h-full object-cover"
                 loading="lazy"
               />
+            </button>
+
+            {/* Heart — always visible when favorited, visible on hover otherwise */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleFavoriteToggle(item.id); }}
+              className={`absolute top-1 right-1 min-h-12 min-w-12 flex items-center justify-center
+                rounded-lg backdrop-blur-sm transition-all
+                ${item.isFavorite
+                  ? 'opacity-100 text-red-400 bg-black/40'
+                  : 'opacity-0 group-hover:opacity-100 text-white/70 hover:text-red-400 bg-black/40'}`}
+              title={item.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <HeartIcon filled={item.isFavorite} />
             </button>
 
             {/* Action strip — revealed on hover/focus-within */}
@@ -169,7 +242,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
       {page < pages && !loading && (
         <div className="flex justify-center p-4">
           <button
-            onClick={() => load(page + 1)}
+            onClick={() => load(page + 1, false, favoritesOnly)}
             className="px-6 min-h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 transition-colors"
           >
             Load more
@@ -184,6 +257,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
           onClose={() => setSelectedIdx(null)}
           onRemix={onRemix}
           onDelete={deleteById}
+          onFavoriteToggle={handleFavoriteToggle}
         />
       )}
     </>

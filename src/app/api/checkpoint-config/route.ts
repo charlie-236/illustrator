@@ -31,6 +31,7 @@ export async function PUT(req: NextRequest) {
   let body: {
     checkpointName: string;
     friendlyName: string;
+    baseModel?: string;
     defaultWidth: number;
     defaultHeight: number;
     defaultPositivePrompt: string;
@@ -43,11 +44,12 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { checkpointName, friendlyName, defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt, description } = body;
+  const { checkpointName, friendlyName, baseModel, defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt, description } = body;
   if (!checkpointName) return NextResponse.json({ error: 'checkpointName required' }, { status: 400 });
 
   const data = {
     friendlyName: friendlyName ?? '',
+    baseModel: baseModel ?? '',
     defaultWidth,
     defaultHeight,
     defaultPositivePrompt,

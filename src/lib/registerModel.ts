@@ -65,6 +65,7 @@ export async function registerModel(
         create: {
           checkpointName: filename,
           friendlyName,
+          baseModel,
           defaultWidth: 1024,
           defaultHeight: 1024,
           defaultPositivePrompt: '',
@@ -72,7 +73,7 @@ export async function registerModel(
           description,
           url,
         },
-        update: { friendlyName, description, url },
+        update: { friendlyName, baseModel, description, url },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else {

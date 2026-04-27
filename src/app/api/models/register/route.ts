@@ -11,6 +11,7 @@ export async function POST(req: NextRequest) {
     modelId?: string | number;
     parentUrlId?: string | number;
     civitaiMetadata?: CivitAIMetadata;
+    sourceHostname?: string;
   };
   try {
     body = await req.json();
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { filename, type, modelId, parentUrlId, civitaiMetadata } = body;
+  const { filename, type, modelId, parentUrlId, civitaiMetadata, sourceHostname } = body;
 
   if (!filename) return NextResponse.json({ error: 'filename required' }, { status: 400 });
   if (type !== 'checkpoint' && type !== 'lora') {
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     modelId: modelId != null ? Number(modelId) : undefined,
     parentUrlId: parentUrlId != null ? Number(parentUrlId) : undefined,
     civitaiMetadata,
+    sourceHostname,
   });
 
   if (!result.ok) {

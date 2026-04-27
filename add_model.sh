@@ -186,11 +186,12 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
   # Register metadata in local DB
   echo "   ==> Registering metadata …"
   PAYLOAD=$(echo "$CIVIT_META" | jq -c \
-    --arg filename    "$RANDOM_FILENAME" \
-    --arg type        "$TYPE" \
+    --arg filename       "$RANDOM_FILENAME" \
+    --arg type           "$TYPE" \
+    --arg sourceHostname "civitai.red" \
     --argjson modelId     "$MODEL_ID" \
     --argjson parentUrlId "$PARENT_URL_ID" \
-    '{filename: $filename, type: $type, modelId: $modelId, parentUrlId: $parentUrlId, civitaiMetadata: .}')
+    '{filename: $filename, type: $type, modelId: $modelId, parentUrlId: $parentUrlId, sourceHostname: $sourceHostname, civitaiMetadata: .}')
 
   if ! RESPONSE=$(echo "$PAYLOAD" | curl -sf -X POST "$NEXT_API_URL" \
     -H "Content-Type: application/json" \

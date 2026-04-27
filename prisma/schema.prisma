@@ -25,6 +25,7 @@ model Generation {
   sampler      String   @default("euler")
   scheduler    String   @default("normal")
   highResFix   Boolean  @default(false)
+  isFavorite   Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
@@ -34,6 +35,7 @@ model CheckpointConfig {
   id                    String   @id @default(cuid())
   checkpointName        String   @unique
   friendlyName          String   @default("")
+  baseModel             String   @default("")
   defaultWidth          Int      @default(512)
   defaultHeight         Int      @default(512)
   defaultPositivePrompt String   @default("")

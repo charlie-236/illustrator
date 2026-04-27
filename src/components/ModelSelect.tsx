@@ -37,9 +37,20 @@ interface SheetProps {
   emptyMessage?: string;
   onRefresh?: () => void;
   refreshing?: boolean;
+  /** Optional base-model badge text per raw item key */
+  badgeMap?: Record<string, string>;
+  /** Items whose base model matches the active checkpoint — sorted to top */
+  prioritySet?: Set<string>;
 }
 
-function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyMessage, onRefresh, refreshing }: SheetProps) {
+function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyMessage, onRefresh, refreshing, badgeMap, prioritySet }: SheetProps) {
+  const sorted = [...items].sort((a, b) => {
+    const aPri = prioritySet?.has(a) ? 0 : 1;
+    const bPri = prioritySet?.has(b) ? 0 : 1;
+    if (aPri !== bPri) return aPri - bPri;
+    return (nameMap[a] ?? a).toLowerCase().localeCompare((nameMap[b] ?? b).toLowerCase());
+  });
+
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-sm"
@@ -76,12 +87,14 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
           </div>
         </div>
         <div className="overflow-y-auto flex-1 p-3 space-y-2 pb-8">
-          {items.length === 0 && (
+          {sorted.length === 0 && (
             <p className="text-zinc-400 text-sm text-center py-6">{emptyMessage ?? 'None available'}</p>
           )}
-          {[...items].sort((a, b) => (nameMap[a] ?? a).toLowerCase().localeCompare((nameMap[b] ?? b).toLowerCase())).map((raw) => {
+          {sorted.map((raw) => {
             const name = nameMap[raw] ?? raw;
             const isSelected = raw === selected;
+            const badge = badgeMap?.[raw];
+            const isMatch = badge !== undefined && prioritySet?.has(raw);
             return (
               <button
                 key={raw}
@@ -92,7 +105,15 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
                     ? 'bg-violet-600/20 border border-violet-600/50'
                     : 'bg-zinc-800 border border-transparent hover:bg-zinc-700 active:bg-zinc-600'}`}
               >
-                <span className={`font-medium text-sm leading-snug ${isSelected ? 'text-violet-200' : 'text-zinc-100'}`}>
+                <span className={`font-medium text-sm leading-snug flex items-center gap-1.5 flex-wrap ${isSelected ? 'text-violet-200' : 'text-zinc-100'}`}>
+                  {badge && (
+                    <span className={`text-xs font-medium px-1.5 py-0 rounded leading-5 flex-shrink-0
+                      ${isMatch
+                        ? 'bg-violet-700/60 text-violet-200 border border-violet-600/50'
+                        : 'bg-zinc-700 text-zinc-400 border border-zinc-600/50'}`}>
+                      {badge}
+                    </span>
+                  )}
                   {name}
                 </span>
                 {name !== raw && (
@@ -110,8 +131,10 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
 export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange, refreshToken }: Props) {
   const [models, setModels] = useState<ModelInfo>({ checkpoints: [], loras: [] });
   const [checkpointNames, setCheckpointNames] = useState<Record<string, string>>({});
+  const [checkpointBaseModels, setCheckpointBaseModels] = useState<Record<string, string>>({});
   const [loraNames, setLoraNames] = useState<Record<string, string>>({});
   const [loraTriggerWords, setLoraTriggerWords] = useState<Record<string, string>>({});
+  const [loraBaseModels, setLoraBaseModels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [ckptBrowserOpen, setCkptBrowserOpen] = useState(false);
@@ -129,22 +152,26 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
         setModels(modelsData);
         if (!checkpoint && modelsData.checkpoints[0]) onCheckpointChange(modelsData.checkpoints[0]);
 
-        const ckptMap: Record<string, string> = {};
+        const ckptNameMap: Record<string, string> = {};
+        const ckptBaseMap: Record<string, string> = {};
         for (const c of ckptConfigs) {
-          if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
+          if (c.friendlyName) ckptNameMap[c.checkpointName] = c.friendlyName;
+          if (c.baseModel) ckptBaseMap[c.checkpointName] = c.baseModel;
         }
-        setCheckpointNames(ckptMap);
+        setCheckpointNames(ckptNameMap);
+        setCheckpointBaseModels(ckptBaseMap);
 
-        const loraMap: Record<string, string> = {};
+        const loraNameMap: Record<string, string> = {};
         const triggerMap: Record<string, string> = {};
+        const loraBaseMap: Record<string, string> = {};
         for (const l of loraConfigs) {
-          if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
-          if (l.triggerWords && l.triggerWords.trim()) {
-            triggerMap[l.loraName] = l.triggerWords;
-          }
+          if (l.friendlyName) loraNameMap[l.loraName] = l.friendlyName;
+          if (l.triggerWords?.trim()) triggerMap[l.loraName] = l.triggerWords;
+          if (l.baseModel?.trim()) loraBaseMap[l.loraName] = l.baseModel;
         }
-        setLoraNames(loraMap);
+        setLoraNames(loraNameMap);
         setLoraTriggerWords(triggerMap);
+        setLoraBaseModels(loraBaseMap);
       })
       .catch(() => setError('Could not reach ComfyUI'))
       .finally(() => setLoading(false));
@@ -170,6 +197,12 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
   const checkpointDisplayName = checkpoint
     ? (checkpointNames[checkpoint] ?? checkpoint)
     : 'Select checkpoint…';
+
+  // LoRAs whose baseModel matches the selected checkpoint's baseModel
+  const activeCheckpointBase = checkpointBaseModels[checkpoint] ?? '';
+  const loraPrioritySet = activeCheckpointBase
+    ? new Set(models.loras.filter((l) => loraBaseModels[l] === activeCheckpointBase))
+    : undefined;
 
   if (error) {
     return <p className="text-red-400 text-sm">{error}</p>;
@@ -278,7 +311,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
                   />
                   <span className="text-xs text-zinc-500 w-4 tabular-nums">3</span>
                 </div>
-                {/* Trigger word pills — shown when this LoRA has triggerWords in the DB */}
+                {/* Trigger word pills */}
                 {triggerPills.length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {triggerPills.map((word, idx) => (
@@ -309,6 +342,8 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
           emptyMessage="No LoRAs available"
           onRefresh={refreshLists}
           refreshing={loading}
+          badgeMap={loraBaseModels}
+          prioritySet={loraPrioritySet}
         />
       )}
     </div>

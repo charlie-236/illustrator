@@ -28,7 +28,7 @@ function recordToParams(record: GenerationRecord): GenerationParams {
     height: record.height,
     steps: record.steps,
     cfg: record.cfg,
-    seed: parseInt(record.seed, 10),
+    seed: -1,
     sampler: record.sampler,
     scheduler: record.scheduler,
     batchSize: 1,

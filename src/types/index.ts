@@ -39,6 +39,7 @@ export interface GenerationRecord {
   sampler: string;
   scheduler: string;
   highResFix: boolean;
+  isFavorite: boolean;
   createdAt: string;
 }
 
@@ -46,6 +47,7 @@ export interface CheckpointConfig {
   id: string;
   checkpointName: string;
   friendlyName: string;
+  baseModel: string;
   defaultWidth: number;
   defaultHeight: number;
   defaultPositivePrompt: string;

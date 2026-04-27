@@ -11,9 +11,21 @@ interface Props {
   onRemix: (record: GenerationRecord) => void;
   /** Parent handles the API call. Throw on failure to keep the modal open. */
   onDelete: (id: string) => Promise<void>;
+  /** Parent updates its own items state; modal does an optimistic local update. */
+  onFavoriteToggle?: (id: string) => Promise<void>;
 }
 
-export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete }: Props) {
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+      fill={filled ? 'currentColor' : 'none'}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+    </svg>
+  );
+}
+
+export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle }: Props) {
   const [items, setItems] = useState(initialItems);
   const [idx, setIdx] = useState(Math.min(startIndex, Math.max(0, initialItems.length - 1)));
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -81,6 +93,19 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
     }
   }
 
+  async function handleFavoriteToggle() {
+    if (!record || !onFavoriteToggle) return;
+    const newVal = !record.isFavorite;
+    // Optimistic local update
+    setItems((prev) => prev.map((item, i) => i === idx ? { ...item, isFavorite: newVal } : item));
+    try {
+      await onFavoriteToggle(record.id);
+    } catch {
+      // Revert on failure
+      setItems((prev) => prev.map((item, i) => i === idx ? { ...item, isFavorite: !newVal } : item));
+    }
+  }
+
   function onTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.touches[0].clientX;
   }
@@ -102,7 +127,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
 
-      {/* ── Top bar: Close · counter · Remix · Delete ── */}
+      {/* ── Top bar: Close · counter · Favorite · Remix · Delete ── */}
       <div className="flex items-center gap-2 px-3 py-2 bg-zinc-950 border-b border-zinc-800 flex-shrink-0">
 
         <button
@@ -118,6 +143,20 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
         <span className="flex-1 text-center text-sm text-zinc-400">
           {items.length > 1 ? `${idx + 1} / ${items.length}` : ''}
         </span>
+
+        {/* Favorite */}
+        {onFavoriteToggle && (
+          <button
+            onClick={handleFavoriteToggle}
+            className={`min-h-12 min-w-12 flex items-center justify-center rounded-xl transition-colors flex-shrink-0
+              ${record.isFavorite
+                ? 'text-red-400 bg-red-600/15 hover:bg-red-600/25'
+                : 'text-zinc-400 hover:text-red-400 hover:bg-zinc-800'}`}
+            aria-label={record.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <HeartIcon filled={record.isFavorite} />
+          </button>
+        )}
 
         {/* Remix */}
         <button

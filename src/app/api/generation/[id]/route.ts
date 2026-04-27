@@ -17,6 +17,31 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  let body: { isFavorite?: boolean };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+  if (typeof body.isFavorite !== 'boolean') {
+    return NextResponse.json({ error: 'isFavorite must be a boolean' }, { status: 400 });
+  }
+  try {
+    const g = await prisma.generation.update({
+      where: { id },
+      data: { isFavorite: body.isFavorite },
+    });
+    return NextResponse.json({ ...g, seed: g.seed.toString(), createdAt: g.createdAt.toISOString() });
+  } catch {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+}
+
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

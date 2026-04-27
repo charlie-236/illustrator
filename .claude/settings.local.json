@@ -15,7 +15,8 @@
       "Bash(xargs ls *)",
       "Bash(chmod +x /home/charlie/illustrator/add_model.sh)",
       "Bash(bash -n /home/charlie/illustrator/add_model.sh)",
-      "Bash(shellcheck /home/charlie/illustrator/add_model.sh)"
+      "Bash(shellcheck /home/charlie/illustrator/add_model.sh)",
+      "Bash(xargs cat *)"
     ]
   }
 }
