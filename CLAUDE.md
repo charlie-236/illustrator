@@ -25,9 +25,7 @@ All communication between the Next.js frontend/backend and the A100 Core VM MUST
 
 Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
 * **ComfyUI (Image Generation):** `http://127.0.0.1:8188`
-* **Midnight-Miqu (Prompt Polish/LLM):** `http://127.0.0.1:21434/v1/chat/completions`
-
-**Note:** For UI or Client-Side requests that need to reach ComfyUI directly from the browser/tablet, rely on the host machine's IP, as the SSH tunnel exposes port 8188 to the local network via `0.0.0.0`.
+* **LLM / Prompt Polish:** `LLM_ENDPOINT` env var (typically `http://127.0.0.1:11438/v1/chat/completions`)
 ---
 
 ## Environment
@@ -166,11 +164,17 @@ SSE events emitted by the manager:
 Returns `{ checkpoints: string[], loras: string[] }` by calling ComfyUI's `/object_info/CheckpointLoaderSimple` and `/object_info/LoraLoader`. 5-second timeout via `AbortSignal.timeout(5000)`. Returns empty arrays on failure so the UI degrades gracefully.
 
 ### `POST /api/generate/polish`
-LLM-powered prompt expansion. Body: `{ prompt: string }`. Returns `{ result: string }`.
+LLM-powered prompt expansion with frozen-token validation. Body: `{ positivePrompt: string, negativeAdditions?: string }` (max 500 chars on additions). Returns `{ positive: string, negative: string, polished: boolean, reason?: 'weight_drift' | 'llm_error' | 'timeout' | 'parse_error' }`.
 
-Calls `http://127.0.0.1:21434/v1/chat/completions` (OpenAI-compatible endpoint; Midnight-Miqu via Aphrodite, forwarded through the SSH tunnel). Model defaults to `midnight-miqu`; override with the `POLISH_LLM_MODEL` env var. Uses a 90-second `AbortSignal.timeout` — returns HTTP 504 with a user-facing message on timeout, 502 on other LLM errors.
+Calls `LLM_ENDPOINT` (set in `.env`; the local llama-server tunnel) with the model identifier from `POLISH_LLM_MODEL`. Uses a 30-second `AbortSignal` timeout.
 
-System prompt instructs the model to expand a short concept into a detailed, comma-separated SD prompt without conversational filler. The `✨ Polish` button in PromptArea (positive prompt only) calls this route and replaces the textarea content with the result.
+The system prompt instructs the model to copy weighted tokens like `(eyes:1.5)`, `((rain))`, and `[[lora_name]]` byte-for-byte and append 15–20 new descriptive tags. After the LLM responds, `validatePreservation()` checks every frozen token from the user's input appears as an exact substring in the output. On weight drift the route retries once; on second failure it falls back to returning the user's original prompt with `polished: false` and a `reason` string explaining why.
+
+The negative prompt is always a fixed `STATIC_NEGATIVE` string (defined in `prompt.ts`); user-supplied `negativeAdditions` are appended after it. The LLM cannot influence the negative prompt.
+
+On any LLM failure (timeout, HTTP error, parse error), the route returns HTTP **200** with `polished: false` rather than an error status — this lets the UI degrade gracefully without breaking the generation flow. Tapping Polish on a failed call leaves the user's prompt visible and unchanged.
+
+The `✨ Polish` button in PromptArea (positive prompt only) calls this route. See `src/app/api/generate/polish/prompt.ts` for the full system prompt and sampling config (`temperature: 0.15`, `top_p: 0.9`, `repeat_penalty: 1.05`, `max_tokens: 600`), and `src/app/api/generate/polish/validate.ts` for the frozen-token regex set.
 
 ### `POST /api/services/control`
 SSH-based remote service control. Body: `{ serviceName: string, action: 'start' | 'stop' }`.
@@ -247,7 +251,9 @@ src/
       models/ingest-batch/   POST — SSE batch ingestion
       services/control/      POST — SSH sudo systemctl start/stop on Core VM
       services/status/       GET  — SSH systemctl is-active for all four services
-      generate/polish/       POST — LLM prompt expansion via Midnight-Miqu at :21434
+      generate/polish/route.ts     POST — LLM prompt expansion with frozen-token validation
+      generate/polish/prompt.ts    POLISH_SYSTEM_PROMPT, POLISH_SAMPLING, STATIC_NEGATIVE constants
+      generate/polish/validate.ts  extractFrozenTokens(), validatePreservation()
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
     workflow.ts         buildWorkflow()
@@ -286,13 +292,12 @@ src/app/
 ## Polish button (LLM prompt expansion)
 
 `PromptArea` accepts an optional `showPolish` boolean prop. When true (positive prompt only), a `✨ Polish` button appears in the weight toolbar. Tapping it:
-1. POSTs the current textarea content to `/api/generate/polish`.
-2. Shows a spinner while the LLM generates (up to 90 s).
-3. Replaces the textarea value with the expanded comma-separated prompt on success.
-4. Displays a red error message (auto-clears after 5 s) on failure or timeout.
+1. POSTs the current `positivePrompt` (and optional `negativeAdditions`) to `/api/generate/polish`.
+2. Shows a spinner while the LLM generates (up to 30 s).
+3. On `polished: true`, replaces the textarea with the expanded prompt that preserves all weighted tokens (`(word:N)`, `((word))`, `[[word]]`) byte-for-byte.
+4. On `polished: false`, leaves the textarea unchanged and shows a brief reason indicator (timeout, weight drift, parse error, etc.) — the user's prompt is never lost.
 
-The LLM endpoint is `http://127.0.0.1:21434/v1/chat/completions` — the Aphrodite Writer service (Midnight-Miqu) tunnelled to `mint-pc:21434`. Override the model name with the `POLISH_LLM_MODEL` env var if the loaded model identifier differs.
-```
+The endpoint is configured via `LLM_ENDPOINT` (typically `http://127.0.0.1:11438/v1/chat/completions` when llama-server is tunnelled to mint-pc:11438) and `POLISH_LLM_MODEL` (the model identifier or path). See the `POST /api/generate/polish` API entry above for full request/response shape.
 
 ## Workflow node graph
 

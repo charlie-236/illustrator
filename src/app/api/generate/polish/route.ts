@@ -30,9 +30,9 @@ interface ChatCompletion {
 
 async function callLLM(userPrompt: string): Promise<string> {
   const endpoint = process.env.LLM_ENDPOINT;
-  const model = process.env.LLM_MODEL_PATH;
+  const model = process.env.POLISH_LLM_MODEL;
   if (!endpoint || !model) {
-    throw new Error("LLM_ENDPOINT or LLM_MODEL_PATH not set");
+    throw new Error("LLM_ENDPOINT or POLISH_LLM_MODEL not set");
   }
 
   const controller = new AbortController();

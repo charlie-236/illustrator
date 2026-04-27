@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckpointConfig, LoraConfig, LoraEntry, ModelInfo } from '@/types';
 
 interface Props {
@@ -124,6 +124,110 @@ function ModelSheet({ title, items, selected, nameMap, onSelect, onClose, emptyM
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface LoraRowProps {
+  weight: number;
+  displayName: string;
+  triggerPills: string[];
+  onOpenPicker: () => void;
+  onWeightChange: (w: number) => void;
+  onRemove: () => void;
+}
+
+function LoraRow({ weight, displayName, triggerPills, onOpenPicker, onWeightChange, onRemove }: LoraRowProps) {
+  const [weightStr, setWeightStr] = useState(weight.toFixed(2));
+  const inputFocused = useRef(false);
+
+  useEffect(() => {
+    if (!inputFocused.current) {
+      setWeightStr(weight.toFixed(2));
+    }
+  }, [weight]);
+
+  return (
+    <div className="bg-zinc-800/60 rounded-lg p-3 space-y-2">
+      {/* Top row: name selector + remove */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenPicker}
+          className="input-base flex-1 min-w-0 text-left flex items-center justify-between min-h-12 px-3 py-2"
+        >
+          <span className="text-sm text-zinc-100 truncate">{displayName}</span>
+          <ChevronDown />
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="min-h-12 min-w-12 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors flex-shrink-0 flex items-center justify-center"
+          aria-label="Remove LoRA"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      {/* Bottom row: slider + weight input */}
+      <div className="flex items-center gap-2">
+        <input
+          type="range"
+          min={-3}
+          max={3}
+          step={0.05}
+          value={Math.min(3, Math.max(-3, weight))}
+          onChange={(e) => onWeightChange(parseFloat(e.target.value))}
+          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
+        />
+        <input
+          type="text"
+          inputMode="decimal"
+          value={weightStr}
+          onFocus={() => { inputFocused.current = true; }}
+          onBlur={() => {
+            inputFocused.current = false;
+            const parsed = parseFloat(weightStr);
+            if (!Number.isFinite(parsed)) {
+              setWeightStr(weight.toFixed(2));
+            } else if (parsed < -3) {
+              setWeightStr('-3.00');
+              onWeightChange(-3);
+            } else if (parsed > 3) {
+              setWeightStr('3.00');
+              onWeightChange(3);
+            } else {
+              setWeightStr(parsed.toFixed(2));
+              onWeightChange(parsed);
+            }
+          }}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === '' || v === '-' || v === '-.' || /^-?\d*\.?\d*$/.test(v)) {
+              setWeightStr(v);
+              const parsed = parseFloat(v);
+              if (Number.isFinite(parsed) && parsed >= -3 && parsed <= 3) {
+                onWeightChange(parsed);
+              }
+            }
+          }}
+          className="w-20 flex-shrink-0 text-center text-sm py-1.5 px-1 input-base"
+        />
+      </div>
+      {/* Trigger word pills */}
+      {triggerPills.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {triggerPills.map((word, idx) => (
+            <span
+              key={`${word}-${idx}`}
+              className="text-xs bg-zinc-700/50 text-zinc-400 border border-zinc-600/40 rounded-full px-2.5 py-0.5"
+            >
+              {word}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -268,63 +372,15 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
               : [];
 
             return (
-              <div key={i} className="bg-zinc-800/60 rounded-lg p-3 space-y-2">
-                {/* LoRA selector button */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setLoraPickerIndex(i)}
-                    className="input-base flex-1 text-left flex items-center justify-between min-h-12 px-3 py-2"
-                  >
-                    <span className="text-sm text-zinc-100 truncate">{entryDisplayName}</span>
-                    <ChevronDown />
-                  </button>
-                  <input
-                    type="number"
-                    step={0.05}
-                    value={entry.weight}
-                    onChange={(e) => updateLora(i, 'weight', parseFloat(e.target.value))}
-                    className="input-base w-20 text-center text-sm py-1.5 px-1"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeLora(i)}
-                    className="min-h-12 min-w-12 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors flex-shrink-0 flex items-center justify-center"
-                    aria-label="Remove LoRA"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                {/* Weight slider */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-500 w-6 text-right tabular-nums">-3</span>
-                  <input
-                    type="range"
-                    min={-3}
-                    max={3}
-                    step={0.05}
-                    value={Math.min(3, Math.max(-3, entry.weight))}
-                    onChange={(e) => updateLora(i, 'weight', parseFloat(e.target.value))}
-                    className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
-                  />
-                  <span className="text-xs text-zinc-500 w-4 tabular-nums">3</span>
-                </div>
-                {/* Trigger word pills */}
-                {triggerPills.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-0.5">
-                    {triggerPills.map((word, idx) => (
-                      <span
-                        key={`${word}-${idx}`}
-                        className="text-xs bg-zinc-700/50 text-zinc-400 border border-zinc-600/40 rounded-full px-2.5 py-0.5"
-                      >
-                        {word}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <LoraRow
+                key={i}
+                weight={entry.weight}
+                displayName={entryDisplayName}
+                triggerPills={triggerPills}
+                onOpenPicker={() => setLoraPickerIndex(i)}
+                onWeightChange={(w) => updateLora(i, 'weight', w)}
+                onRemove={() => removeLora(i)}
+              />
             );
           })}
         </div>
