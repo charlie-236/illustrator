@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckpointConfig, LoraConfig, ModelInfo } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
 
@@ -142,15 +142,31 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
   // ── Checkpoint form state ──────────────────────────────────────────
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
+  const [ckptConfigId, setCkptConfigId] = useState<string | null>(null);
   const [ckptForm, setCkptForm] = useState({ ...CKPT_BLANK });
   const [loadingCkptConfig, setLoadingCkptConfig] = useState(false);
   const [ckptStatus, setCkptStatus] = useState<SaveStatus>('idle');
 
   // ── LoRA form state ────────────────────────────────────────────────
   const [selectedLora, setSelectedLora] = useState('');
+  const [loraConfigId, setLoraConfigId] = useState<string | null>(null);
   const [loraForm, setLoraForm] = useState({ ...LORA_BLANK });
   const [loadingLoraConfig, setLoadingLoraConfig] = useState(false);
   const [loraStatus, setLoraStatus] = useState<SaveStatus>('idle');
+
+  // ── Delete state ───────────────────────────────────────────────────
+  const [deletingModel, setDeletingModel] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearDeleteError() {
+    if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
+    setDeleteError(null);
+  }
+
+  useEffect(() => () => {
+    if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
+  }, []);
 
   const refreshModelLists = useCallback(() => {
     setLoadingModels(true);
@@ -208,10 +224,12 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     if (!selectedCheckpoint) return;
     setLoadingCkptConfig(true);
     setCkptStatus('idle');
+    clearDeleteError();
 
     fetch(`/api/checkpoint-config?name=${encodeURIComponent(selectedCheckpoint)}`)
       .then((r) => (r.status === 404 ? null : r.json() as Promise<CheckpointConfig>))
       .then((config) => {
+        setCkptConfigId(config?.id ?? null);
         setCkptForm(config
           ? {
               friendlyName: config.friendlyName,
@@ -224,8 +242,9 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
             }
           : { ...CKPT_BLANK });
       })
-      .catch(() => setCkptForm({ ...CKPT_BLANK }))
+      .catch(() => { setCkptConfigId(null); setCkptForm({ ...CKPT_BLANK }); })
       .finally(() => setLoadingCkptConfig(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCheckpoint]);
 
   // Load LoRA config when selection changes
@@ -233,10 +252,12 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     if (!selectedLora) return;
     setLoadingLoraConfig(true);
     setLoraStatus('idle');
+    clearDeleteError();
 
     fetch(`/api/lora-config?name=${encodeURIComponent(selectedLora)}`)
       .then((r) => (r.status === 404 ? null : r.json() as Promise<LoraConfig>))
       .then((config) => {
+        setLoraConfigId(config?.id ?? null);
         setLoraForm(config
           ? {
               friendlyName: config.friendlyName,
@@ -247,8 +268,9 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
             }
           : { ...LORA_BLANK });
       })
-      .catch(() => setLoraForm({ ...LORA_BLANK }))
+      .catch(() => { setLoraConfigId(null); setLoraForm({ ...LORA_BLANK }); })
       .finally(() => setLoadingLoraConfig(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLora]);
 
   async function saveCheckpoint() {
@@ -282,6 +304,58 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
       if (res.ok) { refreshNames(); onSaved?.(); }
     } catch {
       setLoraStatus('error');
+    }
+  }
+
+  async function deleteCurrentModel(type: 'checkpoint' | 'lora') {
+    const configId = type === 'checkpoint' ? ckptConfigId : loraConfigId;
+    if (!configId) return;
+
+    const rawName = type === 'checkpoint' ? selectedCheckpoint : selectedLora;
+    const friendlyName = type === 'checkpoint'
+      ? (ckptNames[rawName] || rawName)
+      : (loraNames[rawName] || rawName);
+
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${friendlyName}"?\n\nThis will remove the file from the server and cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    clearDeleteError();
+    setDeletingModel(true);
+    try {
+      const res = await fetch(`/api/models/${configId}`, { method: 'DELETE' });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) {
+        const msg = data.error ?? `Delete failed (${res.status})`;
+        setDeleteError(msg);
+        deleteErrorTimerRef.current = setTimeout(() => setDeleteError(null), 7000);
+        return;
+      }
+
+      // Remove from local list immediately for instant feedback
+      if (type === 'checkpoint') {
+        setCheckpoints((prev) => prev.filter((c) => c !== selectedCheckpoint));
+        setCkptNames((prev) => { const n = { ...prev }; delete n[selectedCheckpoint]; return n; });
+        setSelectedCheckpoint('');
+        setCkptConfigId(null);
+        setCkptForm({ ...CKPT_BLANK });
+      } else {
+        setLoras((prev) => prev.filter((l) => l !== selectedLora));
+        setLoraNames((prev) => { const n = { ...prev }; delete n[selectedLora]; return n; });
+        setSelectedLora('');
+        setLoraConfigId(null);
+        setLoraForm({ ...LORA_BLANK });
+      }
+      // Re-sync with ComfyUI so the list is accurate
+      refreshModelLists();
+      onSaved?.();
+    } catch (err) {
+      const msg = `Network error: ${String(err)}`;
+      setDeleteError(msg);
+      deleteErrorTimerRef.current = setTimeout(() => setDeleteError(null), 7000);
+    } finally {
+      setDeletingModel(false);
     }
   }
 
@@ -444,6 +518,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
             )}
 
             <SaveRow status={ckptStatus} onSave={saveCheckpoint} disabled={!selectedCheckpoint} />
+
+            <DeleteRow
+              configId={ckptConfigId}
+              modelName={ckptNames[selectedCheckpoint] || selectedCheckpoint}
+              deleting={deletingModel}
+              error={deleteError}
+              onDelete={() => deleteCurrentModel('checkpoint')}
+            />
           </div>
         </>
       )}
@@ -553,6 +635,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
             )}
 
             <SaveRow status={loraStatus} onSave={saveLora} disabled={!selectedLora} />
+
+            <DeleteRow
+              configId={loraConfigId}
+              modelName={loraNames[selectedLora] || selectedLora}
+              deleting={deletingModel}
+              error={deleteError}
+              onDelete={() => deleteCurrentModel('lora')}
+            />
           </div>
         </>
       )}
@@ -574,6 +664,52 @@ function SaveRow({ status, onSave, disabled }: { status: SaveStatus; onSave: () 
       </button>
       {status === 'saved' && <span className="text-sm text-emerald-400 font-medium">✓ Saved</span>}
       {status === 'error' && <span className="text-sm text-red-400 font-medium">Save failed</span>}
+    </div>
+  );
+}
+
+interface DeleteRowProps {
+  configId: string | null;
+  modelName: string;
+  deleting: boolean;
+  error: string | null;
+  onDelete: () => void;
+}
+
+function DeleteRow({ configId, modelName, deleting, error, onDelete }: DeleteRowProps) {
+  if (!configId) return null;
+  return (
+    <div className="pt-2 border-t border-zinc-800/60 space-y-2">
+      <button
+        type="button"
+        onClick={onDelete}
+        disabled={deleting}
+        className="w-full min-h-12 rounded-xl font-semibold text-sm transition-all
+                   bg-red-950/40 hover:bg-red-900/50 active:scale-[0.98]
+                   border border-red-800/50 hover:border-red-700
+                   text-red-300 hover:text-red-200
+                   disabled:opacity-50 disabled:cursor-not-allowed
+                   flex items-center justify-center gap-2"
+      >
+        {deleting ? (
+          <>
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Deleting…
+          </>
+        ) : (
+          <>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete {modelName && `"${modelName}"`}
+          </>
+        )}
+      </button>
+      {error && (
+        <p className="text-xs text-red-400 text-center leading-snug">{error}</p>
+      )}
     </div>
   );
 }
