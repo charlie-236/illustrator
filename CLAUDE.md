@@ -6,12 +6,14 @@ Mobile-first ComfyUI generation frontend. Next.js 14 App Router, Tailwind CSS, P
 
 ## 🛑 CRITICAL ARCHITECTURE RULES
 
-### 1. The WebSocket Constraint
-The remote Azure A100 VM has severely limited disk space. ComfyUI must **NEVER** save images to its local storage.
+### 1. The Disk-Avoidance Constraint (was "WebSocket Constraint")
+The remote A100 VM has severely limited disk space. ComfyUI must NEVER write generation files to local storage in either direction.
 
-- **NEVER** use the standard `SaveImage` node in any workflow JSON.
-- **ALWAYS** use the `SaveImageWebsocket` node to stream raw image bytes back to the Next.js server.
-- **VALIDATION REQUIRED:** After any change to API routes that construct the ComfyUI workflow payload, explicitly scan the generated code to verify the string `"SaveImage"` does not appear as a node `class_type` anywhere in the node graph. Only `"SaveImageWebsocket"` is permitted.
+Outputs: Use SaveImageWebsocket only. Never SaveImage.
+Inputs (reference images): Use ETN_LoadImageBase64 only. Never LoadImage (requires prior upload to disk) or /upload/image API (writes to disk).
+Defense-in-depth: ram-sweeper service catches anything that slips through, deleting files in /output/, /temp/ and /input/ on a 60-second window. The application-level rules above are the authoritative protection; ram-sweeper is the safety net.
+
+Validation: after any buildWorkflow() workflow change, scan the generated workflow JSON for these forbidden class_types: SaveImage, LoadImage. Only SaveImageWebsocket and ETN_LoadImageBase64 are permitted as the I/O nodes.
 
 ### 2. General Agent Directives
 - Before proposing any fix, verify it aligns with the `SaveImageWebsocket` requirement.

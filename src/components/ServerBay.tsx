@@ -7,9 +7,9 @@ type ActionState = 'idle' | 'pending' | 'sent' | 'error';
 type ServiceStatus = 'active' | 'inactive' | 'unknown';
 
 const SERVICE_LABELS: Record<ServiceName, string> = {
-  'comfy-illustrator': 'ComfyUI Illustrator',
-  'aphrodite-writer': 'Aphrodite Writer',
-  'aphrodite-illustrator-polisher': 'Aphrodite Illustrator Polisher',
+  'comfy-illustrator': 'Image Generation',
+  'aphrodite-writer': 'Writer',
+  'aphrodite-illustrator-polisher': 'Prompt Polisher',
 };
 
 const ALL_SERVICES: ServiceName[] = [
