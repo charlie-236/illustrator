@@ -67,6 +67,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
   const [checkpointConfig, setCheckpointConfig] = useState<CheckpointConfig | null>(null);
   const [baseImage, setBaseImage] = useState<string | null>(null);
+  const [mask, setMask] = useState<string | null>(null);
   const [baseImageDenoise, setBaseImageDenoise] = useState(0.65);
   const [faceReferences, setFaceReferences] = useState<string[]>([]);
   const [faceStrength, setFaceStrength] = useState(0.85);
@@ -161,6 +162,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       const generateParams: GenerationParams = {
         ...p,
         baseImage: baseImage ?? undefined,
+        mask: mask ?? undefined,
         denoise: baseImage ? baseImageDenoise : undefined,
         referenceImages: faceReferences.length > 0
           ? { images: faceReferences, strength: faceStrength }
@@ -339,12 +341,14 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       {/* ── Reference panel (img2img + FaceID identity) ── */}
       <ReferencePanel
         baseImage={baseImage}
+        mask={mask}
         baseImageDenoise={baseImageDenoise}
         faceReferences={faceReferences}
         faceStrength={faceStrength}
         selectedCheckpoint={p.checkpoint}
         checkpointConfigs={checkpointConfig ? [checkpointConfig] : []}
         onBaseImageChange={setBaseImage}
+        onMaskChange={setMask}
         onBaseImageDenoiseChange={setBaseImageDenoise}
         onFaceReferencesChange={setFaceReferences}
         onFaceStrengthChange={setFaceStrength}

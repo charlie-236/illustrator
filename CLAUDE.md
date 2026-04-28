@@ -309,15 +309,20 @@ Node IDs used in the ComfyUI API workflow:
 | ID | class_type | notes |
 |----|-----------|-------|
 | 1 | CheckpointLoaderSimple | outputs: model[0], clip[1], vae[2] |
-| 2 | EmptyLatentImage | |
+| 2 | EmptyLatentImage | only when no `baseImage`; absent in img2img/inpaint mode |
 | 3 | CLIPTextEncode | positive; clip input = last node in LoRA chain (or node 1 if none) |
 | 4 | CLIPTextEncode | negative; same clip source as node 3 |
 | 5 | KSampler | seed is the resolved value, never -1 |
 | 6 | VAEDecode | |
 | 7 | SaveImageWebsocket | terminal node — no disk write on remote |
+| 10 | ETN_LoadImageBase64 | base image (only when `baseImage` present; no disk write) |
+| 11 | VAEEncode or VAEEncodeForInpaint | `VAEEncode` in plain img2img; `VAEEncodeForInpaint` when `mask` is also present (`grow_mask_by: 6`) |
+| 12 | ETN_LoadMaskBase64 | inpaint mask (only when `mask` present; white=replace, black=keep) |
 | 100 | LoraLoader | first LoRA (`params.loras[0]`); inputs from node 1 |
 | 101 | LoraLoader | second LoRA (`params.loras[1]`); inputs from node 100 |
 | 100+i | LoraLoader | pattern: node ID = `100 + index`; each takes model/clip from the previous node in the chain; final node feeds KSampler + CLIPTextEncode nodes |
+
+When `baseImage` is present, node 2 (`EmptyLatentImage`) is omitted and KSampler uses the latent from node 11 instead. When `mask` is also present, node 12 (`ETN_LoadMaskBase64`) is injected and node 11 switches to `VAEEncodeForInpaint` — the activity pill in the Reference panel changes from `img2img` (violet) to `inpaint` (blue).
 
 When `referenceImages` is present in `GenerationParams`, `buildWorkflow()` injects additional nodes after the LoRA chain and before KSampler:
 

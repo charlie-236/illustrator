@@ -14,6 +14,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
+  // Validate mask payload
+  if (params.mask) {
+    if (typeof params.mask !== 'string' || params.mask.length === 0) {
+      return Response.json({ error: 'mask must be a non-empty base64 string' }, { status: 400 });
+    }
+    if (!params.baseImage) {
+      return Response.json({ error: 'mask requires baseImage to also be set' }, { status: 400 });
+    }
+    const decodedSize = Math.floor(params.mask.length * 0.75);
+    if (decodedSize > 8 * 1024 * 1024) {
+      return Response.json({ error: 'mask too large (over 8MB decoded)' }, { status: 400 });
+    }
+  }
+
   // Validate referenceImages payload before touching anything else
   if (params.referenceImages) {
     const refs = params.referenceImages;
@@ -125,7 +139,7 @@ export async function POST(req: NextRequest) {
   // assembled-with-defaults version. The SSE route picks these up via registerJob().
   // finalPositive/finalNegative are recorded alongside for forensic reference.
   // Strip referenceImages (potentially several MB of base64) — not needed in finalizeJob.
-  const { referenceImages: _ri, ...paramsForStash } = params;
+  const { referenceImages: _ri, mask: _mk, ...paramsForStash } = params;
   manager.stashJobParams(promptId, paramsForStash as GenerationParams, resolvedSeed, finalPositive, finalNegative);
 
   return NextResponse.json({ promptId, resolvedSeed });

@@ -29,18 +29,39 @@ export function buildWorkflow(
   let latentRef: [string, number];
 
   if (params.baseImage) {
-    // img2img: embed image inline via ETN_LoadImageBase64 (no disk write on remote)
-    // Strip data URL prefix — ETN_LoadImageBase64 expects raw base64
+    // Embed image inline — no disk write on remote. Strip data URL prefix if present.
     const commaIdx = params.baseImage.indexOf(',');
     const b64 = commaIdx !== -1 ? params.baseImage.slice(commaIdx + 1) : params.baseImage;
     nodes['10'] = {
       class_type: 'ETN_LoadImageBase64',
       inputs: { image: b64 },
     };
-    nodes['11'] = {
-      class_type: 'VAEEncode',
-      inputs: { pixels: ['10', 0], vae: ['1', 2] },
-    };
+
+    if (params.mask) {
+      // Inpainting mode: load mask inline + VAEEncodeForInpaint
+      const maskCommaIdx = params.mask.indexOf(',');
+      const maskB64 = maskCommaIdx !== -1 ? params.mask.slice(maskCommaIdx + 1) : params.mask;
+      nodes['12'] = {
+        class_type: 'ETN_LoadMaskBase64',
+        inputs: { mask: maskB64 },
+      };
+      nodes['11'] = {
+        class_type: 'VAEEncodeForInpaint',
+        inputs: {
+          pixels: ['10', 0],
+          vae: ['1', 2],
+          mask: ['12', 0],
+          grow_mask_by: 6,
+        },
+      };
+    } else {
+      // Plain img2img: regular VAEEncode
+      nodes['11'] = {
+        class_type: 'VAEEncode',
+        inputs: { pixels: ['10', 0], vae: ['1', 2] },
+      };
+    }
+
     latentRef = ['11', 0];
   } else {
     nodes['2'] = {

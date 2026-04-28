@@ -25,6 +25,12 @@ export interface GenerationParams {
   batchSize: number;
   highResFix?: boolean;
   baseImage?: string;
+  /**
+   * Inpainting mask (base64, no data URL prefix).
+   * White pixels mark inpaint regions, black pixels mark preserved regions.
+   * Only used when baseImage is also present.
+   */
+  mask?: string;
   denoise?: number;
   referenceImages?: ReferenceImageSet;
 }

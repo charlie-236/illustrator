@@ -11,12 +11,14 @@ const MIN_UPLOAD_BYTES = 100 * 1024;
 
 interface Props {
   baseImage: string | null;
+  mask: string | null;
   baseImageDenoise: number;
   faceReferences: string[];
   faceStrength: number;
   selectedCheckpoint: string;
   checkpointConfigs: CheckpointConfig[];
   onBaseImageChange: (b64: string | null) => void;
+  onMaskChange: (b64: string | null) => void;
   onBaseImageDenoiseChange: (value: number) => void;
   onFaceReferencesChange: (refs: string[]) => void;
   onFaceStrengthChange: (value: number) => void;
@@ -24,11 +26,12 @@ interface Props {
 
 async function processUpload(
   file: File,
+  opts: { skipMinSize?: boolean } = {},
 ): Promise<{ ok: true; base64: string } | { ok: false; error: string }> {
   if (!file.type.startsWith('image/')) {
     return { ok: false, error: 'File must be an image' };
   }
-  if (file.size < MIN_UPLOAD_BYTES) {
+  if (!opts.skipMinSize && file.size < MIN_UPLOAD_BYTES) {
     return { ok: false, error: 'Image too small (minimum 100KB)' };
   }
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -76,11 +79,24 @@ function toDisplayUrl(base64: string): string {
   return `data:image/jpeg;base64,${base64}`;
 }
 
-function ActivityPills({ hasBaseImage, faceCount }: { hasBaseImage: boolean; faceCount: number }) {
+function ActivityPills({
+  hasBaseImage,
+  hasMask,
+  faceCount,
+}: {
+  hasBaseImage: boolean;
+  hasMask: boolean;
+  faceCount: number;
+}) {
   if (!hasBaseImage && faceCount === 0) return null;
   return (
     <div className="flex items-center gap-1">
-      {hasBaseImage && (
+      {hasBaseImage && hasMask && (
+        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-600/20 text-blue-300 border border-blue-600/40">
+          inpaint
+        </span>
+      )}
+      {hasBaseImage && !hasMask && (
         <span className="text-xs px-2 py-0.5 rounded-full bg-violet-600/20 text-violet-300 border border-violet-600/40">
           img2img
         </span>
@@ -96,14 +112,25 @@ function ActivityPills({ hasBaseImage, faceCount }: { hasBaseImage: boolean; fac
 
 interface BaseImageSectionProps {
   baseImage: string | null;
+  mask: string | null;
   denoise: number;
   onChange: (b64: string | null) => void;
+  onMaskChange: (b64: string | null) => void;
   onDenoiseChange: (value: number) => void;
   onError: (msg: string | null) => void;
 }
 
-function BaseImageSection({ baseImage, denoise, onChange, onDenoiseChange, onError }: BaseImageSectionProps) {
+function BaseImageSection({
+  baseImage,
+  mask,
+  denoise,
+  onChange,
+  onMaskChange,
+  onDenoiseChange,
+  onError,
+}: BaseImageSectionProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const maskFileRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
     const result = await processUpload(file);
@@ -112,7 +139,15 @@ function BaseImageSection({ baseImage, denoise, onChange, onDenoiseChange, onErr
     onChange(result.base64);
   }
 
+  async function handleMaskFile(file: File) {
+    const result = await processUpload(file, { skipMinSize: true });
+    if (!result.ok) { onError(result.error); return; }
+    onError(null);
+    onMaskChange(result.base64);
+  }
+
   const { isDragOver, handlers } = useDropTarget((f) => void handleFile(f));
+  const { isDragOver: isMaskDragOver, handlers: maskHandlers } = useDropTarget((f) => void handleMaskFile(f));
 
   return (
     <div>
@@ -137,7 +172,7 @@ function BaseImageSection({ baseImage, denoise, onChange, onDenoiseChange, onErr
             />
             <button
               type="button"
-              onClick={() => onChange(null)}
+              onClick={() => { onChange(null); onMaskChange(null); }}
               className="absolute top-2 right-2 min-h-8 min-w-8 flex items-center justify-center
                          rounded-full bg-zinc-900/80 text-zinc-300 hover:text-white hover:bg-zinc-800
                          transition-colors"
@@ -174,18 +209,81 @@ function BaseImageSection({ baseImage, denoise, onChange, onDenoiseChange, onErr
         }}
       />
       {baseImage && (
-        <div className="mt-3 space-y-1">
-          <ParamSlider
-            label="Denoise"
-            value={denoise}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={onDenoiseChange}
-            format={(v) => v.toFixed(2)}
-          />
-          <p className="text-xs text-zinc-500">0 = exact reference &nbsp;·&nbsp; 1 = ignore reference</p>
-        </div>
+        <>
+          <div className="mt-3 space-y-1">
+            <ParamSlider
+              label="Denoise"
+              value={denoise}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={onDenoiseChange}
+              format={(v) => v.toFixed(2)}
+            />
+            <p className="text-xs text-zinc-500">0 = exact reference &nbsp;·&nbsp; 1 = ignore reference</p>
+          </div>
+
+          <div className="mt-4">
+            <p className="label mb-2">Inpaint Mask <span className="normal-case text-zinc-500 font-normal">(optional)</span></p>
+            <div
+              {...maskHandlers}
+              className={`relative rounded-xl border-2 transition-colors ${
+                isMaskDragOver
+                  ? 'border-blue-500 bg-blue-600/10'
+                  : mask
+                    ? 'border-zinc-700'
+                    : 'border-dashed border-zinc-700 hover:border-zinc-500'
+              }`}
+            >
+              {mask ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={toDisplayUrl(mask)}
+                    alt="Inpaint mask"
+                    className="w-full max-h-32 object-contain rounded-xl"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onMaskChange(null)}
+                    className="absolute top-2 right-2 min-h-8 min-w-8 flex items-center justify-center
+                               rounded-full bg-zinc-900/80 text-zinc-300 hover:text-white hover:bg-zinc-800
+                               transition-colors"
+                    aria-label="Remove mask"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => maskFileRef.current?.click()}
+                  className="w-full min-h-20 flex flex-col items-center justify-center gap-2
+                             text-zinc-400 hover:text-zinc-200 transition-colors active:scale-[0.99] p-4"
+                >
+                  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                  </svg>
+                  <span className="text-sm">Drag or tap to upload mask</span>
+                  <span className="text-xs text-zinc-500">White = replace &nbsp;·&nbsp; Black = keep</span>
+                </button>
+              )}
+            </div>
+            <input
+              ref={maskFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleMaskFile(f);
+                e.target.value = '';
+              }}
+            />
+          </div>
+        </>
       )}
     </div>
   );
@@ -343,12 +441,14 @@ function FaceReferenceSection({
 
 export default function ReferencePanel({
   baseImage,
+  mask,
   baseImageDenoise,
   faceReferences,
   faceStrength,
   selectedCheckpoint,
   checkpointConfigs,
   onBaseImageChange,
+  onMaskChange,
   onBaseImageDenoiseChange,
   onFaceReferencesChange,
   onFaceStrengthChange,
@@ -366,7 +466,7 @@ export default function ReferencePanel({
       >
         <div className="flex items-center gap-2">
           <h2 className="text-base font-semibold text-zinc-200">Reference</h2>
-          <ActivityPills hasBaseImage={baseImage !== null} faceCount={faceReferences.length} />
+          <ActivityPills hasBaseImage={baseImage !== null} hasMask={mask !== null} faceCount={faceReferences.length} />
         </div>
         {expanded ? (
           <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -383,8 +483,10 @@ export default function ReferencePanel({
         <div className="mt-3 space-y-5">
           <BaseImageSection
             baseImage={baseImage}
+            mask={mask}
             denoise={baseImageDenoise}
             onChange={onBaseImageChange}
+            onMaskChange={onMaskChange}
             onDenoiseChange={onBaseImageDenoiseChange}
             onError={setError}
           />
