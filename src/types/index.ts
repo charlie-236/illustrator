@@ -3,6 +3,13 @@ export interface LoraEntry {
   weight: number;
 }
 
+export interface ReferenceImageSet {
+  /** Base64-encoded image data, NO data URL prefix. 1-3 entries. */
+  images: string[];
+  /** Master strength control mapped to FaceID weight + weight_faceidv2. Range 0.0-1.5. */
+  strength: number;
+}
+
 export interface GenerationParams {
   checkpoint: string;
   loras: LoraEntry[];
@@ -19,6 +26,7 @@ export interface GenerationParams {
   highResFix?: boolean;
   baseImage?: string;
   denoise?: number;
+  referenceImages?: ReferenceImageSet;
 }
 
 export interface GenerationRecord {

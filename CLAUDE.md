@@ -15,6 +15,8 @@ Defense-in-depth: ram-sweeper service catches anything that slips through, delet
 
 Validation: after any buildWorkflow() workflow change, scan the generated workflow JSON for these forbidden class_types: SaveImage, LoadImage. Only SaveImageWebsocket and ETN_LoadImageBase64 are permitted as the I/O nodes.
 
+Runtime enforcement: the `/api/generate` route includes a structural assertion that iterates every node in the built workflow and returns HTTP 500 with a "this is a bug" message if `SaveImage` or `LoadImage` appears as a `class_type`. This catches future regressions automatically — a forbidden node causes a loud failure rather than a silent disk write on the VM.
+
 ### 2. General Agent Directives
 - Before proposing any fix, verify it aligns with the `SaveImageWebsocket` requirement.
 - If a package update or ComfyUI node change breaks the WebSocket relay, fixing the relay takes priority over all UI/UX features.
@@ -314,6 +316,20 @@ Node IDs used in the ComfyUI API workflow:
 | 100 | LoraLoader | first LoRA (`params.loras[0]`); inputs from node 1 |
 | 101 | LoraLoader | second LoRA (`params.loras[1]`); inputs from node 100 |
 | 100+i | LoraLoader | pattern: node ID = `100 + index`; each takes model/clip from the previous node in the chain; final node feeds KSampler + CLIPTextEncode nodes |
+
+When `referenceImages` is present in `GenerationParams`, `buildWorkflow()` injects additional nodes after the LoRA chain and before KSampler:
+
+| ID | class_type | notes |
+|----|-----------|-------|
+| 300 | ETN_LoadImageBase64 | first reference image (base64 inline — no disk write) |
+| 301 | ETN_LoadImageBase64 | second reference image (only when 2+ refs) |
+| 302 | ETN_LoadImageBase64 | third reference image (only when 3 refs) |
+| 310 | ImageBatch | batches refs 0+1 (only when 2+ refs) |
+| 311 | ImageBatch | batches node 310 + ref 2 (only when 3 refs) |
+| 320 | IPAdapterUnifiedLoaderFaceID | FACEID PLUS V2 preset, CPU provider, lora_strength 0.6; takes model from end of LoRA chain |
+| 321 | IPAdapterFaceID | weights mapped from `referenceImages.strength` via `strengthToWeights()`; model output feeds KSampler |
+
+`strengthToWeights(strength)` maps 0–1.5 to `weight`/`weight_faceidv2`: linear 0→(0.85, 0.75) at strength=1.0, then up to caps (1.0, 1.0) at strength=1.5. KSampler's model input switches to node 321's output. Without `referenceImages`, the chain is unchanged.
 
 ## Tailwind conventions
 

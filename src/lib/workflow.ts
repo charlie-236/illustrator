@@ -1,8 +1,19 @@
 import type { GenerationParams } from '@/types';
 
+function strengthToWeights(strength: number): { weight: number; weight_faceidv2: number } {
+  const clamped = Math.max(0, Math.min(1.5, strength));
+  if (clamped <= 1.0) {
+    return { weight: 0.85 * clamped, weight_faceidv2: 0.75 * clamped };
+  }
+  const t = (clamped - 1.0) / 0.5;
+  return {
+    weight: 0.85 + (1.0 - 0.85) * t,
+    weight_faceidv2: 0.75 + (1.0 - 0.75) * t,
+  };
+}
+
 export function buildWorkflow(
   params: GenerationParams,
-  uploadedFilename?: string,
 ): { workflow: Record<string, unknown>; resolvedSeed: number } {
   const seed = params.seed === -1
     ? Math.floor(Math.random() * 2 ** 32)
@@ -17,11 +28,14 @@ export function buildWorkflow(
 
   let latentRef: [string, number];
 
-  if (uploadedFilename) {
-    // img2img: load uploaded image → encode into latent space
+  if (params.baseImage) {
+    // img2img: embed image inline via ETN_LoadImageBase64 (no disk write on remote)
+    // Strip data URL prefix — ETN_LoadImageBase64 expects raw base64
+    const commaIdx = params.baseImage.indexOf(',');
+    const b64 = commaIdx !== -1 ? params.baseImage.slice(commaIdx + 1) : params.baseImage;
     nodes['10'] = {
-      class_type: 'LoadImage',
-      inputs: { image: uploadedFilename },
+      class_type: 'ETN_LoadImageBase64',
+      inputs: { image: b64 },
     };
     nodes['11'] = {
       class_type: 'VAEEncode',
@@ -56,6 +70,76 @@ export function buildWorkflow(
     clipRef = [id, 1];
   });
 
+  // IP-Adapter FaceID chain — nodes 300+. Injected after LoRAs so LoRAs apply first.
+  if (params.referenceImages && params.referenceImages.images.length > 0) {
+    const refs = params.referenceImages;
+    if (refs.images.length > 3) {
+      throw new Error('referenceImages.images cannot exceed 3 entries');
+    }
+
+    // One ETN_LoadImageBase64 per reference (base64 inline — no disk write on remote)
+    const loadNodeIds: string[] = [];
+    refs.images.forEach((b64, idx) => {
+      const nodeId = String(300 + idx); // 300, 301, 302
+      nodes[nodeId] = {
+        class_type: 'ETN_LoadImageBase64',
+        inputs: { image: b64 },
+      };
+      loadNodeIds.push(nodeId);
+    });
+
+    // ImageBatch chains reference images together (only needed for 2+ refs)
+    let faceIdImageSource: [string, number];
+    if (loadNodeIds.length === 1) {
+      faceIdImageSource = [loadNodeIds[0], 0];
+    } else if (loadNodeIds.length === 2) {
+      nodes['310'] = {
+        class_type: 'ImageBatch',
+        inputs: { image1: [loadNodeIds[0], 0], image2: [loadNodeIds[1], 0] },
+      };
+      faceIdImageSource = ['310', 0];
+    } else {
+      nodes['310'] = {
+        class_type: 'ImageBatch',
+        inputs: { image1: [loadNodeIds[0], 0], image2: [loadNodeIds[1], 0] },
+      };
+      nodes['311'] = {
+        class_type: 'ImageBatch',
+        inputs: { image1: ['310', 0], image2: [loadNodeIds[2], 0] },
+      };
+      faceIdImageSource = ['311', 0];
+    }
+
+    nodes['320'] = {
+      class_type: 'IPAdapterUnifiedLoaderFaceID',
+      inputs: {
+        preset: 'FACEID PLUS V2',
+        lora_strength: 0.6,
+        provider: 'CPU',
+        model: modelRef,
+      },
+    };
+
+    const { weight, weight_faceidv2 } = strengthToWeights(refs.strength);
+    nodes['321'] = {
+      class_type: 'IPAdapterFaceID',
+      inputs: {
+        weight,
+        weight_faceidv2,
+        weight_type: 'style transfer',
+        combine_embeds: 'concat',
+        start_at: 0,
+        end_at: 1,
+        embeds_scaling: 'V only',
+        model: ['320', 0],
+        ipadapter: ['320', 1],
+        image: faceIdImageSource,
+      },
+    };
+
+    modelRef = ['321', 0];
+  }
+
   nodes['3'] = {
     class_type: 'CLIPTextEncode',
     inputs: { text: params.positivePrompt, clip: clipRef },
@@ -78,7 +162,7 @@ export function buildWorkflow(
       cfg: params.cfg,
       sampler_name: params.sampler,
       scheduler: params.scheduler,
-      denoise: uploadedFilename ? (params.denoise ?? 0.65) : 1.0,
+      denoise: params.baseImage ? (params.denoise ?? 0.65) : 1.0,
     },
   };
 

@@ -6,33 +6,6 @@ import type { GenerationParams } from '@/types';
 
 const COMFYUI = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 
-async function uploadBaseImage(dataUrl: string): Promise<string | undefined> {
-  try {
-    const commaIdx = dataUrl.indexOf(',');
-    if (commaIdx === -1) return undefined;
-    const meta = dataUrl.slice(0, commaIdx); // e.g. "data:image/jpeg;base64"
-    const base64 = dataUrl.slice(commaIdx + 1);
-    const mimeMatch = meta.match(/^data:([^;]+)/);
-    const mimeType = mimeMatch?.[1] ?? 'image/jpeg';
-    const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
-
-    const imageBuffer = Buffer.from(base64, 'base64');
-    const blob = new Blob([imageBuffer], { type: mimeType });
-
-    const form = new FormData();
-    form.append('image', blob, `upload.${ext}`);
-    form.append('type', 'input');
-    form.append('overwrite', 'true');
-
-    const res = await fetch(`${COMFYUI}/upload/image`, { method: 'POST', body: form });
-    if (!res.ok) return undefined;
-    const data = await res.json() as { name: string; subfolder?: string };
-    return data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function POST(req: NextRequest) {
   let params: GenerationParams;
   try {
@@ -41,10 +14,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  // Upload base image to ComfyUI before building the workflow
-  let uploadedFilename: string | undefined;
-  if (params.baseImage) {
-    uploadedFilename = await uploadBaseImage(params.baseImage);
+  // Validate referenceImages payload before touching anything else
+  if (params.referenceImages) {
+    const refs = params.referenceImages;
+    if (!Array.isArray(refs.images) || refs.images.length === 0 || refs.images.length > 3) {
+      return Response.json({ error: 'referenceImages.images must be 1-3 entries' }, { status: 400 });
+    }
+    for (const b64 of refs.images) {
+      if (typeof b64 !== 'string' || b64.length === 0) {
+        return Response.json({ error: 'each reference image must be a non-empty base64 string' }, { status: 400 });
+      }
+      if (b64.startsWith('data:')) {
+        return Response.json({ error: 'reference images must be base64 only, no data: prefix' }, { status: 400 });
+      }
+      const decodedSize = Math.floor(b64.length * 0.75);
+      if (decodedSize < 100 * 1024) {
+        return Response.json({ error: 'reference image too small (under 100KB decoded)' }, { status: 400 });
+      }
+      if (decodedSize > 8 * 1024 * 1024) {
+        return Response.json({ error: 'reference image too large (over 8MB decoded)' }, { status: 400 });
+      }
+    }
+    if (typeof refs.strength !== 'number' || refs.strength < 0 || refs.strength > 1.5) {
+      return Response.json({ error: 'referenceImages.strength must be 0.0-1.5' }, { status: 400 });
+    }
   }
 
   // Assemble final prompts server-side; original user prompts go to DB/filename
@@ -90,7 +83,19 @@ export async function POST(req: NextRequest) {
   };
 
   const manager = getComfyWSManager();
-  const { workflow, resolvedSeed } = buildWorkflow(workflowParams, uploadedFilename);
+  const { workflow, resolvedSeed } = buildWorkflow(workflowParams);
+
+  // Disk-avoidance constraint — see CLAUDE.md. SaveImage and LoadImage write to VM disk.
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    const ct = (node as { class_type: string }).class_type;
+    if (ct === 'SaveImage' || ct === 'LoadImage') {
+      console.error(`[generate] FORBIDDEN class_type "${ct}" in node ${nodeId}`);
+      return Response.json(
+        { error: `Internal error: workflow contains forbidden class_type "${ct}". This is a bug.` },
+        { status: 500 },
+      );
+    }
+  }
 
   let comfyRes: Response;
   try {
@@ -119,7 +124,9 @@ export async function POST(req: NextRequest) {
   // Stash original params (not workflowParams) so DB stores the user's typed prompts, not the
   // assembled-with-defaults version. The SSE route picks these up via registerJob().
   // finalPositive/finalNegative are recorded alongside for forensic reference.
-  manager.stashJobParams(promptId, params, resolvedSeed, finalPositive, finalNegative);
+  // Strip referenceImages (potentially several MB of base64) — not needed in finalizeJob.
+  const { referenceImages: _ri, ...paramsForStash } = params;
+  manager.stashJobParams(promptId, paramsForStash as GenerationParams, resolvedSeed, finalPositive, finalNegative);
 
   return NextResponse.json({ promptId, resolvedSeed });
 }
