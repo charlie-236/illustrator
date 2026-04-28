@@ -268,7 +268,8 @@ src/
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants
   components/
     TabNav.tsx          sticky header with Studio / Gallery tabs
-    Studio.tsx          full generation form; owns all GenerationParams state + SSE lifecycle
+    Studio.tsx          full generation form; owns all GenerationParams state + SSE lifecycle; renders ReferencePanel between prompts and the generate bar
+    ReferencePanel.tsx  img2img + FaceID identity reference upload zones (collapsible card in Studio)
     PromptArea.tsx      labelled textarea
     ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves) or when the user taps the Refresh button in the picker sheet
     ParamSlider.tsx     range slider + number input pair

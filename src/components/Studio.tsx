@@ -10,6 +10,7 @@ import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig }
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
+import ReferencePanel from './ReferencePanel';
 
 interface CheckpointDefaults {
   positivePrompt: string;
@@ -63,8 +64,12 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sseRef = useRef<EventSource | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
+  const [checkpointConfig, setCheckpointConfig] = useState<CheckpointConfig | null>(null);
+  const [baseImage, setBaseImage] = useState<string | null>(null);
+  const [baseImageDenoise, setBaseImageDenoise] = useState(0.65);
+  const [faceReferences, setFaceReferences] = useState<string[]>([]);
+  const [faceStrength, setFaceStrength] = useState(0.85);
   const [polishing, setPolishing] = useState(false);
   const [polishError, setPolishError] = useState<string | null>(null);
   const polishErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,6 +107,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       fetch(`/api/checkpoint-config?name=${encodeURIComponent(remixParams.checkpoint)}`)
         .then((r) => (r.ok ? r.json() as Promise<CheckpointConfig> : null))
         .then((config) => {
+          setCheckpointConfig(config ?? null);
           setCheckpointDefaults(config
             ? { positivePrompt: config.defaultPositivePrompt, negativePrompt: config.defaultNegativePrompt }
             : null,
@@ -117,32 +123,14 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     setP((prev) => ({ ...prev, [key]: val }));
   }
 
-  function handleBaseImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setP((prev) => ({
-        ...prev,
-        baseImage: reader.result as string,
-        denoise: prev.denoise ?? 0.65,
-      }));
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  }
-
-  function clearBaseImage() {
-    setP((prev) => ({ ...prev, baseImage: undefined, denoise: undefined }));
-  }
-
   async function handleCheckpointChange(newCheckpoint: string) {
     update('checkpoint', newCheckpoint);
     if (!newCheckpoint) { setCheckpointDefaults(null); return; }
     try {
       const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);
-      if (!res.ok) { setCheckpointDefaults(null); return; }
+      if (!res.ok) { setCheckpointConfig(null); setCheckpointDefaults(null); return; }
       const config = await res.json() as CheckpointConfig;
+      setCheckpointConfig(config);
       setCheckpointDefaults({
         positivePrompt: config.defaultPositivePrompt,
         negativePrompt: config.defaultNegativePrompt,
@@ -170,10 +158,18 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     let resolvedSeed: number;
 
     try {
+      const generateParams: GenerationParams = {
+        ...p,
+        baseImage: baseImage ?? undefined,
+        denoise: baseImage ? baseImageDenoise : undefined,
+        referenceImages: faceReferences.length > 0
+          ? { images: faceReferences, strength: faceStrength }
+          : undefined,
+      };
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(p),
+        body: JSON.stringify(generateParams),
       });
       if (!res.ok) {
         const { error } = await res.json() as { error: string };
@@ -340,62 +336,19 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         />
       </div>
 
-      {/* ── Base Image (Image-to-Image) ── */}
-      <div className="card space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="label mb-0">Base Image</label>
-          {p.baseImage && (
-            <button
-              type="button"
-              onClick={clearBaseImage}
-              className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-              aria-label="Clear base image"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-
-        {p.baseImage ? (
-          <div className="rounded-xl overflow-hidden border border-zinc-700 bg-zinc-800">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={p.baseImage} alt="Base image" className="w-full max-h-48 object-contain" />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full min-h-24 rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 flex flex-col items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 transition-colors active:scale-[0.99]"
-          >
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-            </svg>
-            <span className="text-sm">Tap to select from camera roll</span>
-          </button>
-        )}
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleBaseImageChange}
-        />
-
-        {p.baseImage && (
-          <ParamSlider
-            label="Denoise Strength"
-            value={p.denoise ?? 0.65}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={(v) => update('denoise', v)}
-            format={(v) => v.toFixed(2)}
-          />
-        )}
-      </div>
+      {/* ── Reference panel (img2img + FaceID identity) ── */}
+      <ReferencePanel
+        baseImage={baseImage}
+        baseImageDenoise={baseImageDenoise}
+        faceReferences={faceReferences}
+        faceStrength={faceStrength}
+        selectedCheckpoint={p.checkpoint}
+        checkpointConfigs={checkpointConfig ? [checkpointConfig] : []}
+        onBaseImageChange={setBaseImage}
+        onBaseImageDenoiseChange={setBaseImageDenoise}
+        onFaceReferencesChange={setFaceReferences}
+        onFaceStrengthChange={setFaceStrength}
+      />
 
       {/* ── Bottom bar: Settings toggle + Polish + Generate ── */}
       <div
