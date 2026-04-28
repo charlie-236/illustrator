@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { filterSystemLoras } from '@/lib/systemLoraFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export async function GET() {
       getNodeInputList('CheckpointLoaderSimple', 'ckpt_name'),
       getNodeInputList('LoraLoader', 'lora_name'),
     ]);
-    return NextResponse.json({ checkpoints, loras });
+    return NextResponse.json({ checkpoints, loras: filterSystemLoras(loras) });
   } catch (err) {
     console.error('[/api/models]', err);
     return NextResponse.json(

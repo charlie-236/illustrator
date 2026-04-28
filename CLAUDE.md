@@ -263,6 +263,7 @@ src/
     civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM
     civitaiUrl.ts       parseCivitaiUrl(input) — extracts modelId + parentUrlId
     registerModel.ts    DB upsert logic shared by /api/models/register and ingest
+    systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
   types/
     index.ts            GenerationParams, GenerationRecord, ModelInfo, SSEEvent,
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants

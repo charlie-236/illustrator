@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { filterSystemLoras } from '@/lib/systemLoraFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!name) {
     try {
       const configs = await prisma.loraConfig.findMany();
-      return NextResponse.json(configs);
+      return NextResponse.json(filterSystemLoras(configs));
     } catch (err) {
       return NextResponse.json({ error: String(err) }, { status: 500 });
     }
