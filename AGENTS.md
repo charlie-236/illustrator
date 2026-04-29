@@ -1,73 +1,74 @@
-# Instructions for AI agents (Cowork, Claude Code, etc.)
+# Instructions for AI agents working on this repo
 
-## Before any code changes
+This file is read by Claude Code CLI (and any other agent) before starting work on this repo. It defines guardrails, expected workflow, and the boundaries of agent authority.
 
-1. Read CLAUDE.md fully. The architecture rules there are load-bearing.
-2. Read BACKLOG.md to understand what's queued.
-3. Pick the next unchecked item from BACKLOG.md unless explicitly directed otherwise.
-4. Read the corresponding prompt file in `prompts/` for the full specification.
+## Read first, always
 
-## Branch and commit hygiene
+1. CLAUDE.md — load-bearing architecture rules. The Disk-Avoidance Constraint and Network Routing Rules are non-negotiable.
+2. BACKLOG.md — queue of pending features.
+3. The specific prompt file in `prompts/` corresponding to the task.
 
-- NEVER push directly to main. main is protected; pushes will fail.
-- Create a feature branch named `batch/<short-name>` matching the prompt's name.
-- Commit incrementally as work progresses. Don't squash everything to one commit at the end.
-- Each commit message: single-line summary, present tense (e.g. "Add live preview SSE event").
+## When invoked autonomously (e.g., via the run-next-batch script)
+
+If invoked without a specific task, pick the first unchecked item from BACKLOG.md, find its prompt file, and execute that prompt.
+
+If invoked with a specific prompt path, execute that one.
+
+## Branch and commit rules
+
+- Main is protected. Direct pushes to main will fail.
+- For each batch: create a feature branch named `batch/<short-name>` matching the prompt's name.
+- Commit incrementally. Don't squash everything into one commit at the end.
 - After acceptance criteria pass, push the branch with `git push -u origin batch/<short-name>`.
-- DO NOT create the pull request yourself. `gh` is not available in this sandbox and the user creates the PR manually after reviewing the pushed branch.
+- After pushing, create the PR using `gh pr create --base main --head batch/<short-name>` with a body that includes the acceptance-criteria walkthrough.
 
-## Build and validation gates (RUN BEFORE EVERY COMMIT)
+## Build and validation gates (before EVERY commit)
 
-- `npm run build` must pass clean. If it fails, fix it before committing.
+- `npm run build` must pass clean.
 - `grep -rn "class_type.*['\"]SaveImage['\"]" src/` must return only SaveImageWebsocket.
-- `grep -rn "class_type.*['\"]LoadImage['\"]" src/` must return only ETN_LoadImageBase64 (and ETN_LoadMaskBase64 for inpainting).
-- These are the disk-avoidance constraints. Violating them is a load-bearing failure.
+- `grep -rn "class_type.*['\"]LoadImage['\"]" src/` must return only ETN_LoadImageBase64 (and ETN_LoadMaskBase64 for inpainting paths).
+- These are the disk-avoidance constraints. A regression here is a load-bearing failure.
 
 ## Operational boundaries — DO NOT
 
-- Do not run `pm2 restart` or any pm2 command. PM2 management is the user's manual responsibility on the runtime machine (mint-pc).
-- Do not modify `.env`, `ecosystem.config.js`, or any systemd unit files unless the task explicitly directs you to.
-- Do not modify `prisma/schema.prisma` without an explicit task instruction. Schema changes require migration coordination.
-- Do not refactor unrelated code "while you're in there."
+- Do not run `pm2` commands. PM2 management is the user's manual responsibility.
+- Do not modify `.env`, `ecosystem.config.js`, systemd unit files, or `prisma/schema.prisma` unless the task explicitly directs you to.
+- Do not refactor unrelated code.
 - Do not update dependencies unless the task explicitly requires it.
 - Do not change formatting or linting rules.
+- Do not modify CLAUDE.md to "match" code that violates it. Stop and flag the conflict.
 
 ## When uncertain — STOP
 
-- If the prompt is ambiguous between two reasonable approaches, do not pick. Push what you have, then write the ambiguity in your final message so the user can clarify in the PR.
-- If you encounter behavior that contradicts CLAUDE.md, do not "fix" CLAUDE.md to match. Stop and flag it.
-- If a task touches comfyws.ts, workflow.ts, or the WS hijack path, treat with extra care. These are load-bearing.
-- If a task would require modifying the disk-avoidance assertion or any of the SaveImageWebsocket / ETN_LoadImageBase64 / ETN_LoadMaskBase64 plumbing, STOP. That requires explicit user direction.
+- If the prompt is ambiguous between two reasonable approaches, do not pick. Push what you have, and write the ambiguity in the PR description so the user can clarify.
+- If a task touches `comfyws.ts`, `workflow.ts`, the WS hijack path, or the disk-avoidance assertion in `/api/generate/route.ts`, treat with extra care. These are load-bearing.
+- If the route's disk-avoidance assertion would need modification, STOP. That is architectural and requires explicit user direction.
 
-## Final message format (when batch is complete)
+## PR description format
 
-After pushing the branch, your final message must include:
+Every PR you create must include:
 
-1. **Branch name pushed**: `batch/<name>`
-2. **Suggested PR title**: matches the batch name from the prompt
-3. **Suggested PR body** in markdown, containing:
-   - File-by-file summary of changes
-   - Acceptance criteria walkthrough — every criterion from the prompt, marked ✓ or with explanation
-   - Manual smoke tests run (or explicitly noted as "smoke test deferred to user")
-   - Any deviations from the prompt and why
-4. **BACKLOG.md update**: a one-line note saying "BACKLOG.md item marked done in branch — user should verify after merge."
-
-The user copies your PR title and body into GitHub when creating the PR manually.
+1. **Summary** — file-by-file list of changes
+2. **Acceptance criteria walkthrough** — every criterion from the original prompt, marked ✓ or with explanation if not met
+3. **Manual smoke tests** — what you ran, or "smoke tests deferred to user" if they require runtime services
+4. **Deviations from the prompt** — anything you did differently, with reasoning
 
 ## Backlog management
 
-- After a PR merges, the user marks the BACKLOG.md item with `[x]` and the PR number. Cowork does NOT modify BACKLOG.md unless the task explicitly says to.
-- Do NOT add new items to BACKLOG.md. The backlog is the user's plan.
+After successfully creating the PR, update BACKLOG.md: change `[ ]` to `[~]` for the in-flight item (it's not done until the user merges). Add the PR number next to it. Commit and push that change to the same feature branch.
 
-## Tools available in this sandbox
+After merge, the user updates `[~]` to `[x]`. Do not modify BACKLOG.md to add `[x]` yourself.
 
-- `git`, `node`, `npm`, `curl`, `python` — all in /usr/bin
-- `gh` is NOT available. Use `git push` and let the user create PRs manually.
-- No `pm2`, no `psql`, no SSH access to the A100 VM (that's mint-pc's job).
+## Tools available
 
-## Repos and paths
+- `git`, `node`, `npm`, `gh`, `curl`, `python`, `ssh` — full network access
+- The A100 VM SSH key is at `/home/charlie/.ssh/a100-key.pem` (read .env for canonical path)
+- Database: PostgreSQL at the URL in `.env`
+- ComfyUI: tunneled to 127.0.0.1:8188; do not assume it's running
 
-- Working directory: the workspace folder Cowork was granted access to
-- Remote: `origin` points to https://github.com/charlie-236/illustrator
-- Main branch: `main` (protected, no direct pushes)
+## Repo paths
+
+- Working directory: `/home/charlie/illustrator`
+- Remote: `origin` → https://github.com/charlie-236/illustrator
+- Default branch: `main` (protected)
 - Feature branches: `batch/<short-name>`
