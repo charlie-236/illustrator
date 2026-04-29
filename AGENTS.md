@@ -14,13 +14,12 @@ If invoked without a specific task, pick the first unchecked item from BACKLOG.m
 
 If invoked with a specific prompt path, execute that one.
 
-## Branch and commit rules
+## Branch and commit rules — POLICY ONLY (main is no longer protected)
 
-- Main is protected. Direct pushes to main will fail.
-- For each batch: create a feature branch named `batch/<short-name>` matching the prompt's name.
-- Commit incrementally. Don't squash everything into one commit at the end.
-- After acceptance criteria pass, push the branch with `git push -u origin batch/<short-name>`.
-- After pushing, create the PR using `gh pr create --base main --head batch/<short-name>` with a body that includes the acceptance-criteria walkthrough.
+- Even though main accepts direct pushes, NEVER push directly to main.
+- All work goes on a feature branch named `batch/<short-name>`.
+- All work merges via PR so the user can review the diff.
+- If you find yourself about to push to main, STOP and create a branch instead.
 
 ## Build and validation gates (before EVERY commit)
 
