@@ -5,29 +5,36 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
-  const limit = Math.min(50, parseInt(url.searchParams.get('limit') ?? '20', 10));
+  const cursorParam = url.searchParams.get('cursor');
   const favoritesOnly = url.searchParams.get('isFavorite') === 'true';
+  const defaultLimit = parseInt(process.env.GALLERY_PAGE_SIZE ?? '30', 10);
+  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') ?? String(defaultLimit), 10)));
 
-  const where = favoritesOnly ? { isFavorite: true } : {};
+  const cursor = cursorParam ? new Date(cursorParam) : undefined;
+
+  const where = {
+    ...(favoritesOnly ? { isFavorite: true } : {}),
+    ...(cursor ? { createdAt: { lt: cursor } } : {}),
+  };
 
   try {
-    const [total, items] = await Promise.all([
-      prisma.generation.count({ where }),
-      prisma.generation.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-    ]);
-
-    return NextResponse.json({
-      items: items.map((g) => ({ ...g, seed: g.seed.toString(), createdAt: g.createdAt.toISOString() })),
-      total,
-      page,
-      pages: Math.ceil(total / limit),
+    const records = await prisma.generation.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
     });
+
+    const serialized = records.map((g) => ({
+      ...g,
+      seed: g.seed.toString(),
+      createdAt: g.createdAt.toISOString(),
+    }));
+
+    const nextCursor = records.length === limit
+      ? records[records.length - 1].createdAt.toISOString()
+      : null;
+
+    return NextResponse.json({ records: serialized, nextCursor });
   } catch (err) {
     console.error('[/api/gallery]', err);
     return NextResponse.json({ error: 'Database error' }, { status: 500 });
