@@ -9,12 +9,15 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-(none yet — to be populated)
+- [ ] AGENTS.md gh CLI update — see prompts/agents-md-gh-update.md
+- [ ] CheckpointConfig.baseModel UI + auto-populate — see prompts/checkpoint-basemodel.md
+- [ ] Textual inversion / embeddings full feature — see prompts/embeddings.md
 
 ## In flight
 
-- [~] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
+
 
 ## Done
 
 - [x] Batch P: image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
+- [x] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
