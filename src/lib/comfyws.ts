@@ -295,7 +295,11 @@ class ComfyWSManager {
     }
 
     try {
-      const dir = path.join(process.cwd(), 'public', 'generations');
+      const IMAGE_OUTPUT_DIR = process.env.IMAGE_OUTPUT_DIR;
+      if (!IMAGE_OUTPUT_DIR) {
+        throw new Error('IMAGE_OUTPUT_DIR not configured. Set it in .env to an absolute path outside the repo.');
+      }
+      const dir = IMAGE_OUTPUT_DIR;
       await mkdir(dir, { recursive: true });
 
       const { prisma } = await import('./prisma');
