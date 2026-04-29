@@ -13,7 +13,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
-(none)
+- [~] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
 
 ## Done
 
