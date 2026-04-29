@@ -21,6 +21,35 @@ If invoked with a specific prompt path, execute that one.
 - All work merges via PR so the user can review the diff.
 - If you find yourself about to push to main, STOP and create a branch instead.
 
+## Creating the PR
+
+After all acceptance criteria pass, push the branch and open the PR with `gh pr create`:
+
+```bash
+git push -u origin batch/<short-name>
+
+gh pr create \
+  --base main \
+  --head batch/<short-name> \
+  --title "<batch title>" \
+  --body "$(cat <<'PRBODY'
+## Summary
+<file-by-file list of changes>
+
+## Acceptance criteria walkthrough
+<every criterion from the prompt, marked ✓ or explained if not met>
+
+## Manual smoke tests
+<what you ran, or "smoke tests deferred to user" if runtime services are required>
+
+## Deviations from the prompt
+<anything done differently, with reasoning — omit section if none>
+PRBODY
+)"
+```
+
+The heredoc avoids shell-escaping issues with multi-line bodies. Use the PR number returned by `gh pr create` when updating BACKLOG.md.
+
 ## Build and validation gates (before EVERY commit)
 
 - `npm run build` must pass clean.
