@@ -13,8 +13,8 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
-- [~] Batch P: image storage relocation, gallery infinite-scroll, CivitAI Air format — branch `batch/storage-gallery-air` (PR pending — gh CLI not available, create at https://github.com/charlie-236/illustrator/compare/batch/storage-gallery-air)
+- [~] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
 
 ## Done
 
-(none)
+- [x] Batch P: image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
