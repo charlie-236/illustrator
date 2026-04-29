@@ -36,6 +36,8 @@ Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
 
 ```
 DATABASE_URL=postgresql://...        # local Postgres
+IMAGE_OUTPUT_DIR=/home/charlie/illustrator-images  # absolute path for generated image files (outside repo)
+GALLERY_PAGE_SIZE=30                 # records per page for gallery infinite-scroll (default 30, max 100)
 COMFYUI_URL=http://localhost:8188    # ComfyUI HTTP API
 COMFYUI_WS_URL=ws://localhost:8188   # ComfyUI WebSocket
 CIVITAI_TOKEN=...                    # CivitAI API token, used by add_model.sh and ingest API
@@ -78,7 +80,7 @@ Browser → GET  /api/progress/[promptId] (SSE)
                      ↕
           global.__comfyWSManager  ←→  ws://localhost:8188/ws
                      ↓ on execution_success
-          writes PNG to /public/generations/
+          writes PNG to IMAGE_OUTPUT_DIR (absolute path outside repo)
           inserts row into Generation table
           pushes SSE 'complete' event to browser
 ```
@@ -261,7 +263,7 @@ src/
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
     civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM
-    civitaiUrl.ts       parseCivitaiUrl(input) — extracts modelId + parentUrlId
+    civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel
     registerModel.ts    DB upsert logic shared by /api/models/register and ingest
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
   types/
@@ -275,7 +277,7 @@ src/
     ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves) or when the user taps the Refresh button in the picker sheet
     ParamSlider.tsx     range slider + number input pair
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
-    Gallery.tsx         3-col image grid, load-more pagination, opens ImageModal
+    Gallery.tsx         3-col image grid, cursor-based infinite-scroll via IntersectionObserver, opens ImageModal
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Add Models; saves trigger onSaved (increments modelConfigVersion)
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
@@ -349,7 +351,7 @@ When `referenceImages` is present in `GenerationParams`, `buildWorkflow()` injec
 
 ## Model ingestion workflow
 
-**Primary path: in-app UI.** Models tab → Add Models sub-tab. Single mode pastes one CivitAI URL and streams live progress; batch mode accepts up to 20 URLs and processes them sequentially with per-row progress. Backed by `/api/models/ingest` and `/api/models/ingest-batch`. Successful ingestion automatically refreshes Studio's ModelSelect via the `modelConfigVersion` mechanism — no manual refresh needed.
+**Primary path: in-app UI.** Models tab → Add Models sub-tab. Single mode pastes one CivitAI URL or Air string (`urn:air:<base>:<type>:civitai:<id>@<id>`) and streams live progress; batch mode accepts up to 20 URLs/Air strings and processes them sequentially with per-row progress. When an Air string is pasted, the type radio (Checkpoint/LoRA) is auto-pre-filled from the Air `<type>` field. Backed by `/api/models/ingest` and `/api/models/ingest-batch`. Successful ingestion automatically refreshes Studio's ModelSelect via the `modelConfigVersion` mechanism — no manual refresh needed.
 
 **Desktop fallback: `add_model.sh`** — batch processing from the desktop terminal using a queue-file format. Posts to `/api/models/register` directly, bypassing the SSE infrastructure. Use this for large batches from the desktop, or as a recovery path if the in-app UI breaks.
 
@@ -399,5 +401,5 @@ To implement: `onBinary()` in `comfyws.ts` already captures the latest image buf
 
 - Using Next.js **14.2** (not 15). `next.config.ts` is not supported — config is `next.config.mjs`.
 - `serverComponentsExternalPackages` (not the v15 `serverExternalPackages`) for `ws` and `@prisma/client`.
-- `images.unoptimized: true` — generated images are served as static files from `/public/generations/`.
+- `images.unoptimized: true` — generated images are served via `/api/images/[filename]`, which reads from `IMAGE_OUTPUT_DIR` (an absolute path outside the repo, set in `.env`). DB rows store the URL path `/api/images/<filename>` regardless of where the files live on disk.
 - `tsconfig.json` sets `"target": "es2017"` — required for `Map.values()` iteration to compile without `--downlevelIteration`.
