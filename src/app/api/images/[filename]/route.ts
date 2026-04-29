@@ -13,7 +13,11 @@ export async function GET(
     return new NextResponse('Forbidden', { status: 403 });
   }
 
-  const filePath = path.join(process.cwd(), 'public', 'generations', filename);
+  const IMAGE_OUTPUT_DIR = process.env.IMAGE_OUTPUT_DIR;
+  if (!IMAGE_OUTPUT_DIR) {
+    return new NextResponse('IMAGE_OUTPUT_DIR not configured', { status: 500 });
+  }
+  const filePath = path.join(IMAGE_OUTPUT_DIR, filename);
 
   try {
     const data = await readFile(filePath);
