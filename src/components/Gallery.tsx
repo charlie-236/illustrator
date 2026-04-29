@@ -6,10 +6,8 @@ import type { GenerationRecord } from '@/types';
 import { imgSrc } from '@/lib/imageSrc';
 
 interface GalleryResponse {
-  items: GenerationRecord[];
-  total: number;
-  pages: number;
-  page: number;
+  records: GenerationRecord[];
+  nextCursor: string | null;
 }
 
 interface Props {
@@ -29,15 +27,28 @@ function HeartIcon({ filled }: { filled: boolean }) {
 
 export default function Gallery({ refreshToken, onRemix }: Props) {
   const [items, setItems] = useState<GenerationRecord[]>([]);
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [initialized, setInitialized] = useState(false);
   // null = closed; number = index of the item currently open in the modal
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Refs to allow the IntersectionObserver callback to always see current state
+  const cursorRef = useRef<string | null>(null);
+  const hasMoreRef = useRef(true);
+  const loadingRef = useRef(false);
+  const favoritesOnlyRef = useRef(false);
+
+  cursorRef.current = cursor;
+  hasMoreRef.current = hasMore;
+  loadingRef.current = loading;
+  favoritesOnlyRef.current = favoritesOnly;
 
   function clearPendingTimer() {
     if (pendingDeleteTimerRef.current !== null) {
@@ -46,28 +57,58 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     }
   }
 
-  // Clear any armed delete timer on unmount
   useEffect(() => clearPendingTimer, []);
 
-  const load = useCallback(async (p: number, reset = false, onlyFavs = false) => {
+  const loadMore = useCallback(async () => {
+    if (loadingRef.current || !hasMoreRef.current) return;
     setLoading(true);
+    loadingRef.current = true;
     try {
-      const params = new URLSearchParams({ page: String(p), limit: '20' });
-      if (onlyFavs) params.set('isFavorite', 'true');
+      const params = new URLSearchParams();
+      if (cursorRef.current) params.set('cursor', cursorRef.current);
+      if (favoritesOnlyRef.current) params.set('isFavorite', 'true');
       const res = await fetch(`/api/gallery?${params}`);
       const data = await res.json() as GalleryResponse;
-      setItems((prev) => reset ? data.items : [...prev, ...data.items]);
-      setPages(data.pages);
-      setPage(p);
+      setItems((prev) => [...prev, ...data.records]);
+      setCursor(data.nextCursor);
+      setHasMore(data.nextCursor !== null);
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   }, []);
 
-  // Reload from page 1 when refreshToken or favoritesOnly changes
+  // Reset and reload from scratch when refreshToken or favoritesOnly changes
   useEffect(() => {
-    load(1, true, favoritesOnly);
-  }, [load, refreshToken, favoritesOnly]);
+    setItems([]);
+    setCursor(null);
+    setHasMore(true);
+    setInitialized(false);
+    cursorRef.current = null;
+    hasMoreRef.current = true;
+    loadingRef.current = false;
+  }, [refreshToken, favoritesOnly]);
+
+  // Fire initial load after reset
+  useEffect(() => {
+    if (!initialized) {
+      setInitialized(true);
+      void loadMore();
+    }
+  }, [initialized, loadMore]);
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && hasMoreRef.current && !loadingRef.current) {
+        void loadMore();
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   /** Raw delete — used by the modal (which handles its own confirm UI). */
   async function deleteById(id: string): Promise<void> {
@@ -88,7 +129,6 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     if (!res.ok) return;
     setItems((prev) => {
       const updated = prev.map((i) => i.id === id ? { ...i, isFavorite: newVal } : i);
-      // In favorites-only view, unfavoring removes the item from the visible list
       return favoritesOnly && !newVal ? updated.filter((i) => i.id !== id) : updated;
     });
   }
@@ -116,55 +156,36 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     }
   }
 
-  if (!loading && items.length === 0) {
+  const filterBar = (
+    <div className="flex items-center justify-end px-3 pt-3 pb-1">
+      <button
+        onClick={() => setFavoritesOnly((f) => !f)}
+        className={`min-h-12 px-4 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors
+          ${favoritesOnly
+            ? 'bg-red-600/20 text-red-300 border border-red-600/40'
+            : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700'}`}
+      >
+        <HeartIcon filled={favoritesOnly} />
+        Favorites
+      </button>
+    </div>
+  );
+
+  if (!loading && items.length === 0 && !hasMore) {
     return (
       <>
-        {/* Filter bar — always rendered so the user can toggle off the favorites filter */}
-        <div className="flex items-center justify-end px-3 pt-3 pb-1">
-          <button
-            onClick={() => setFavoritesOnly((f) => !f)}
-            className={`min-h-12 px-4 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors
-              ${favoritesOnly
-                ? 'bg-red-600/20 text-red-300 border border-red-600/40'
-                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700'}`}
-          >
-            <HeartIcon filled={favoritesOnly} />
-            Favorites
-          </button>
-        </div>
+        {filterBar}
         <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
           <p className="text-4xl mb-3">✦</p>
           <p>{favoritesOnly ? 'No favorites yet — tap the heart on any image.' : 'No generations yet — switch to Studio to create one.'}</p>
         </div>
-        {page < pages && (
-          <div className="flex justify-center p-4">
-            <button
-              onClick={() => load(page + 1, false, favoritesOnly)}
-              className="px-6 min-h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 transition-colors"
-            >
-              Load more
-            </button>
-          </div>
-        )}
       </>
     );
   }
 
   return (
     <>
-      {/* Filter bar */}
-      <div className="flex items-center justify-end px-3 pt-3 pb-1">
-        <button
-          onClick={() => setFavoritesOnly((f) => !f)}
-          className={`min-h-12 px-4 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors
-            ${favoritesOnly
-              ? 'bg-red-600/20 text-red-300 border border-red-600/40'
-              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700'}`}
-        >
-          <HeartIcon filled={favoritesOnly} />
-          Favorites
-        </button>
-      </div>
+      {filterBar}
 
       <div className="p-3 grid grid-cols-3 gap-1.5 sm:gap-2">
         {items.map((item, i) => (
@@ -249,15 +270,11 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
         ))}
       </div>
 
-      {page < pages && !loading && (
-        <div className="flex justify-center p-4">
-          <button
-            onClick={() => load(page + 1, false, favoritesOnly)}
-            className="px-6 min-h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 transition-colors"
-          >
-            Load more
-          </button>
-        </div>
+      {/* Sentinel for IntersectionObserver — triggers next page load */}
+      <div ref={sentinelRef} className="h-1" />
+
+      {!hasMore && items.length > 0 && (
+        <p className="text-center text-xs text-zinc-600 pb-6">No more results</p>
       )}
 
       {selectedIdx !== null && (

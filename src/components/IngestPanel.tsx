@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { parseCivitaiUrl } from '@/lib/civitaiUrl';
+import { parseCivitaiInput } from '@/lib/civitaiUrl';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,10 @@ interface PhaseEvent {
 interface ParsedIds {
   parentUrlId: number;
   modelId: number;
-  hostname: string;
+  canonicalUrl: string;
+  type: 'checkpoint' | 'lora' | null;
+  baseModel: string | null;
+  hostname: string | null;
 }
 
 interface SingleState {
@@ -142,9 +145,8 @@ function currentlyProcessingIndex(rows: BatchRow[]): number {
 
 function applyUrlParse(value: string): { urlInput: string; parsedIds: ParsedIds | null; parseError: string | null } {
   if (!value.trim()) return { urlInput: value, parsedIds: null, parseError: null };
-  const result = parseCivitaiUrl(value);
+  const result = parseCivitaiInput(value);
   if ('error' in result) return { urlInput: value, parsedIds: null, parseError: result.error };
-  // Preserve the user's original URL (including civitai.red) — do not rewrite the domain
   return { urlInput: value.trim(), parsedIds: result, parseError: null };
 }
 
@@ -284,9 +286,11 @@ function UrlInput({
   onChange: (v: string) => void;
   disabled: boolean;
   showIds: boolean;
-  parsedIds: { parentUrlId: number; modelId: number } | null;
+  parsedIds: ParsedIds | null;
   parseError: string | null;
 }) {
+  const showSd1Warning = parsedIds?.baseModel != null && /^sd[12]$/i.test(parsedIds.baseModel);
+
   return (
     <div className="space-y-1.5">
       <input
@@ -294,7 +298,7 @@ function UrlInput({
         inputMode="url"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="https://civitai.com/models/...?modelVersionId=..."
+        placeholder="CivitAI URL or Air string (urn:air:...)"
         disabled={disabled}
         className="input-base min-h-12 font-mono text-xs"
         spellCheck={false}
@@ -307,7 +311,13 @@ function UrlInput({
         <div className="text-xs text-zinc-400 space-y-0.5">
           <p>Model version: <span className="text-zinc-200 tabular-nums">{parsedIds.modelId}</span></p>
           <p>Parent model: <span className="text-zinc-200 tabular-nums">{parsedIds.parentUrlId}</span></p>
+          <p className="text-zinc-500 break-all">{parsedIds.canonicalUrl}</p>
         </div>
+      )}
+      {parsedIds && showSd1Warning && (
+        <p className="text-xs text-amber-300">
+          This model targets {parsedIds.baseModel!.toUpperCase()} and may not be compatible with your SDXL setup.
+        </p>
       )}
     </div>
   );
@@ -327,7 +337,13 @@ function SingleMode({ onIngestComplete }: { onIngestComplete: () => void }) {
   });
 
   function handleUrlChange(value: string) {
-    setState((s) => ({ ...s, ...applyUrlParse(value) }));
+    const parsed = applyUrlParse(value);
+    setState((s) => ({
+      ...s,
+      ...parsed,
+      // Auto-select type when Air string provides one
+      ...(parsed.parsedIds?.type ? { type: parsed.parsedIds.type } : {}),
+    }));
   }
 
   async function handleSubmit() {
@@ -345,7 +361,7 @@ function SingleMode({ onIngestComplete }: { onIngestComplete: () => void }) {
           type,
           modelId: parsedIds.modelId,
           parentUrlId: parsedIds.parentUrlId,
-          sourceHostname: parsedIds.hostname,
+          ...(parsedIds.hostname ? { sourceHostname: parsedIds.hostname } : {}),
         }),
       });
 
@@ -421,7 +437,12 @@ function BatchRowCard({ row, rowNumber, canRemove, onChange, onRemove }: BatchRo
   const locked = row.finalState !== 'pending';
 
   function handleUrlChange(value: string) {
-    onChange(applyUrlParse(value));
+    const parsed = applyUrlParse(value);
+    onChange({
+      ...parsed,
+      // Auto-select type when Air string provides one
+      ...(parsed.parsedIds?.type ? { type: parsed.parsedIds.type } : {}),
+    });
   }
 
   return (
@@ -513,7 +534,7 @@ function BatchMode({ onIngestComplete }: { onIngestComplete: () => void }) {
             type: r.type,
             modelId: r.parsedIds!.modelId,
             parentUrlId: r.parsedIds!.parentUrlId,
-            sourceHostname: r.parsedIds!.hostname,
+            ...(r.parsedIds!.hostname ? { sourceHostname: r.parsedIds!.hostname } : {}),
           })),
         }),
       });

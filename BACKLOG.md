@@ -13,7 +13,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
-(none)
+- [~] Batch P: image storage relocation, gallery infinite-scroll, CivitAI Air format — branch `batch/storage-gallery-air` (PR pending — gh CLI not available, create at https://github.com/charlie-236/illustrator/compare/batch/storage-gallery-air)
 
 ## Done
 
