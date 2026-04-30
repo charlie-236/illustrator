@@ -9,12 +9,12 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] AGENTS.md gh CLI update — see prompts/agents-md-gh-update.md
 - [ ] CheckpointConfig.baseModel UI + auto-populate — see prompts/checkpoint-basemodel.md
 - [ ] Textual inversion / embeddings full feature — see prompts/embeddings.md
 
 ## In flight
 
+- [~] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
 
 
 ## Done
