@@ -21,34 +21,18 @@ If invoked with a specific prompt path, execute that one.
 - All work merges via PR so the user can review the diff.
 - If you find yourself about to push to main, STOP and create a branch instead.
 
-## Creating the PR
+## Branch and commit hygiene
 
-After all acceptance criteria pass, push the branch and open the PR with `gh pr create`:
+After acceptance criteria pass, push the branch and create the PR:
 
-```bash
-git push -u origin batch/<short-name>
+    git push -u origin batch/<short-name>
+    gh pr create --base main --head batch/<short-name> \
+      --title "<batch title>" \
+      --body-file <path-to-pr-body.md>
 
-gh pr create \
-  --base main \
-  --head batch/<short-name> \
-  --title "<batch title>" \
-  --body "$(cat <<'PRBODY'
-## Summary
-<file-by-file list of changes>
+Write the PR body to a temporary file first (e.g. `/tmp/pr-body.md`) so multi-line markdown survives shell escaping. The body must follow the format described below.
 
-## Acceptance criteria walkthrough
-<every criterion from the prompt, marked ✓ or explained if not met>
-
-## Manual smoke tests
-<what you ran, or "smoke tests deferred to user" if runtime services are required>
-
-## Deviations from the prompt
-<anything done differently, with reasoning — omit section if none>
-PRBODY
-)"
-```
-
-The heredoc avoids shell-escaping issues with multi-line bodies. Use the PR number returned by `gh pr create` when updating BACKLOG.md.
+After PR creation, capture the PR URL from the gh output. Mark the BACKLOG.md item as `[~]` (in-flight) with the PR number. Commit and push that BACKLOG.md change to the same feature branch — gh will update the existing PR automatically.
 
 ## Build and validation gates (before EVERY commit)
 
@@ -72,13 +56,13 @@ The heredoc avoids shell-escaping issues with multi-line bodies. Use the PR numb
 - If a task touches `comfyws.ts`, `workflow.ts`, the WS hijack path, or the disk-avoidance assertion in `/api/generate/route.ts`, treat with extra care. These are load-bearing.
 - If the route's disk-avoidance assertion would need modification, STOP. That is architectural and requires explicit user direction.
 
-## PR description format
+## PR body format
 
 Every PR you create must include:
 
 1. **Summary** — file-by-file list of changes
-2. **Acceptance criteria walkthrough** — every criterion from the original prompt, marked ✓ or with explanation if not met
-3. **Manual smoke tests** — what you ran, or "smoke tests deferred to user" if they require runtime services
+2. **Acceptance criteria walkthrough** — every criterion from the prompt, marked ✓ or with explanation if not met
+3. **Manual smoke tests** — what you ran (or "smoke tests deferred to user" if they require runtime services unavailable in your sandbox)
 4. **Deviations from the prompt** — anything you did differently, with reasoning
 
 ## Backlog management
@@ -89,7 +73,8 @@ After merge, the user updates `[~]` to `[x]`. Do not modify BACKLOG.md to add `[
 
 ## Tools available
 
-- `git`, `node`, `npm`, `gh`, `curl`, `python`, `ssh` — full network access
+- `git`, `node`, `npm`, `curl`, `python`, `ssh` — full network access
+- `gh` is installed and authenticated. Use `gh pr create` after pushing the branch. Use `gh pr view <number>` to read existing PRs.
 - The A100 VM SSH key is at `/home/charlie/.ssh/a100-key.pem` (read .env for canonical path)
 - Database: PostgreSQL at the URL in `.env`
 - ComfyUI: tunneled to 127.0.0.1:8188; do not assume it's running
