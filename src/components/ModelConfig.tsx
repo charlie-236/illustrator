@@ -8,6 +8,7 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const CKPT_BLANK = {
   friendlyName: '',
+  baseModel: '',
   defaultWidth: 1024,
   defaultHeight: 1024,
   defaultPositivePrompt: '',
@@ -233,6 +234,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         setCkptForm(config
           ? {
               friendlyName: config.friendlyName,
+              baseModel: config.baseModel ?? '',
               defaultWidth: config.defaultWidth,
               defaultHeight: config.defaultHeight,
               defaultPositivePrompt: config.defaultPositivePrompt,
@@ -449,6 +451,20 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
                 placeholder="e.g. Realistic Vision v5"
                 className="input-base"
               />
+            </div>
+
+            <div>
+              <label className="label">Base Model</label>
+              <input
+                type="text"
+                value={ckptForm.baseModel ?? ''}
+                onChange={(e) => ckptField('baseModel', e.target.value)}
+                placeholder="Pony, SDXL 1.0, Illustrious, etc."
+                className="input-base min-h-12"
+              />
+              <p className="text-xs text-zinc-500 mt-1">
+                Used to match compatible LoRAs and to flag stylized checkpoints in the Reference panel.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
