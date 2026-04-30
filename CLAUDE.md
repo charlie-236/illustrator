@@ -262,12 +262,12 @@ src/
     workflow.ts         buildWorkflow()
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
-    civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM
-    civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel
-    registerModel.ts    DB upsert logic shared by /api/models/register and ingest
+    civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/
+    civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel; type now includes 'embedding'
+    registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; includes extractCategoryFromTags() heuristic
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
   types/
-    index.ts            GenerationParams, GenerationRecord, ModelInfo, SSEEvent,
+    index.ts            GenerationParams, GenerationRecord, ModelInfo (now includes embeddings[]), EmbeddingConfig, SSEEvent,
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants
   components/
     TabNav.tsx          sticky header with Studio / Gallery tabs
@@ -279,7 +279,7 @@ src/
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
     Gallery.tsx         3-col image grid, cursor-based infinite-scroll via IntersectionObserver, opens ImageModal
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields
-    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Add Models; saves trigger onSaved (increments modelConfigVersion)
+    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
 
@@ -351,7 +351,9 @@ When `referenceImages` is present in `GenerationParams`, `buildWorkflow()` injec
 
 ## Model ingestion workflow
 
-**Primary path: in-app UI.** Models tab → Add Models sub-tab. Single mode pastes one CivitAI URL or Air string (`urn:air:<base>:<type>:civitai:<id>@<id>`) and streams live progress; batch mode accepts up to 20 URLs/Air strings and processes them sequentially with per-row progress. When an Air string is pasted, the type radio (Checkpoint/LoRA) is auto-pre-filled from the Air `<type>` field. Backed by `/api/models/ingest` and `/api/models/ingest-batch`. Successful ingestion automatically refreshes Studio's ModelSelect via the `modelConfigVersion` mechanism — no manual refresh needed.
+**Primary path: in-app UI.** Models tab → Add Models sub-tab. Single mode pastes one CivitAI URL or Air string (`urn:air:<base>:<type>:civitai:<id>@<id>`) and streams live progress; batch mode accepts up to 20 URLs/Air strings and processes them sequentially with per-row progress. When an Air string is pasted, the type radio (Checkpoint/LoRA/Embedding) is auto-pre-filled from the Air `<type>` field. Backed by `/api/models/ingest` and `/api/models/ingest-batch`. Successful ingestion automatically refreshes Studio's ModelSelect via the `modelConfigVersion` mechanism — no manual refresh needed.
+
+**Embeddings (textual inversions):** Supported as a third type alongside checkpoints and LoRAs. Ingested via the same Add Models tab — select the "Embedding" radio (or paste an Air string with `type=embedding`). The file downloads to `/models/ComfyUI/models/embeddings/` on the VM. After ingestion, browse and edit metadata in the Models tab → Embeddings sub-tab. To use an embedding in a generation, type `embedding:<filename-without-extension>` directly in the positive or negative prompt in Studio. ComfyUI resolves embeddings by name at prompt-parse time — no workflow changes required. There is no Studio-side picker; users type the syntax manually. The Embeddings sub-tab provides a copy-to-clipboard button for each embedding's usage syntax.
 
 **Desktop fallback: `add_model.sh`** — batch processing from the desktop terminal using a queue-file format. Posts to `/api/models/register` directly, bypassing the SSE infrastructure. Use this for large batches from the desktop, or as a recovery path if the in-app UI breaks.
 
