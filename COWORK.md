@@ -4,15 +4,23 @@ You're working with the illustrator project. A few things are different from a d
 
 ## 1. You can invoke Claude Code
 
-The Claude Code CLI is available on this machine and can be driven from bash. Once you've called `request_cowork_directory` to mount both `~/claude-auth-bridge` and the project folder (`~/illustrator`), use this pattern:
+The Claude Code CLI is available on this machine and can be driven from bash. You must call `request_cowork_directory` to mount **all three** of these folders before Claude Code will work:
+
+1. `~/claude-auth-bridge` — stores Claude auth tokens
+2. `~/.local/share/claude` — contains the Claude Code binary (versions/2.1.123)
+3. The project folder (e.g. `~/illustrator`)
+
+Once all three are mounted, use this pattern:
 
     cd <project-mount-path> && \
     HOME=<claude-auth-bridge-mount-path> \
-    /home/charlie/.local/share/claude/versions/2.1.123 \
+    <claude-mount-path>/versions/2.1.123 \
     -p "YOUR PROMPT" \
     --dangerously-skip-permissions 2>&1
 
-The mount paths will use your session-specific name (not `trusting-zealous-hopper` — that was a different session). Use whatever `request_cowork_directory` returns.
+The mount paths will use your session-specific name. Use whatever `request_cowork_directory` returns for each folder.
+
+**Important:** If `~/.local/share/claude` is not mounted, the binary will not be found and you must not do the coding work yourself — stop and request the directory first.
 
 ## 2. The workflow this repo uses
 

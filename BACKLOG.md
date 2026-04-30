@@ -13,13 +13,11 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
-- [~] CheckpointConfig.baseModel UI + auto-populate — `batch/checkpoint-basemodel` (PR #4)
-
-
 
 
 ## Done
 
 - [x] Batch P: image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
 - [x] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
-- [~] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
+- [x] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
+- [x] CheckpointConfig.baseModel UI + auto-populate — `batch/checkpoint-basemodel` (PR #4)
