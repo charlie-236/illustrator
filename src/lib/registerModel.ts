@@ -73,7 +73,7 @@ export async function registerModel(
           description,
           url,
         },
-        update: { friendlyName, baseModel, description, url },
+        update: { friendlyName, ...(baseModel ? { baseModel } : {}), description, url },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else {
