@@ -14,51 +14,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  function bad(message: string) {
-    return NextResponse.json({ error: message }, { status: 400 });
-  }
-
-  if (typeof params.checkpoint !== 'string' || params.checkpoint.length === 0) {
-    return bad('checkpoint must be a non-empty string');
-  }
-  if (!Array.isArray(params.loras)) {
-    return bad('loras must be an array');
-  }
-  for (const lora of params.loras) {
-    if (typeof lora?.name !== 'string' || lora.name.length === 0) {
-      return bad('each lora must have a non-empty name');
-    }
-    if (typeof lora.weight !== 'number' || !Number.isFinite(lora.weight)) {
-      return bad('each lora must have a numeric weight');
-    }
-  }
-  if (typeof params.positivePrompt !== 'string') return bad('positivePrompt must be a string');
-  if (typeof params.negativePrompt !== 'string') return bad('negativePrompt must be a string');
-  if (!Number.isInteger(params.width) || params.width < 64 || params.width > 4096) {
-    return bad('width must be an integer between 64 and 4096');
-  }
-  if (!Number.isInteger(params.height) || params.height < 64 || params.height > 4096) {
-    return bad('height must be an integer between 64 and 4096');
-  }
-  if (!Number.isInteger(params.steps) || params.steps < 1 || params.steps > 200) {
-    return bad('steps must be an integer between 1 and 200');
-  }
-  if (typeof params.cfg !== 'number' || !Number.isFinite(params.cfg) || params.cfg < 0 || params.cfg > 30) {
-    return bad('cfg must be a number between 0 and 30');
-  }
-  if (typeof params.seed !== 'number' || !Number.isInteger(params.seed)) {
-    return bad('seed must be an integer (use -1 for random)');
-  }
-  if (typeof params.sampler !== 'string' || params.sampler.length === 0) {
-    return bad('sampler must be a non-empty string');
-  }
-  if (typeof params.scheduler !== 'string' || params.scheduler.length === 0) {
-    return bad('scheduler must be a non-empty string');
-  }
-  if (!Number.isInteger(params.batchSize) || params.batchSize < 1 || params.batchSize > 8) {
-    return bad('batchSize must be an integer between 1 and 8');
-  }
-
   // Validate mask payload
   if (params.mask) {
     if (typeof params.mask !== 'string' || params.mask.length === 0) {
