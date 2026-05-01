@@ -45,6 +45,24 @@ After PR creation, capture the PR URL from the gh output. Mark the BACKLOG.md it
 - `grep -rn "class_type.*['\"]LoadImage['\"]" src/` must return only ETN_LoadImageBase64 (and ETN_LoadMaskBase64 for inpainting paths).
 - These are the disk-avoidance constraints. A regression here is a load-bearing failure.
 
+## Before any commit: are you on a batch/ branch?
+
+Your FIRST action after reading the prompt and BEFORE any code change is:
+
+    git checkout -b batch/<short-name>
+
+If you're about to commit and `git rev-parse --abbrev-ref HEAD` returns
+anything that doesn't start with `batch/`, STOP. Do not commit. Do not
+push. Reset and branch first:
+
+    git reset --soft HEAD              # keep your work staged if any
+    git checkout -b batch/<short-name>
+    git commit -m "..."
+
+Pushing to main directly is a CRITICAL FAILURE. The base branch the
+script checked out (main, or a previous batch/) is the BASE for your
+PR — never the destination of your commits.
+
 ## Operational boundaries — DO NOT
 
 - Do not run `pm2` commands. PM2 management is the user's manual responsibility.
