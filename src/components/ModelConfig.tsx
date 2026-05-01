@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CheckpointConfig, EmbeddingConfig, LoraConfig, ModelInfo } from '@/types';
+import type { CheckpointConfig, EmbeddingConfig, LoraConfig } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
 import { useModelLists } from '@/lib/useModelLists';
 
@@ -144,7 +144,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [tab, setTab] = useState<'checkpoints' | 'loras' | 'embeddings' | 'add'>('checkpoints');
 
   const { data: lists, loading: loadingModels, refresh: refreshLists } = useModelLists();
-  const { checkpoints, loras, checkpointNames: ckptNames, loraNames } = lists;
+  const {
+    checkpoints,
+    loras,
+    embeddings,
+    checkpointNames: ckptNames,
+    loraNames,
+    embeddingNames,
+  } = lists;
 
   // Sheet open state
   const [ckptBrowserOpen, setCkptBrowserOpen] = useState(false);
@@ -165,8 +172,6 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [loraStatus, setLoraStatus] = useState<SaveStatus>('idle');
 
   // ── Embedding form state ───────────────────────────────────────────
-  const [embeddings, setEmbeddings] = useState<string[]>([]);
-  const [embeddingNames, setEmbeddingNames] = useState<Record<string, string>>({});
   const [embeddingBrowserOpen, setEmbeddingBrowserOpen] = useState(false);
   const [selectedEmbedding, setSelectedEmbedding] = useState('');
   const [embeddingConfigId, setEmbeddingConfigId] = useState<string | null>(null);
@@ -188,22 +193,6 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   useEffect(() => () => {
     if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
   }, []);
-
-  const refreshEmbeddings = useCallback(() => {
-    Promise.all([
-      fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
-      fetch('/api/embedding-config').then((r) => r.json() as Promise<EmbeddingConfig[]>).catch(() => []),
-    ]).then(([modelData, embeddingConfigs]) => {
-      setEmbeddings(modelData.embeddings ?? []);
-      const embeddingMap: Record<string, string> = {};
-      for (const e of embeddingConfigs) {
-        if (e.friendlyName) embeddingMap[e.embeddingName] = e.friendlyName;
-      }
-      setEmbeddingNames(embeddingMap);
-    });
-  }, []);
-
-  useEffect(() => { refreshEmbeddings(); }, [refreshEmbeddings]);
 
   // Auto-pick initial selections when data arrives
   useEffect(() => {
@@ -351,19 +340,23 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         body: JSON.stringify({ embeddingName: selectedEmbedding, ...embSaveFields }),
       });
       setEmbeddingStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) { refreshEmbeddings(); onSaved?.(); }
+      if (res.ok) { refreshLists(); onSaved?.(); }
     } catch {
       setEmbeddingStatus('error');
     }
   }
 
-  async function deleteCurrentModel(type: 'checkpoint' | 'lora') {
-    const filename = type === 'checkpoint' ? selectedCheckpoint : selectedLora;
+  async function deleteCurrentModel(type: 'checkpoint' | 'lora' | 'embedding') {
+    const filename =
+      type === 'checkpoint' ? selectedCheckpoint :
+      type === 'lora' ? selectedLora :
+      selectedEmbedding;
     if (!filename) return;
 
-    const friendlyName = type === 'checkpoint'
-      ? (ckptNames[filename] || filename)
-      : (loraNames[filename] || filename);
+    const friendlyName =
+      type === 'checkpoint' ? (ckptNames[filename] || filename) :
+      type === 'lora' ? (loraNames[filename] || filename) :
+      (embeddingNames[filename] || filename);
 
     const confirmed = window.confirm(
       `Are you sure you want to permanently delete "${friendlyName}"?\n\nThis will remove the file from the server and cannot be undone.`,
@@ -386,12 +379,15 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         setSelectedCheckpoint('');
         setCkptConfigId(null);
         setCkptForm({ ...CKPT_BLANK });
-      } else {
+      } else if (type === 'lora') {
         setSelectedLora('');
         setLoraConfigId(null);
         setLoraForm({ ...LORA_BLANK });
+      } else {
+        setSelectedEmbedding('');
+        setEmbeddingConfigId(null);
+        setEmbeddingForm({ ...EMBEDDING_BLANK });
       }
-      // Re-sync with ComfyUI so the list is accurate
       refreshLists();
       onSaved?.();
     } catch (err) {
@@ -425,7 +421,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
           <h2 className="text-base font-semibold text-zinc-200">Model Settings</h2>
           <button
             type="button"
-            onClick={() => { refreshLists(); refreshEmbeddings(); }}
+            onClick={() => refreshLists()}
             disabled={loadingModels}
             className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
             aria-label="Refresh model lists"
@@ -605,7 +601,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               onClick={() => setEmbeddingBrowserOpen(true)}
             />
             {!loadingModels && embeddings.length === 0 && (
-              <p className="text-xs text-zinc-400 mt-2">No embeddings ingested yet. Use Add Models to ingest one.</p>
+              <p className="text-xs text-zinc-400 mt-2">No embeddings found on the VM. Use Add Models to ingest one.</p>
             )}
           </div>
 
@@ -732,6 +728,13 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               )}
 
               <SaveRow status={embeddingStatus} onSave={saveEmbedding} disabled={!selectedEmbedding} />
+
+              <DeleteRow
+                modelName={embeddingNames[selectedEmbedding] || selectedEmbedding}
+                deleting={deletingModel}
+                error={deleteError}
+                onDelete={() => deleteCurrentModel('embedding')}
+              />
             </div>
           )}
         </>
@@ -739,7 +742,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
       {/* ── Add Models tab ──────────────────────────────────────────── */}
       {tab === 'add' && (
-        <IngestPanel onIngestComplete={() => { onSaved?.(); refreshLists(); refreshEmbeddings(); }} />
+        <IngestPanel onIngestComplete={() => { onSaved?.(); refreshLists(); }} />
       )}
 
       {/* ── LoRAs tab ────────────────────────────────────────────────── */}
