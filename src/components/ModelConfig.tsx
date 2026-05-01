@@ -358,13 +358,12 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   }
 
   async function deleteCurrentModel(type: 'checkpoint' | 'lora') {
-    const configId = type === 'checkpoint' ? ckptConfigId : loraConfigId;
-    if (!configId) return;
+    const filename = type === 'checkpoint' ? selectedCheckpoint : selectedLora;
+    if (!filename) return;
 
-    const rawName = type === 'checkpoint' ? selectedCheckpoint : selectedLora;
     const friendlyName = type === 'checkpoint'
-      ? (ckptNames[rawName] || rawName)
-      : (loraNames[rawName] || rawName);
+      ? (ckptNames[filename] || filename)
+      : (loraNames[filename] || filename);
 
     const confirmed = window.confirm(
       `Are you sure you want to permanently delete "${friendlyName}"?\n\nThis will remove the file from the server and cannot be undone.`,
@@ -374,7 +373,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     clearDeleteError();
     setDeletingModel(true);
     try {
-      const res = await fetch(`/api/models/${configId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/models/${type}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
       const data = await res.json() as { ok?: boolean; error?: string };
       if (!res.ok) {
         const msg = data.error ?? `Delete failed (${res.status})`;
@@ -583,13 +582,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
             <SaveRow status={ckptStatus} onSave={saveCheckpoint} disabled={!selectedCheckpoint} />
 
-            <DeleteRow
-              configId={ckptConfigId}
-              modelName={ckptNames[selectedCheckpoint] || selectedCheckpoint}
-              deleting={deletingModel}
-              error={deleteError}
-              onDelete={() => deleteCurrentModel('checkpoint')}
-            />
+            {selectedCheckpoint && (
+              <DeleteRow
+                modelName={ckptNames[selectedCheckpoint] || selectedCheckpoint}
+                deleting={deletingModel}
+                error={deleteError}
+                onDelete={() => deleteCurrentModel('checkpoint')}
+              />
+            )}
           </div>
         </>
       )}
@@ -843,13 +843,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
             <SaveRow status={loraStatus} onSave={saveLora} disabled={!selectedLora} />
 
-            <DeleteRow
-              configId={loraConfigId}
-              modelName={loraNames[selectedLora] || selectedLora}
-              deleting={deletingModel}
-              error={deleteError}
-              onDelete={() => deleteCurrentModel('lora')}
-            />
+            {selectedLora && (
+              <DeleteRow
+                modelName={loraNames[selectedLora] || selectedLora}
+                deleting={deletingModel}
+                error={deleteError}
+                onDelete={() => deleteCurrentModel('lora')}
+              />
+            )}
           </div>
         </>
       )}
@@ -876,15 +877,13 @@ function SaveRow({ status, onSave, disabled }: { status: SaveStatus; onSave: () 
 }
 
 interface DeleteRowProps {
-  configId: string | null;
   modelName: string;
   deleting: boolean;
   error: string | null;
   onDelete: () => void;
 }
 
-function DeleteRow({ configId, modelName, deleting, error, onDelete }: DeleteRowProps) {
-  if (!configId) return null;
+function DeleteRow({ modelName, deleting, error, onDelete }: DeleteRowProps) {
   return (
     <div className="pt-2 border-t border-zinc-800/60 space-y-2">
       <button

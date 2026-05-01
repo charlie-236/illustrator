@@ -235,6 +235,9 @@ Phase events: `metadata`, `download`, `validate`, `register`, `done`, `error`. E
 ### `POST /api/models/ingest-batch`
 Same as `/ingest` but accepts `{ items: [...] }` with up to 20 items. Each item extends the single-item body with a caller-supplied `clientId` string. Processes items sequentially and emits `item` events tagged with `clientId`, plus a final `summary` event with `{ succeeded, failed, total }`.
 
+### `DELETE /api/models/[type]/[filename]`
+Removes a checkpoint, LoRA, or embedding by filename. `type` is `'checkpoint' | 'lora' | 'embedding'`; filename is the on-disk filename including extension. SSH-deletes the file from the A100 VM via `rm -f` (idempotent) and removes any matching DB row via Prisma `deleteMany` (also idempotent). Used by ModelConfig's delete buttons. Works whether or not a DB row exists for the filename, so orphan files are deletable from the UI.
+
 ## Source layout
 
 ```
