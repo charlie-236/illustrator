@@ -4,6 +4,7 @@ import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import type { Prisma } from '@prisma/client';
 import type { GenerationParams } from '@/types';
+import { prisma } from './prisma';
 
 interface Job {
   promptId: string;
@@ -302,7 +303,6 @@ class ComfyWSManager {
       const dir = IMAGE_OUTPUT_DIR;
       await mkdir(dir, { recursive: true });
 
-      const { prisma } = await import('./prisma');
       const slug = slugifyPrompt(params.positivePrompt);
       const timestamp = Date.now();
       const isBatch = imageBuffers.length > 1;
