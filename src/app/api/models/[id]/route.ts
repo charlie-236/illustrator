@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
 import { prisma } from '@/lib/prisma';
-import { revalidatePath } from 'next/cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -69,11 +68,6 @@ export async function DELETE(
   } catch (err) {
     return NextResponse.json({ error: `DB delete failed: ${String(err)}` }, { status: 500 });
   }
-
-  // Step 4: Bust server-side route cache
-  revalidatePath('/api/models');
-  revalidatePath('/api/checkpoint-config');
-  revalidatePath('/api/lora-config');
 
   return NextResponse.json({ ok: true });
 }
