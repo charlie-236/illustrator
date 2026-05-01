@@ -8,12 +8,21 @@ const VM_IP = process.env.A100_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
 
 type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher';
-type ServiceStatus = 'active' | 'inactive' | 'unknown';
+type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
 
-const SERVICE_UNITS: Record<ServiceName, string> = {
-  'comfy-illustrator': 'comfy-illustrator.service',
-  'aphrodite-writer': 'aphrodite-writer',
-  'aphrodite-illustrator-polisher': 'aphrodite-illustrator-polisher',
+const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = {
+  'comfy-illustrator': {
+    unit: 'comfy-illustrator.service',
+    probeUrl: 'http://127.0.0.1:8188/system_stats',
+  },
+  'aphrodite-writer': {
+    unit: 'aphrodite-writer',
+    probeUrl: 'http://127.0.0.1:21434/v1/models',
+  },
+  'aphrodite-illustrator-polisher': {
+    unit: 'aphrodite-illustrator-polisher',
+    probeUrl: 'http://127.0.0.1:11438/v1/models',
+  },
 };
 
 const SERVICES: ServiceName[] = [
@@ -21,6 +30,40 @@ const SERVICES: ServiceName[] = [
   'aphrodite-writer',
   'aphrodite-illustrator-polisher',
 ];
+
+async function probe(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function runSystemctlChecks(ssh: NodeSSH): Promise<Record<ServiceName, number>> {
+  const cmd = SERVICES
+    .map((name) => `systemctl is-active ${SERVICE_CONFIG[name].unit} >/dev/null 2>&1; echo "${name}:$?"`)
+    .join('; ');
+
+  const result = await ssh.execCommand(cmd);
+
+  const exitCodes: Record<ServiceName, number> = {
+    'comfy-illustrator': 1,
+    'aphrodite-writer': 1,
+    'aphrodite-illustrator-polisher': 1,
+  };
+
+  for (const line of result.stdout.split('\n')) {
+    for (const name of SERVICES) {
+      if (line.startsWith(`${name}:`)) {
+        const code = parseInt(line.slice(name.length + 1).trim(), 10);
+        exitCodes[name] = isNaN(code) ? 1 : code;
+      }
+    }
+  }
+
+  return exitCodes;
+}
 
 export async function GET() {
   if (!SSH_KEY_PATH) {
@@ -37,12 +80,10 @@ export async function GET() {
   try {
     await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });
 
-    // Run all checks in a single SSH round-trip; each line emits "name:exitcode"
-    const cmd = SERVICES
-      .map((name) => `systemctl is-active ${SERVICE_UNITS[name]} >/dev/null 2>&1; echo "${name}:$?"`)
-      .join('; ');
-
-    const result = await ssh.execCommand(cmd);
+    const [systemdResults, probeResults] = await Promise.all([
+      runSystemctlChecks(ssh),
+      Promise.all(SERVICES.map((s) => probe(SERVICE_CONFIG[s].probeUrl))),
+    ]);
 
     const statuses: Record<ServiceName, ServiceStatus> = {
       'comfy-illustrator': 'unknown',
@@ -50,14 +91,13 @@ export async function GET() {
       'aphrodite-illustrator-polisher': 'unknown',
     };
 
-    for (const line of result.stdout.split('\n')) {
-      for (const name of SERVICES) {
-        if (line.startsWith(`${name}:`)) {
-          const code = line.slice(name.length + 1).trim();
-          statuses[name] = code === '0' ? 'active' : 'inactive';
-        }
-      }
-    }
+    SERVICES.forEach((name, i) => {
+      const systemdActive = systemdResults[name] === 0;
+      const probeOk = probeResults[i];
+      if (!systemdActive) statuses[name] = 'inactive';
+      else if (probeOk) statuses[name] = 'ready';
+      else statuses[name] = 'loading';
+    });
 
     return Response.json({ statuses });
   } catch (err) {
