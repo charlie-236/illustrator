@@ -9,7 +9,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — see prompts/model-delete-by-filename.md
+- [~] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — `batch/model-delete-by-filename` (PR #10)
 - [ ] Source embeddings list from the VM (orphan visibility + delete) — see prompts/embeddings-vm-source.md
 - [ ] Real-readiness status probe for Admin tab services — see prompts/service-readiness-probe.md
 
