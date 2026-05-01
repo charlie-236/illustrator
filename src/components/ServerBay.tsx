@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 
 type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher';
 type ActionState = 'idle' | 'pending' | 'sent' | 'error';
-type ServiceStatus = 'active' | 'inactive' | 'unknown';
+type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
 
 const SERVICE_LABELS: Record<ServiceName, string> = {
   'comfy-illustrator': 'Image Generation',
@@ -336,8 +336,10 @@ function ServiceRow({
 
 function StatusDot({ status }: { status: ServiceStatus }) {
   const color =
-    status === 'active'
+    status === 'ready'
       ? 'bg-emerald-400'
+      : status === 'loading'
+      ? 'bg-amber-400 animate-pulse'
       : status === 'inactive'
       ? 'bg-red-500'
       : 'bg-zinc-600';

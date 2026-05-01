@@ -195,11 +195,25 @@ Service name → systemctl unit mapping:
 | `aphrodite-illustrator-polisher` | `aphrodite-illustrator-polisher` |
 
 ### `GET /api/services/status`
-SSH-based service status check. Opens a single SSH session, runs `systemctl is-active {unit}` for all three services in one command, and returns:
+Combines two checks per service, run in parallel: (1) SSH `systemctl is-active <unit>` (process running) and (2) HTTP probe of the service's endpoint via the localhost SSH tunnel (process actually answering). Returns:
+
 ```ts
-{ statuses: Record<ServiceName, 'active' | 'inactive' | 'unknown'> }
+{ statuses: Record<ServiceName, 'ready' | 'loading' | 'inactive' | 'unknown'> }
 ```
-Exit code `0` from `systemctl is-active` → `active`; anything else → `inactive`. If SSH fails entirely, returns HTTP 500. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher'`.
+
+- `inactive` — systemd reports the unit isn't active.
+- `loading` — systemd active, HTTP probe failed or timed out (5 s). Typically means the model is still loading into VRAM.
+- `ready` — systemd active and the probe returned 2xx.
+- `unknown` — SSH itself failed; HTTP results aren't meaningful in that case (route returns HTTP 500).
+
+Probe endpoints:
+| Service | Probe URL |
+|---|---|
+| `comfy-illustrator` | `http://127.0.0.1:8188/system_stats` |
+| `aphrodite-writer` | `http://127.0.0.1:21434/v1/models` |
+| `aphrodite-illustrator-polisher` | `http://127.0.0.1:11438/v1/models` |
+
+All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by `/api/generate`. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher'`.
 
 ### `GET /api/gallery?page=1&limit=20`
 Paginated. `limit` capped at 50. Returns:
@@ -256,7 +270,7 @@ src/
       models/ingest/         POST — SSE single-model ingestion
       models/ingest-batch/   POST — SSE batch ingestion
       services/control/      POST — SSH sudo systemctl start/stop on Core VM
-      services/status/       GET  — SSH systemctl is-active for all four services
+      services/status/       GET  — SSH systemctl + HTTP probe for all three services
       generate/polish/route.ts     POST — LLM prompt expansion with frozen-token validation
       generate/polish/prompt.ts    POLISH_SYSTEM_PROMPT, POLISH_SAMPLING, STATIC_NEGATIVE constants
       generate/polish/validate.ts  extractFrozenTokens(), validatePreservation()
