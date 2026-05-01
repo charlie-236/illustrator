@@ -47,7 +47,15 @@ Where `<BASE_BRANCH>` is the value the script gave you in the prompt prefix. NOT
 
 Write the PR body to a temporary file first (e.g. `/tmp/pr-body.md`) so multi-line markdown survives shell escaping. The body must follow the format in the "PR body format" section below.
 
-After PR creation, capture the PR URL from the gh output. Mark the BACKLOG.md item as `[~]` (in-flight) with the PR number. Commit and push that BACKLOG.md change to the same feature branch — gh will update the existing PR automatically.
+After PR creation, capture the PR URL from the gh output. Then update BACKLOG.md on the SAME feature branch:
+
+1. Find the line for the item you just completed (the line that referenced your prompt file).
+2. Change [ ] to [~].
+3. Replace the — see prompts/<name>.md suffix with — `batch/<short-name>` (PR #N).
+4. Commit with message: Mark <short-name> in-flight (PR #N).
+5. Push to the same feature branch. The PR updates automatically.
+
+The batch is NOT complete until the BACKLOG.md commit is pushed. The wrapper script will refuse to start the next batch if BACKLOG.md still shows [ ] for the item you just ran. Skipping this step is a workflow failure, not a "nice to have."
 
 ## Build and validation gates (before EVERY commit)
 
@@ -86,9 +94,7 @@ Every PR you create must include:
 
 ## Backlog management
 
-After successfully creating the PR, update BACKLOG.md: change `[ ]` to `[~]` for the in-flight item (it's not done until the user merges). Add the PR number next to it. Commit and push that change to the same feature branch.
-
-After merge, the user updates `[~]` to `[x]`. Do not modify BACKLOG.md to add `[x]` yourself.
+See "Branch and commit hygiene" above for the BACKLOG.md update step. After merge, the user updates [~] to [x]. Do not modify BACKLOG.md to add [x] yourself.
 
 ## Tools available
 
