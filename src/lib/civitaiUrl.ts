@@ -4,7 +4,7 @@ export interface ParsedCivitaiInput {
   /** Canonical URL in the form https://civitai.com/models/<parentId>?modelVersionId=<versionId> */
   canonicalUrl: string;
   /** Type from Air string, if present. Otherwise null. */
-  type: 'checkpoint' | 'lora' | null;
+  type: 'checkpoint' | 'lora' | 'embedding' | null;
   /** Base model string from Air string (e.g. "sdxl", "sd1"). Otherwise null. */
   baseModel: string | null;
   /** Original hostname when parsed from a URL (for sourceHostname forwarding). */
@@ -38,7 +38,8 @@ function parseAirString(input: string): ParsedCivitaiInput | { error: string } {
     return { error: 'Air string contains invalid IDs' };
   }
 
-  const normalizedType = type === 'checkpoint' || type === 'lora' ? type : null;
+  const normalizedType =
+    type === 'checkpoint' || type === 'lora' || type === 'embedding' ? type : null;
 
   return {
     parentUrlId,

@@ -80,9 +80,21 @@ export interface LoraConfig {
   url?: string | null;
 }
 
+export interface EmbeddingConfig {
+  id: string;
+  embeddingName: string;
+  friendlyName: string;
+  triggerWords: string;
+  baseModel: string;
+  category?: string | null;
+  description?: string | null;
+  url?: string | null;
+}
+
 export interface ModelInfo {
   checkpoints: string[];
   loras: string[];
+  embeddings: string[];
 }
 
 export type SSEEvent =

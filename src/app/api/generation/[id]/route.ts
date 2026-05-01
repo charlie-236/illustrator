@@ -47,17 +47,32 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
+  const IMAGE_OUTPUT_DIR = process.env.IMAGE_OUTPUT_DIR;
+  if (!IMAGE_OUTPUT_DIR) {
+    return NextResponse.json(
+      { error: 'IMAGE_OUTPUT_DIR not configured' },
+      { status: 500 },
+    );
+  }
+
   try {
     const g = await prisma.generation.findUnique({ where: { id } });
     if (!g) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    // Extract filename — handle both /api/images/<filename> and legacy /generations/<filename>
     const filename = g.filePath
       .replace('/api/images/', '')
       .replace('/generations/', '');
     if (filename && !filename.includes('..') && !filename.includes('/')) {
-      const filePath = path.join(process.cwd(), 'public', 'generations', filename);
-      await unlink(filePath).catch(() => { /* file already gone — that's fine */ });
+      const filePath = path.join(IMAGE_OUTPUT_DIR, filename);
+      try {
+        await unlink(filePath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') {
+          console.error(`[generation/delete] unlink failed for ${filePath}:`, err);
+        }
+      }
     }
 
     await prisma.generation.delete({ where: { id } });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CheckpointConfig, LoraConfig, ModelInfo } from '@/types';
+import type { CheckpointConfig, EmbeddingConfig, LoraConfig, ModelInfo } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -26,6 +26,19 @@ const LORA_BLANK = {
 };
 
 const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3', 'Big Love'];
+
+const EMBEDDING_BLANK = {
+  friendlyName: '',
+  triggerWords: '',
+  baseModel: '',
+  category: '',
+  description: '',
+  url: '' as string | null | undefined,
+};
+
+function stripExtension(name: string): string {
+  return name.replace(/\.(safetensors|pt|bin|ckpt)$/i, '');
+}
 
 // ── Shared bottom-sheet picker ────────────────────────────────────────────────
 
@@ -127,7 +140,7 @@ function SelectorButton({ label, displayName, disabled, onClick }: SelectorButto
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
-  const [tab, setTab] = useState<'checkpoints' | 'loras' | 'add'>('checkpoints');
+  const [tab, setTab] = useState<'checkpoints' | 'loras' | 'embeddings' | 'add'>('checkpoints');
 
   const [checkpoints, setCheckpoints] = useState<string[]>([]);
   const [loras, setLoras] = useState<string[]>([]);
@@ -155,6 +168,17 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [loadingLoraConfig, setLoadingLoraConfig] = useState(false);
   const [loraStatus, setLoraStatus] = useState<SaveStatus>('idle');
 
+  // ── Embedding form state ───────────────────────────────────────────
+  const [embeddings, setEmbeddings] = useState<string[]>([]);
+  const [embeddingNames, setEmbeddingNames] = useState<Record<string, string>>({});
+  const [embeddingBrowserOpen, setEmbeddingBrowserOpen] = useState(false);
+  const [selectedEmbedding, setSelectedEmbedding] = useState('');
+  const [embeddingConfigId, setEmbeddingConfigId] = useState<string | null>(null);
+  const [embeddingForm, setEmbeddingForm] = useState({ ...EMBEDDING_BLANK });
+  const [loadingEmbeddingConfig, setLoadingEmbeddingConfig] = useState(false);
+  const [embeddingStatus, setEmbeddingStatus] = useState<SaveStatus>('idle');
+  const [copiedEmbedding, setCopiedEmbedding] = useState(false);
+
   // ── Delete state ───────────────────────────────────────────────────
   const [deletingModel, setDeletingModel] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -175,12 +199,15 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
       fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
       fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
       fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
+      fetch('/api/embedding-config').then((r) => r.json() as Promise<EmbeddingConfig[]>).catch(() => []),
     ])
-      .then(([modelData, ckptConfigs, loraConfigs]) => {
+      .then(([modelData, ckptConfigs, loraConfigs, embeddingConfigs]) => {
         setCheckpoints(modelData.checkpoints);
         setLoras(modelData.loras);
+        setEmbeddings(modelData.embeddings ?? []);
         setSelectedCheckpoint((prev) => prev || modelData.checkpoints[0] || '');
         setSelectedLora((prev) => prev || modelData.loras[0] || '');
+        setSelectedEmbedding((prev) => prev || modelData.embeddings?.[0] || '');
 
         const ckptMap: Record<string, string> = {};
         for (const c of ckptConfigs) {
@@ -193,6 +220,12 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
           if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
         }
         setLoraNames(loraMap);
+
+        const embeddingMap: Record<string, string> = {};
+        for (const e of embeddingConfigs) {
+          if (e.friendlyName) embeddingMap[e.embeddingName] = e.friendlyName;
+        }
+        setEmbeddingNames(embeddingMap);
       })
       .finally(() => setLoadingModels(false));
   }, []);
@@ -205,7 +238,8 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     Promise.all([
       fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
       fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
-    ]).then(([ckptConfigs, loraConfigs]) => {
+      fetch('/api/embedding-config').then((r) => r.json() as Promise<EmbeddingConfig[]>).catch(() => []),
+    ]).then(([ckptConfigs, loraConfigs, embeddingConfigs]) => {
       const ckptMap: Record<string, string> = {};
       for (const c of ckptConfigs) {
         if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
@@ -217,6 +251,12 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
       }
       setLoraNames(loraMap);
+
+      const embeddingMap: Record<string, string> = {};
+      for (const e of embeddingConfigs) {
+        if (e.friendlyName) embeddingMap[e.embeddingName] = e.friendlyName;
+      }
+      setEmbeddingNames(embeddingMap);
     });
   }
 
@@ -275,6 +315,33 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLora]);
 
+  // Load embedding config when selection changes
+  useEffect(() => {
+    if (!selectedEmbedding) return;
+    setLoadingEmbeddingConfig(true);
+    setEmbeddingStatus('idle');
+    clearDeleteError();
+
+    fetch(`/api/embedding-config?name=${encodeURIComponent(selectedEmbedding)}`)
+      .then((r) => (r.status === 404 ? null : r.json() as Promise<EmbeddingConfig>))
+      .then((config) => {
+        setEmbeddingConfigId(config?.id ?? null);
+        setEmbeddingForm(config
+          ? {
+              friendlyName: config.friendlyName,
+              triggerWords: config.triggerWords,
+              baseModel: config.baseModel,
+              category: config.category ?? '',
+              description: config.description ?? '',
+              url: config.url,
+            }
+          : { ...EMBEDDING_BLANK });
+      })
+      .catch(() => { setEmbeddingConfigId(null); setEmbeddingForm({ ...EMBEDDING_BLANK }); })
+      .finally(() => setLoadingEmbeddingConfig(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEmbedding]);
+
   async function saveCheckpoint() {
     if (!selectedCheckpoint) return;
     setCkptStatus('saving');
@@ -306,6 +373,23 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
       if (res.ok) { refreshNames(); onSaved?.(); }
     } catch {
       setLoraStatus('error');
+    }
+  }
+
+  async function saveEmbedding() {
+    if (!selectedEmbedding) return;
+    setEmbeddingStatus('saving');
+    try {
+      const { url: _embUrl, ...embSaveFields } = embeddingForm;
+      const res = await fetch('/api/embedding-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ embeddingName: selectedEmbedding, ...embSaveFields }),
+      });
+      setEmbeddingStatus(res.ok ? 'saved' : 'error');
+      if (res.ok) { refreshNames(); onSaved?.(); }
+    } catch {
+      setEmbeddingStatus('error');
     }
   }
 
@@ -371,6 +455,11 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     setLoraStatus('idle');
   }
 
+  function embeddingField<K extends keyof typeof embeddingForm>(key: K, value: (typeof embeddingForm)[K]) {
+    setEmbeddingForm((prev) => ({ ...prev, [key]: value }));
+    setEmbeddingStatus('idle');
+  }
+
   return (
     <div className="p-4 space-y-4">
       <div className="card space-y-1">
@@ -395,14 +484,14 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
       {/* Tab switcher */}
       <div className="flex gap-1 p-1 bg-zinc-800/60 rounded-xl">
-        {(['checkpoints', 'loras', 'add'] as const).map((t) => (
+        {(['checkpoints', 'loras', 'embeddings', 'add'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`flex-1 min-h-12 rounded-lg text-sm font-medium transition-colors
               ${tab === t ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
           >
-            {t === 'checkpoints' ? 'Checkpoints' : t === 'loras' ? 'LoRAs' : 'Add Models'}
+            {t === 'checkpoints' ? 'Checkpoints' : t === 'loras' ? 'LoRAs' : t === 'embeddings' ? 'Embeddings' : 'Add Models'}
           </button>
         ))}
       </div>
@@ -543,6 +632,149 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               onDelete={() => deleteCurrentModel('checkpoint')}
             />
           </div>
+        </>
+      )}
+
+      {/* ── Embeddings tab ──────────────────────────────────────────── */}
+      {tab === 'embeddings' && (
+        <>
+          <div className="card">
+            <SelectorButton
+              label="Embedding"
+              displayName={loadingModels ? '' : (embeddingNames[selectedEmbedding] ?? selectedEmbedding)}
+              disabled={loadingModels || embeddings.length === 0}
+              onClick={() => setEmbeddingBrowserOpen(true)}
+            />
+            {!loadingModels && embeddings.length === 0 && (
+              <p className="text-xs text-zinc-400 mt-2">No embeddings ingested yet. Use Add Models to ingest one.</p>
+            )}
+          </div>
+
+          {embeddingBrowserOpen && (
+            <ModelSheet
+              title="Select Embedding"
+              items={embeddings}
+              selected={selectedEmbedding}
+              nameMap={embeddingNames}
+              onSelect={setSelectedEmbedding}
+              onClose={() => setEmbeddingBrowserOpen(false)}
+              emptyMessage="No embeddings available"
+            />
+          )}
+
+          {selectedEmbedding && (
+            <div className={`card space-y-4 transition-opacity ${loadingEmbeddingConfig ? 'opacity-40 pointer-events-none' : ''}`}>
+              <div>
+                <label className="label">File</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={selectedEmbedding}
+                  className="input-base min-h-12 bg-zinc-800/40 text-zinc-400 font-mono text-xs cursor-default"
+                />
+              </div>
+
+              <div>
+                <label className="label">Usage</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 font-mono text-sm select-all">
+                    embedding:{stripExtension(selectedEmbedding)}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`embedding:${stripExtension(selectedEmbedding)}`);
+                      setCopiedEmbedding(true);
+                      setTimeout(() => setCopiedEmbedding(false), 1500);
+                    }}
+                    className="min-h-12 min-w-12 flex items-center justify-center rounded-lg border border-zinc-700
+                               bg-zinc-800 hover:bg-zinc-700 transition-colors flex-shrink-0"
+                    aria-label="Copy usage syntax"
+                  >
+                    {copiedEmbedding ? (
+                      <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-500 mt-1">Paste this into the positive or negative prompt in Studio.</p>
+              </div>
+
+              <div>
+                <label className="label">Friendly Name</label>
+                <input
+                  type="text"
+                  value={embeddingForm.friendlyName}
+                  onChange={(e) => embeddingField('friendlyName', e.target.value)}
+                  placeholder="e.g. Fast Negative V2"
+                  className="input-base"
+                />
+              </div>
+
+              <div>
+                <label className="label">Category</label>
+                <input
+                  type="text"
+                  value={embeddingForm.category ?? ''}
+                  onChange={(e) => embeddingField('category', e.target.value)}
+                  placeholder="negative, style, character, concept…"
+                  className="input-base min-h-12"
+                />
+              </div>
+
+              <div>
+                <label className="label">Base Model</label>
+                <input
+                  type="text"
+                  value={embeddingForm.baseModel ?? ''}
+                  onChange={(e) => embeddingField('baseModel', e.target.value)}
+                  placeholder="SD 1.5, SDXL, Pony, etc."
+                  className="input-base min-h-12"
+                />
+              </div>
+
+              <div>
+                <label className="label">Trigger Words</label>
+                <textarea rows={2}
+                  value={embeddingForm.triggerWords}
+                  onChange={(e) => embeddingField('triggerWords', e.target.value)}
+                  placeholder="Words to use alongside this embedding…"
+                  className="input-base resize-none leading-relaxed"
+                />
+              </div>
+
+              <div>
+                <label className="label">Description</label>
+                <textarea rows={3}
+                  value={embeddingForm.description ?? ''}
+                  onChange={(e) => embeddingField('description', e.target.value)}
+                  placeholder="Notes about this embedding — purpose, recommended usage…"
+                  className="input-base resize-none leading-relaxed"
+                />
+              </div>
+
+              {embeddingForm.url && (
+                <div>
+                  <label className="label">URL</label>
+                  <a
+                    href={embeddingForm.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-blue-400 text-sm break-all hover:text-blue-300 underline underline-offset-2 transition-colors"
+                  >
+                    {embeddingForm.url}
+                  </a>
+                </div>
+              )}
+
+              <SaveRow status={embeddingStatus} onSave={saveEmbedding} disabled={!selectedEmbedding} />
+            </div>
+          )}
         </>
       )}
 

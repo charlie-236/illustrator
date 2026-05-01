@@ -6,15 +6,17 @@ export interface CivitAIMetadata {
   trainedWords?: string[];
   baseModel?: string;
   description?: string | null;
+  tags?: string[];
   model?: {
     name?: string;
     description?: string | null;
+    tags?: string[];
   };
 }
 
 export interface RegisterModelInput {
   filename: string;
-  type: 'checkpoint' | 'lora';
+  type: 'checkpoint' | 'lora' | 'embedding';
   modelId?: number;
   parentUrlId?: number;
   civitaiMetadata?: CivitAIMetadata;
@@ -40,6 +42,20 @@ export interface RegisteredModelInfo {
   friendlyName: string;
   baseModel: string;
   triggerWords: string;
+}
+
+function extractCategoryFromTags(meta: CivitAIMetadata): string | null {
+  const tags: string[] = meta.tags ?? meta.model?.tags ?? [];
+  if (!Array.isArray(tags) || tags.length === 0) return null;
+
+  const lower = tags.map((t) => String(t).toLowerCase());
+
+  if (lower.some((t) => t.includes('negative') || t.includes('quality'))) return 'negative';
+  if (lower.some((t) => t === 'style' || t.includes('style'))) return 'style';
+  if (lower.some((t) => t === 'character' || t.includes('character'))) return 'character';
+  if (lower.some((t) => t === 'concept' || t.includes('concept'))) return 'concept';
+
+  return null;
 }
 
 export async function registerModel(
@@ -76,7 +92,7 @@ export async function registerModel(
         update: { friendlyName, ...(baseModel ? { baseModel } : {}), description, url },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
-    } else {
+    } else if (type === 'lora') {
       const record = await prisma.loraConfig.upsert({
         where: { loraName: filename },
         create: {
@@ -88,6 +104,29 @@ export async function registerModel(
           url,
         },
         update: { friendlyName, triggerWords, baseModel, description, url },
+      });
+      return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
+    } else {
+      const category = extractCategoryFromTags(civitaiMetadata);
+      const record = await prisma.embeddingConfig.upsert({
+        where: { embeddingName: filename },
+        create: {
+          embeddingName: filename,
+          friendlyName,
+          triggerWords,
+          baseModel,
+          category,
+          description,
+          url,
+        },
+        update: {
+          friendlyName,
+          triggerWords,
+          ...(baseModel ? { baseModel } : {}),
+          ...(category ? { category } : {}),
+          description,
+          url,
+        },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     }
