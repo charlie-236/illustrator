@@ -14,7 +14,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
-- [~] Fail closed on missing SSH env vars + validate /api/generate body — `batch/input-env-hardening` (PR #7)
 
 ## Ready for Review
 
@@ -27,4 +26,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Textual inversion / embeddings full feature — `batch/checkpoint-basemodel` (PR #5)
 - [x] Fix delete-from-UI to actually remove image files from disk — `batch/checkpoint-basemodel` (PR #5)
 - [x] Clean up leftovers from image-storage migration — see prompts/storage-migration-leftovers.md (direct commit to main, AGENTS.md violation)
-
+- [x] Fail closed on missing SSH env vars + validate /api/generate body — `batch/input-env-hardening` (PR #7)
