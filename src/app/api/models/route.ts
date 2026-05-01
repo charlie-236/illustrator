@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { filterSystemLoras } from '@/lib/systemLoraFilter';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,15 +20,23 @@ async function getNodeInputList(nodeType: string, inputName: string): Promise<st
 
 export async function GET() {
   try {
-    const [checkpoints, loras] = await Promise.all([
+    const [checkpoints, loras, embeddingRows] = await Promise.all([
       getNodeInputList('CheckpointLoaderSimple', 'ckpt_name'),
       getNodeInputList('LoraLoader', 'lora_name'),
+      prisma.embeddingConfig.findMany({
+        select: { embeddingName: true },
+        orderBy: { embeddingName: 'asc' },
+      }),
     ]);
-    return NextResponse.json({ checkpoints, loras: filterSystemLoras(loras) });
+    return NextResponse.json({
+      checkpoints,
+      loras: filterSystemLoras(loras),
+      embeddings: embeddingRows.map((e) => e.embeddingName),
+    });
   } catch (err) {
     console.error('[/api/models]', err);
     return NextResponse.json(
-      { error: 'Failed to reach ComfyUI', checkpoints: [], loras: [] },
+      { error: 'Failed to reach ComfyUI', checkpoints: [], loras: [], embeddings: [] },
       { status: 502 },
     );
   }

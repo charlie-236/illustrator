@@ -6,7 +6,7 @@ import { parseCivitaiInput } from '@/lib/civitaiUrl';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Mode = 'single' | 'batch';
-type ItemType = 'checkpoint' | 'lora';
+type ItemType = 'checkpoint' | 'lora' | 'embedding';
 
 interface PhaseEvent {
   phase: 'metadata' | 'download' | 'validate' | 'register' | 'done' | 'error';
@@ -26,7 +26,7 @@ interface ParsedIds {
   parentUrlId: number;
   modelId: number;
   canonicalUrl: string;
-  type: 'checkpoint' | 'lora' | null;
+  type: 'checkpoint' | 'lora' | 'embedding' | null;
   baseModel: string | null;
   hostname: string | null;
 }
@@ -253,7 +253,7 @@ function TypeRadio({
 }) {
   return (
     <div className="flex gap-2">
-      {(['checkpoint', 'lora'] as const).map((t) => (
+      {(['checkpoint', 'lora', 'embedding'] as const).map((t) => (
         <button
           key={t}
           type="button"
@@ -265,7 +265,7 @@ function TypeRadio({
               : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'}
             disabled:opacity-40`}
         >
-          {t === 'checkpoint' ? 'Checkpoint' : 'LoRA'}
+          {t === 'checkpoint' ? 'Checkpoint' : t === 'lora' ? 'LoRA' : 'Embedding'}
         </button>
       ))}
     </div>

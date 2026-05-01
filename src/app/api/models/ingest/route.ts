@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
   }
 
-  if (body.type !== 'checkpoint' && body.type !== 'lora') {
-    return new Response(JSON.stringify({ error: "type must be 'checkpoint' or 'lora'" }), { status: 400 });
+  if (body.type !== 'checkpoint' && body.type !== 'lora' && body.type !== 'embedding') {
+    return new Response(JSON.stringify({ error: "type must be 'checkpoint', 'lora', or 'embedding'" }), { status: 400 });
   }
   if (!Number.isFinite(body.modelId) || !Number.isFinite(body.parentUrlId)) {
     return new Response(JSON.stringify({ error: 'modelId and parentUrlId must be numbers' }), { status: 400 });

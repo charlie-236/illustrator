@@ -233,7 +233,7 @@ function LoraRow({ weight, displayName, triggerPills, onOpenPicker, onWeightChan
 }
 
 export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange, refreshToken }: Props) {
-  const [models, setModels] = useState<ModelInfo>({ checkpoints: [], loras: [] });
+  const [models, setModels] = useState<ModelInfo>({ checkpoints: [], loras: [], embeddings: [] });
   const [checkpointNames, setCheckpointNames] = useState<Record<string, string>>({});
   const [checkpointBaseModels, setCheckpointBaseModels] = useState<Record<string, string>>({});
   const [loraNames, setLoraNames] = useState<Record<string, string>>({});

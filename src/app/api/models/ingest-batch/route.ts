@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       try {
         for (const item of body.items) {
           if (
-            (item.type !== 'checkpoint' && item.type !== 'lora') ||
+            (item.type !== 'checkpoint' && item.type !== 'lora' && item.type !== 'embedding') ||
             !Number.isFinite(item.modelId) ||
             !Number.isFinite(item.parentUrlId)
           ) {

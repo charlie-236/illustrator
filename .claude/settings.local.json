@@ -21,7 +21,8 @@
       "Bash(python3 -c ' *)",
       "Bash(tee /tmp/ac2.txt)",
       "Bash(python3 -c \"print\\('x' * 501\\)\")",
-      "Bash(tee /dev/stderr)"
+      "Bash(tee /dev/stderr)",
+      "Skill(update-config)"
     ]
   }
 }

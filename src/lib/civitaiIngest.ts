@@ -21,7 +21,7 @@ export type IngestPhase =
   | { phase: 'error'; message: string; orphanPath?: string };
 
 export interface IngestRequest {
-  type: 'checkpoint' | 'lora';
+  type: 'checkpoint' | 'lora' | 'embedding';
   modelId: number;
   parentUrlId: number;
   sourceHostname?: string;
@@ -92,9 +92,14 @@ export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPha
     const stem = randomBytes(6).toString('hex');
     const filename = `${stem}.safetensors`;
     const remotePath =
-      req.type === 'lora'
-        ? `/models/ComfyUI/models/loras/${filename}`
-        : `/models/ComfyUI/models/checkpoints/${filename}`;
+      req.type === 'lora' ? `/models/ComfyUI/models/loras/${filename}`
+      : req.type === 'checkpoint' ? `/models/ComfyUI/models/checkpoints/${filename}`
+      : `/models/ComfyUI/models/embeddings/${filename}`;
+
+    // Ensure the embeddings directory exists on the VM (idempotent)
+    if (req.type === 'embedding') {
+      await ssh.execCommand('mkdir -p /models/ComfyUI/models/embeddings');
+    }
 
     yield { phase: 'download', status: 'starting', filename, remotePath };
 
