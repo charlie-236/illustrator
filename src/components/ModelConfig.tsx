@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckpointConfig, EmbeddingConfig, LoraConfig, ModelInfo } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
+import { useModelLists } from '@/lib/useModelLists';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -142,13 +143,8 @@ function SelectorButton({ label, displayName, disabled, onClick }: SelectorButto
 export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [tab, setTab] = useState<'checkpoints' | 'loras' | 'embeddings' | 'add'>('checkpoints');
 
-  const [checkpoints, setCheckpoints] = useState<string[]>([]);
-  const [loras, setLoras] = useState<string[]>([]);
-  const [loadingModels, setLoadingModels] = useState(true);
-
-  // Friendly-name maps populated from the config APIs
-  const [ckptNames, setCkptNames] = useState<Record<string, string>>({});
-  const [loraNames, setLoraNames] = useState<Record<string, string>>({});
+  const { data: lists, loading: loadingModels, refresh: refreshLists } = useModelLists();
+  const { checkpoints, loras, checkpointNames: ckptNames, loraNames } = lists;
 
   // Sheet open state
   const [ckptBrowserOpen, setCkptBrowserOpen] = useState(false);
@@ -193,72 +189,40 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
   }, []);
 
-  const refreshModelLists = useCallback(() => {
-    setLoadingModels(true);
+  const refreshEmbeddings = useCallback(() => {
     Promise.all([
       fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
-      fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
-      fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
       fetch('/api/embedding-config').then((r) => r.json() as Promise<EmbeddingConfig[]>).catch(() => []),
-    ])
-      .then(([modelData, ckptConfigs, loraConfigs, embeddingConfigs]) => {
-        setCheckpoints(modelData.checkpoints);
-        setLoras(modelData.loras);
-        setEmbeddings(modelData.embeddings ?? []);
-        setSelectedCheckpoint((prev) => prev || modelData.checkpoints[0] || '');
-        setSelectedLora((prev) => prev || modelData.loras[0] || '');
-        setSelectedEmbedding((prev) => prev || modelData.embeddings?.[0] || '');
-
-        const ckptMap: Record<string, string> = {};
-        for (const c of ckptConfigs) {
-          if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
-        }
-        setCkptNames(ckptMap);
-
-        const loraMap: Record<string, string> = {};
-        for (const l of loraConfigs) {
-          if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
-        }
-        setLoraNames(loraMap);
-
-        const embeddingMap: Record<string, string> = {};
-        for (const e of embeddingConfigs) {
-          if (e.friendlyName) embeddingMap[e.embeddingName] = e.friendlyName;
-        }
-        setEmbeddingNames(embeddingMap);
-      })
-      .finally(() => setLoadingModels(false));
-  }, []);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { refreshModelLists(); }, []);
-
-  // Reload friendly-name maps after a save so the selector button updates immediately
-  function refreshNames() {
-    Promise.all([
-      fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
-      fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
-      fetch('/api/embedding-config').then((r) => r.json() as Promise<EmbeddingConfig[]>).catch(() => []),
-    ]).then(([ckptConfigs, loraConfigs, embeddingConfigs]) => {
-      const ckptMap: Record<string, string> = {};
-      for (const c of ckptConfigs) {
-        if (c.friendlyName) ckptMap[c.checkpointName] = c.friendlyName;
-      }
-      setCkptNames(ckptMap);
-
-      const loraMap: Record<string, string> = {};
-      for (const l of loraConfigs) {
-        if (l.friendlyName) loraMap[l.loraName] = l.friendlyName;
-      }
-      setLoraNames(loraMap);
-
+    ]).then(([modelData, embeddingConfigs]) => {
+      setEmbeddings(modelData.embeddings ?? []);
       const embeddingMap: Record<string, string> = {};
       for (const e of embeddingConfigs) {
         if (e.friendlyName) embeddingMap[e.embeddingName] = e.friendlyName;
       }
       setEmbeddingNames(embeddingMap);
     });
-  }
+  }, []);
+
+  useEffect(() => { refreshEmbeddings(); }, [refreshEmbeddings]);
+
+  // Auto-pick initial selections when data arrives
+  useEffect(() => {
+    if (!selectedCheckpoint && checkpoints.length > 0) {
+      setSelectedCheckpoint(checkpoints[0]);
+    }
+  }, [selectedCheckpoint, checkpoints]);
+
+  useEffect(() => {
+    if (!selectedLora && loras.length > 0) {
+      setSelectedLora(loras[0]);
+    }
+  }, [selectedLora, loras]);
+
+  useEffect(() => {
+    if (!selectedEmbedding && embeddings.length > 0) {
+      setSelectedEmbedding(embeddings[0]);
+    }
+  }, [selectedEmbedding, embeddings]);
 
   // Load checkpoint config when selection changes
   useEffect(() => {
@@ -353,7 +317,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         body: JSON.stringify({ checkpointName: selectedCheckpoint, ...ckptSaveFields }),
       });
       setCkptStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) { refreshNames(); onSaved?.(); }
+      if (res.ok) { refreshLists(); onSaved?.(); }
     } catch {
       setCkptStatus('error');
     }
@@ -370,7 +334,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         body: JSON.stringify({ loraName: selectedLora, ...loraSaveFields }),
       });
       setLoraStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) { refreshNames(); onSaved?.(); }
+      if (res.ok) { refreshLists(); onSaved?.(); }
     } catch {
       setLoraStatus('error');
     }
@@ -387,7 +351,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         body: JSON.stringify({ embeddingName: selectedEmbedding, ...embSaveFields }),
       });
       setEmbeddingStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) { refreshNames(); onSaved?.(); }
+      if (res.ok) { refreshEmbeddings(); onSaved?.(); }
     } catch {
       setEmbeddingStatus('error');
     }
@@ -419,22 +383,17 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
         return;
       }
 
-      // Remove from local list immediately for instant feedback
       if (type === 'checkpoint') {
-        setCheckpoints((prev) => prev.filter((c) => c !== selectedCheckpoint));
-        setCkptNames((prev) => { const n = { ...prev }; delete n[selectedCheckpoint]; return n; });
         setSelectedCheckpoint('');
         setCkptConfigId(null);
         setCkptForm({ ...CKPT_BLANK });
       } else {
-        setLoras((prev) => prev.filter((l) => l !== selectedLora));
-        setLoraNames((prev) => { const n = { ...prev }; delete n[selectedLora]; return n; });
         setSelectedLora('');
         setLoraConfigId(null);
         setLoraForm({ ...LORA_BLANK });
       }
       // Re-sync with ComfyUI so the list is accurate
-      refreshModelLists();
+      refreshLists();
       onSaved?.();
     } catch (err) {
       const msg = `Network error: ${String(err)}`;
@@ -467,7 +426,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
           <h2 className="text-base font-semibold text-zinc-200">Model Settings</h2>
           <button
             type="button"
-            onClick={refreshModelLists}
+            onClick={() => { refreshLists(); refreshEmbeddings(); }}
             disabled={loadingModels}
             className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
             aria-label="Refresh model lists"
@@ -780,7 +739,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
 
       {/* ── Add Models tab ──────────────────────────────────────────── */}
       {tab === 'add' && (
-        <IngestPanel onIngestComplete={() => { onSaved?.(); refreshModelLists(); }} />
+        <IngestPanel onIngestComplete={() => { onSaved?.(); refreshLists(); refreshEmbeddings(); }} />
       )}
 
       {/* ── LoRAs tab ────────────────────────────────────────────────── */}

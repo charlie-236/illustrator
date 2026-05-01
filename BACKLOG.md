@@ -9,10 +9,11 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md
 - [ ] Prisma client touch-ups — see prompts/prisma-client-touchups.md
 
 ## In flight
+
+- [~] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md
 
 
 ## Ready for Review
