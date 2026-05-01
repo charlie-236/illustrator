@@ -17,6 +17,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
+- [~] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
 
 
 ## Ready for Review
