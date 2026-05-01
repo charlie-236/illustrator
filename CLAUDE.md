@@ -167,7 +167,7 @@ SSE events emitted by the manager:
 | `error` | `{ message: string }` |
 
 ### `GET /api/models`
-Returns `{ checkpoints: string[], loras: string[] }` by calling ComfyUI's `/object_info/CheckpointLoaderSimple` and `/object_info/LoraLoader`. 5-second timeout via `AbortSignal.timeout(5000)`. Returns empty arrays on failure so the UI degrades gracefully.
+Returns `{ checkpoints: string[], loras: string[], embeddings: string[] }`. Checkpoints and LoRAs come from ComfyUI's `/object_info/CheckpointLoaderSimple` and `/object_info/LoraLoader`. Embeddings come from ComfyUI's `/embeddings` endpoint (returns on-disk filenames from `/models/ComfyUI/models/embeddings/`, sorted alphabetically). All three fetches use a 5-second `AbortSignal.timeout`. On any failure the entire route returns HTTP 502 — embeddings intentionally do not degrade to an empty array so that a VM connectivity problem is visible rather than silently showing an empty list.
 
 ### `POST /api/generate/polish`
 LLM-powered prompt expansion with frozen-token validation. Body: `{ positivePrompt: string, negativeAdditions?: string }` (max 500 chars on additions). Returns `{ positive: string, negative: string, polished: boolean, reason?: 'weight_drift' | 'llm_error' | 'timeout' | 'parse_error' }`.
@@ -269,7 +269,7 @@ src/
     civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel; type now includes 'embedding'
     registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; includes extractCategoryFromTags() heuristic
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
-    useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config; consumed by ModelSelect and ModelConfig
+    useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config + /api/embedding-config; consumed by ModelSelect and ModelConfig
   types/
     index.ts            GenerationParams, GenerationRecord, ModelInfo (now includes embeddings[]), EmbeddingConfig, SSEEvent,
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants
@@ -357,7 +357,7 @@ When `referenceImages` is present in `GenerationParams`, `buildWorkflow()` injec
 
 **Primary path: in-app UI.** Models tab → Add Models sub-tab. Single mode pastes one CivitAI URL or Air string (`urn:air:<base>:<type>:civitai:<id>@<id>`) and streams live progress; batch mode accepts up to 20 URLs/Air strings and processes them sequentially with per-row progress. When an Air string is pasted, the type radio (Checkpoint/LoRA/Embedding) is auto-pre-filled from the Air `<type>` field. Backed by `/api/models/ingest` and `/api/models/ingest-batch`. Successful ingestion automatically refreshes Studio's ModelSelect via the `modelConfigVersion` mechanism — no manual refresh needed.
 
-**Embeddings (textual inversions):** Supported as a third type alongside checkpoints and LoRAs. Ingested via the same Add Models tab — select the "Embedding" radio (or paste an Air string with `type=embedding`). The file downloads to `/models/ComfyUI/models/embeddings/` on the VM. After ingestion, browse and edit metadata in the Models tab → Embeddings sub-tab. To use an embedding in a generation, type `embedding:<filename-without-extension>` directly in the positive or negative prompt in Studio. ComfyUI resolves embeddings by name at prompt-parse time — no workflow changes required. There is no Studio-side picker; users type the syntax manually. The Embeddings sub-tab provides a copy-to-clipboard button for each embedding's usage syntax.
+**Embeddings (textual inversions):** Supported as a third type alongside checkpoints and LoRAs. Ingested via the same Add Models tab — select the "Embedding" radio (or paste an Air string with `type=embedding`). The file downloads to `/models/ComfyUI/models/embeddings/` on the VM. The embeddings list is sourced from the VM (via ComfyUI's `/embeddings` endpoint — see `/api/models` route notes); `EmbeddingConfig` rows are metadata that join in by filename. Files on the VM without metadata still appear in the Embeddings sub-tab with the raw filename and can be deleted from the UI. To use an embedding in a generation, type `embedding:<filename-without-extension>` directly in the positive or negative prompt in Studio. ComfyUI resolves embeddings by name at prompt-parse time — no workflow changes required. There is no Studio-side picker; users type the syntax manually. The Embeddings sub-tab provides a copy-to-clipboard button for each embedding's usage syntax.
 
 **Desktop fallback: `add_model.sh`** — batch processing from the desktop terminal using a queue-file format. Posts to `/api/models/register` directly, bypassing the SSE infrastructure. Use this for large batches from the desktop, or as a recovery path if the in-app UI breaks.
 
