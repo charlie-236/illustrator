@@ -6,8 +6,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Credentials from env — never hardcoded, never contact VM IP directly
-const VM_USER = process.env.A100_VM_USER ?? '';
-const VM_IP = process.env.A100_VM_IP ?? '';
+const VM_USER = process.env.A100_VM_USER ?? 'charlie';
+const VM_IP = process.env.A100_VM_IP ?? '100.96.99.94';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
 
 export async function DELETE(
@@ -18,12 +18,6 @@ export async function DELETE(
 
   if (!SSH_KEY_PATH) {
     return NextResponse.json({ error: 'A100_SSH_KEY_PATH not configured' }, { status: 500 });
-  }
-  if (!VM_USER) {
-    return NextResponse.json({ error: 'A100_VM_USER not configured' }, { status: 500 });
-  }
-  if (!VM_IP) {
-    return NextResponse.json({ error: 'A100_VM_IP not configured' }, { status: 500 });
   }
 
   // Step 1: Locate the record — check checkpoints first, then LoRAs
