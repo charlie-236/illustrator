@@ -14,6 +14,10 @@ If invoked without a specific task, pick the first unchecked item from BACKLOG.m
 
 If invoked with a specific prompt path, execute that one.
 
+## Branch base
+
+Branch from the current HEAD, not from main. The wrapper script (run-next-batch.sh) checks out the correct base before invoking you — it may be main, or it may be the most recent unmerged batch/* branch when work is being chained. Do NOT `git checkout main` before creating your feature branch. Use `git checkout -b batch/<short-name>` from wherever HEAD currently is, and pass `--base $(git rev-parse --abbrev-ref HEAD@{1})` or just hardcode the base branch name from your invocation context to `gh pr create`.
+
 ## Branch and commit rules — POLICY ONLY (main is no longer protected)
 
 - Even though main accepts direct pushes, NEVER push directly to main.
