@@ -9,7 +9,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] Textual inversion / embeddings full feature — see prompts/embeddings.md
 
 ## In flight
 
@@ -17,7 +16,9 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Done
 
-- [x] Batch P: image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
+- [x] image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
 - [x] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
 - [x] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
 - [x] CheckpointConfig.baseModel UI + auto-populate — `batch/checkpoint-basemodel` (PR #4)
+- [x] Textual inversion / embeddings full feature — see prompts/embeddings.md (PR #5)
+
