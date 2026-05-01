@@ -9,8 +9,17 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
+- [ ] Fix delete-from-UI to actually remove image files from disk — see prompts/fix-delete-orphan-files.md
+- [ ] Clean up leftovers from image-storage migration — see prompts/storage-migration-leftovers.md
+- [ ] Fail closed on missing SSH env vars + validate /api/generate body — see prompts/input-env-hardening.md
+- [ ] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md
+- [ ] Prisma client touch-ups — see prompts/prisma-client-touchups.md
 
 ## In flight
+
+
+
+## Ready for Review
 
 
 

@@ -22,6 +22,8 @@ The mount paths will use your session-specific name. Use whatever `request_cowor
 
 **Important:** If `~/.local/share/claude` is not mounted, the binary will not be found and you must not do the coding work yourself — stop and request the directory first.
 
+**Known limitation:** Claude Code auth uses the system keychain, not a plain file. Redirecting HOME to `claude-auth-bridge` gives it account metadata but not the session token, so Claude Code CLI will report "Not logged in" when run from the sandbox. The workaround is to run Claude Code from your own terminal (where it has keychain access) and have the Cowork session prepare the prompt and manage BACKLOG updates.
+
 ## 2. The workflow this repo uses
 
 Read `AGENTS.md` and `BACKLOG.md` for the full workflow. Quick version:
