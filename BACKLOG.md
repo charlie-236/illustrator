@@ -9,10 +9,9 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] Prisma client touch-ups — see prompts/prisma-client-touchups.md
-
 ## In flight
 
+- [~] Prisma client touch-ups — `batch/prisma-client-touchups` (PR #9)
 
 ## Ready for Review
 
