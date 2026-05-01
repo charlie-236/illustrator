@@ -9,7 +9,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] Source embeddings list from the VM (orphan visibility + delete) — see prompts/embeddings-vm-source.md
+- [~] Source embeddings list from the VM (orphan visibility + delete) — `batch/embeddings-vm-source` (PR #11)
 - [ ] Real-readiness status probe for Admin tab services — see prompts/service-readiness-probe.md
 
 ## In flight
