@@ -9,7 +9,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [ ] Fix delete-from-UI to actually remove image files from disk — see prompts/fix-delete-orphan-files.md
 - [ ] Clean up leftovers from image-storage migration — see prompts/storage-migration-leftovers.md
 - [ ] Fail closed on missing SSH env vars + validate /api/generate body — see prompts/input-env-hardening.md
 - [ ] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md
@@ -17,6 +16,8 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## In flight
 
+
+## Ready for Review
 
 
 ## Ready for Review
@@ -29,5 +30,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
 - [x] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
 - [x] CheckpointConfig.baseModel UI + auto-populate — `batch/checkpoint-basemodel` (PR #4)
-- [x] Textual inversion / embeddings full feature — see prompts/embeddings.md (PR #5)
-
+- [x] Textual inversion / embeddings full feature — `batch/checkpoint-basemodel` (PR #5)
+- [x] Fix delete-from-UI to actually remove image files from disk — `batch/checkpoint-basemodel` (PR #5)

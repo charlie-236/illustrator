@@ -27,20 +27,16 @@ Branch from the current HEAD, not from main. The wrapper script (run-next-batch.
 
 ## Branch and commit hygiene
 
-Determine the base branch for your PR: the wrapper script will have checked out either main or a previous batch's branch. Run `git rev-parse --abbrev-ref HEAD` to see what's currently checked out — that's your base.
-
-Create the feature branch from there:
-
-    git checkout -b batch/<short-name>
-    
-After committing, push and create the PR against the correct base:
+After acceptance criteria pass, push the branch and create the PR:
 
     git push -u origin batch/<short-name>
-    gh pr create --base <BASE_BRANCH> --head batch/<short-name> \
+    gh pr create --base main --head batch/<short-name> \
       --title "<batch title>" \
-      --body-file /tmp/pr-body.md
+      --body-file <path-to-pr-body.md>
 
-Where `<BASE_BRANCH>` is whatever was checked out when you started. NOT always main.
+Write the PR body to a temporary file first (e.g. `/tmp/pr-body.md`) so multi-line markdown survives shell escaping. The body must follow the format described below.
+
+After PR creation, capture the PR URL from the gh output. Mark the BACKLOG.md item as `[~]` (in-flight) with the PR number. Commit and push that BACKLOG.md change to the same feature branch — gh will update the existing PR automatically.
 
 ## Build and validation gates (before EVERY commit)
 
