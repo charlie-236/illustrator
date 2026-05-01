@@ -9,9 +9,10 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-## In flight
+- [ ] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — see prompts/model-delete-by-filename.md
+- [ ] Source embeddings list from the VM (orphan visibility + delete) — see prompts/embeddings-vm-source.md
 
-- [~] Prisma client touch-ups — `batch/prisma-client-touchups` (PR #9)
+## In flight
 
 ## Ready for Review
 
@@ -26,3 +27,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Clean up leftovers from image-storage migration — see prompts/storage-migration-leftovers.md (direct commit to main, AGENTS.md violation)
 - [x] Fail closed on missing SSH env vars + validate /api/generate body — `batch/input-env-hardening` (PR #7)
 - [x] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md (PR #8)
+- [x] Prisma client touch-ups — `batch/prisma-client-touchups` (PR #9)
