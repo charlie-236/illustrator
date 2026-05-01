@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { filterSystemLoras } from '@/lib/systemLoraFilter';
-import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,20 +17,28 @@ async function getNodeInputList(nodeType: string, inputName: string): Promise<st
   return Array.isArray(list) ? (list as string[]) : [];
 }
 
+async function getEmbeddings(): Promise<string[]> {
+  const res = await fetch(`${COMFYUI}/embeddings`, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`ComfyUI /embeddings returned ${res.status}`);
+  const data = await res.json() as unknown;
+  if (!Array.isArray(data)) throw new Error('ComfyUI /embeddings returned unexpected shape');
+  return (data as string[]).slice().sort((a, b) => a.localeCompare(b));
+}
+
 export async function GET() {
   try {
-    const [checkpoints, loras, embeddingRows] = await Promise.all([
+    const [checkpoints, loras, embeddings] = await Promise.all([
       getNodeInputList('CheckpointLoaderSimple', 'ckpt_name'),
       getNodeInputList('LoraLoader', 'lora_name'),
-      prisma.embeddingConfig.findMany({
-        select: { embeddingName: true },
-        orderBy: { embeddingName: 'asc' },
-      }),
+      getEmbeddings(),
     ]);
     return NextResponse.json({
       checkpoints,
       loras: filterSystemLoras(loras),
-      embeddings: embeddingRows.map((e) => e.embeddingName),
+      embeddings,
     });
   } catch (err) {
     console.error('[/api/models]', err);
