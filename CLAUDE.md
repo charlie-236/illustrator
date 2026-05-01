@@ -266,6 +266,7 @@ src/
     civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel; type now includes 'embedding'
     registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; includes extractCategoryFromTags() heuristic
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
+    useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config; consumed by ModelSelect and ModelConfig
   types/
     index.ts            GenerationParams, GenerationRecord, ModelInfo (now includes embeddings[]), EmbeddingConfig, SSEEvent,
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants
