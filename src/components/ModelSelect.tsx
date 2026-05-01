@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CheckpointConfig, LoraConfig, LoraEntry, ModelInfo } from '@/types';
+import { useEffect, useRef, useState } from 'react';
+import type { LoraEntry } from '@/types';
+import { useModelLists } from '@/lib/useModelLists';
 
 interface Props {
   checkpoint: string;
@@ -233,61 +234,20 @@ function LoraRow({ weight, displayName, triggerPills, onOpenPicker, onWeightChan
 }
 
 export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange, refreshToken }: Props) {
-  const [models, setModels] = useState<ModelInfo>({ checkpoints: [], loras: [], embeddings: [] });
-  const [checkpointNames, setCheckpointNames] = useState<Record<string, string>>({});
-  const [checkpointBaseModels, setCheckpointBaseModels] = useState<Record<string, string>>({});
-  const [loraNames, setLoraNames] = useState<Record<string, string>>({});
-  const [loraTriggerWords, setLoraTriggerWords] = useState<Record<string, string>>({});
-  const [loraBaseModels, setLoraBaseModels] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const { data: lists, loading, error, refresh } = useModelLists(refreshToken);
   const [ckptBrowserOpen, setCkptBrowserOpen] = useState(false);
   // null = closed; number = index of the LoRA slot being picked
   const [loraPickerIndex, setLoraPickerIndex] = useState<number | null>(null);
 
-  const refreshLists = useCallback(() => {
-    setLoading(true);
-    Promise.all([
-      fetch('/api/models').then((r) => r.json() as Promise<ModelInfo>),
-      fetch('/api/checkpoint-config').then((r) => r.json() as Promise<CheckpointConfig[]>).catch(() => []),
-      fetch('/api/lora-config').then((r) => r.json() as Promise<LoraConfig[]>).catch(() => []),
-    ])
-      .then(([modelsData, ckptConfigs, loraConfigs]) => {
-        setModels(modelsData);
-        if (!checkpoint && modelsData.checkpoints[0]) onCheckpointChange(modelsData.checkpoints[0]);
-
-        const ckptNameMap: Record<string, string> = {};
-        const ckptBaseMap: Record<string, string> = {};
-        for (const c of ckptConfigs) {
-          if (c.friendlyName) ckptNameMap[c.checkpointName] = c.friendlyName;
-          if (c.baseModel) ckptBaseMap[c.checkpointName] = c.baseModel;
-        }
-        setCheckpointNames(ckptNameMap);
-        setCheckpointBaseModels(ckptBaseMap);
-
-        const loraNameMap: Record<string, string> = {};
-        const triggerMap: Record<string, string> = {};
-        const loraBaseMap: Record<string, string> = {};
-        for (const l of loraConfigs) {
-          if (l.friendlyName) loraNameMap[l.loraName] = l.friendlyName;
-          if (l.triggerWords?.trim()) triggerMap[l.loraName] = l.triggerWords;
-          if (l.baseModel?.trim()) loraBaseMap[l.loraName] = l.baseModel;
-        }
-        setLoraNames(loraNameMap);
-        setLoraTriggerWords(triggerMap);
-        setLoraBaseModels(loraBaseMap);
-      })
-      .catch(() => setError('Could not reach ComfyUI'))
-      .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkpoint, onCheckpointChange]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { refreshLists(); }, [refreshToken]);
+  useEffect(() => {
+    if (!checkpoint && lists.checkpoints.length > 0) {
+      onCheckpointChange(lists.checkpoints[0]);
+    }
+  }, [checkpoint, lists.checkpoints, onCheckpointChange]);
 
   function addLora() {
-    if (!models.loras[0]) return;
-    onLorasChange([...loras, { name: models.loras[0], weight: 1.0 }]);
+    if (!lists.loras[0]) return;
+    onLorasChange([...loras, { name: lists.loras[0], weight: 1.0 }]);
   }
 
   function updateLora(index: number, field: keyof LoraEntry, value: string | number) {
@@ -299,13 +259,13 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
   }
 
   const checkpointDisplayName = checkpoint
-    ? (checkpointNames[checkpoint] ?? checkpoint)
+    ? (lists.checkpointNames[checkpoint] ?? checkpoint)
     : 'Select checkpoint…';
 
   // LoRAs whose baseModel matches the selected checkpoint's baseModel
-  const activeCheckpointBase = checkpointBaseModels[checkpoint] ?? '';
+  const activeCheckpointBase = lists.checkpointBaseModels[checkpoint] ?? '';
   const loraPrioritySet = activeCheckpointBase
-    ? new Set(models.loras.filter((l) => loraBaseModels[l] === activeCheckpointBase))
+    ? new Set(lists.loras.filter((l) => lists.loraBaseModels[l] === activeCheckpointBase))
     : undefined;
 
   if (error) {
@@ -333,13 +293,13 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
       {ckptBrowserOpen && (
         <ModelSheet
           title="Select Checkpoint"
-          items={models.checkpoints}
+          items={lists.checkpoints}
           selected={checkpoint}
-          nameMap={checkpointNames}
+          nameMap={lists.checkpointNames}
           onSelect={onCheckpointChange}
           onClose={() => setCkptBrowserOpen(false)}
           emptyMessage="No checkpoints available"
-          onRefresh={refreshLists}
+          onRefresh={refresh}
           refreshing={loading}
         />
       )}
@@ -351,7 +311,7 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
           <button
             type="button"
             onClick={addLora}
-            disabled={loading || models.loras.length === 0}
+            disabled={loading || lists.loras.length === 0}
             className="text-xs px-3 min-h-12 rounded-lg bg-zinc-700 hover:bg-zinc-600
                        disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 transition-colors"
           >
@@ -365,8 +325,8 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
 
         <div className="space-y-3">
           {loras.map((entry, i) => {
-            const entryDisplayName = loraNames[entry.name] ?? entry.name;
-            const rawTriggers = loraTriggerWords[entry.name];
+            const entryDisplayName = lists.loraNames[entry.name] ?? entry.name;
+            const rawTriggers = lists.loraTriggerWords[entry.name];
             const triggerPills = rawTriggers
               ? rawTriggers.split(',').map((t) => t.trim()).filter(Boolean)
               : [];
@@ -390,15 +350,15 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
       {loraPickerIndex !== null && (
         <ModelSheet
           title="Select LoRA"
-          items={models.loras}
+          items={lists.loras}
           selected={loras[loraPickerIndex]?.name ?? ''}
-          nameMap={loraNames}
+          nameMap={lists.loraNames}
           onSelect={(raw) => updateLora(loraPickerIndex, 'name', raw)}
           onClose={() => setLoraPickerIndex(null)}
           emptyMessage="No LoRAs available"
-          onRefresh={refreshLists}
+          onRefresh={refresh}
           refreshing={loading}
-          badgeMap={loraBaseModels}
+          badgeMap={lists.loraBaseModels}
           prioritySet={loraPrioritySet}
         />
       )}
