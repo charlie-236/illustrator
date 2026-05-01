@@ -14,27 +14,38 @@ If invoked without a specific task, pick the first unchecked item from BACKLOG.m
 
 If invoked with a specific prompt path, execute that one.
 
-## Branch base
+## Branch and commit rules
 
-Branch from the current HEAD, not from main. The wrapper script (run-next-batch.sh) checks out the correct base before invoking you — it may be main, or it may be the most recent unmerged batch/* branch when work is being chained. Do NOT `git checkout main` before creating your feature branch. Use `git checkout -b batch/<short-name>` from wherever HEAD currently is, and pass `--base $(git rev-parse --abbrev-ref HEAD@{1})` or just hardcode the base branch name from your invocation context to `gh pr create`.
-
-## Branch and commit rules — POLICY ONLY (main is no longer protected)
-
-- Even though main accepts direct pushes, NEVER push directly to main.
+- **Main is protected.** Direct pushes to main will be rejected by GitHub. This is enforced server-side, not by policy.
 - All work goes on a feature branch named `batch/<short-name>`.
+- The wrapper script (`run-next-batch.sh`) creates the branch for you BEFORE invoking you. You will already be on the correct `batch/*` branch when you start. Do NOT run `git checkout -b` — the branch already exists and you are already on it.
 - All work merges via PR so the user can review the diff.
-- If you find yourself about to push to main, STOP and create a branch instead.
+- The PR base is whatever was checked out before the script branched (main, or a previous unmerged batch/*). The script's prompt prefix tells you the exact base branch name. Use that.
+
+## Before any commit: verify your branch
+
+Run `git rev-parse --abbrev-ref HEAD` before your first commit. The result MUST start with `batch/`. If it returns `main` or anything else, the script's branching step failed — STOP and report the issue. Do not attempt to recover by branching yourself; that masks the failure mode.
+
+If your first commit accidentally lands somewhere other than the expected branch, STOP. Do not push. Tell the user. The patched script catches direct-push attempts to main, but it cannot recover lost intent — only the user can decide how to handle a wrong-branch commit.
 
 ## Branch and commit hygiene
 
-After acceptance criteria pass, push the branch and create the PR:
+The script-injected prompt prefix tells you:
+- The branch name you're on (e.g. `batch/input-env-hardening`)
+- The base branch (e.g. `main`, or a previous unmerged `batch/*`)
+
+After acceptance criteria pass, push the branch and create the PR against the correct base:
 
     git push -u origin batch/<short-name>
-    gh pr create --base main --head batch/<short-name> \
+    gh pr create \
+      --base <BASE_BRANCH> \
+      --head batch/<short-name> \
       --title "<batch title>" \
-      --body-file <path-to-pr-body.md>
+      --body-file /tmp/pr-body.md
 
-Write the PR body to a temporary file first (e.g. `/tmp/pr-body.md`) so multi-line markdown survives shell escaping. The body must follow the format described below.
+Where `<BASE_BRANCH>` is the value the script gave you in the prompt prefix. NOT always main — when batches are chained, the base will be the previous batch's branch.
+
+Write the PR body to a temporary file first (e.g. `/tmp/pr-body.md`) so multi-line markdown survives shell escaping. The body must follow the format in the "PR body format" section below.
 
 After PR creation, capture the PR URL from the gh output. Mark the BACKLOG.md item as `[~]` (in-flight) with the PR number. Commit and push that BACKLOG.md change to the same feature branch — gh will update the existing PR automatically.
 
@@ -45,24 +56,6 @@ After PR creation, capture the PR URL from the gh output. Mark the BACKLOG.md it
 - `grep -rn "class_type.*['\"]LoadImage['\"]" src/` must return only ETN_LoadImageBase64 (and ETN_LoadMaskBase64 for inpainting paths).
 - These are the disk-avoidance constraints. A regression here is a load-bearing failure.
 
-## Before any commit: are you on a batch/ branch?
-
-Your FIRST action after reading the prompt and BEFORE any code change is:
-
-    git checkout -b batch/<short-name>
-
-If you're about to commit and `git rev-parse --abbrev-ref HEAD` returns
-anything that doesn't start with `batch/`, STOP. Do not commit. Do not
-push. Reset and branch first:
-
-    git reset --soft HEAD              # keep your work staged if any
-    git checkout -b batch/<short-name>
-    git commit -m "..."
-
-Pushing to main directly is a CRITICAL FAILURE. The base branch the
-script checked out (main, or a previous batch/) is the BASE for your
-PR — never the destination of your commits.
-
 ## Operational boundaries — DO NOT
 
 - Do not run `pm2` commands. PM2 management is the user's manual responsibility.
@@ -71,12 +64,16 @@ PR — never the destination of your commits.
 - Do not update dependencies unless the task explicitly requires it.
 - Do not change formatting or linting rules.
 - Do not modify CLAUDE.md to "match" code that violates it. Stop and flag the conflict.
+- Do not run `git checkout main` or create branches yourself. The script handles that.
+- Do not attempt to push to main. It will be rejected and is a policy violation regardless.
 
 ## When uncertain — STOP
 
 - If the prompt is ambiguous between two reasonable approaches, do not pick. Push what you have, and write the ambiguity in the PR description so the user can clarify.
 - If a task touches `comfyws.ts`, `workflow.ts`, the WS hijack path, or the disk-avoidance assertion in `/api/generate/route.ts`, treat with extra care. These are load-bearing.
 - If the route's disk-avoidance assertion would need modification, STOP. That is architectural and requires explicit user direction.
+- If `git rev-parse --abbrev-ref HEAD` shows you are not on a `batch/*` branch, STOP. Report. Do not self-recover.
+- If `gh pr create` fails because the branch was rejected by branch protection, STOP. Report. Do not retry against a different base.
 
 ## PR body format
 
@@ -105,5 +102,5 @@ After merge, the user updates `[~]` to `[x]`. Do not modify BACKLOG.md to add `[
 
 - Working directory: `/home/charlie/illustrator`
 - Remote: `origin` → https://github.com/charlie-236/illustrator
-- Default branch: `main` (protected)
+- Default branch: `main` (protected — direct pushes rejected)
 - Feature branches: `batch/<short-name>`
