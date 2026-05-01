@@ -7,17 +7,6 @@ Status legend:
 
 When picking the next item, find its prompt file in `prompts/` and execute that prompt. Never start work without a prompt file — they are the source of truth, not this list.
 
-## Queued
-
-- [~] Source embeddings list from the VM (orphan visibility + delete) — `batch/embeddings-vm-source` (PR #11)
-- [~] Real-readiness status probe for Admin tab services — `batch/service-readiness-probe` (PR #12)
-
-## In flight
-
-## Ready for Review
-
-## Done
-
 - [x] image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
 - [x] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
 - [x] AGENTS.md gh CLI update — `batch/agents-gh-pr-workflow` (PR #3)
@@ -29,3 +18,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md (PR #8)
 - [x] Prisma client touch-ups — `batch/prisma-client-touchups` (PR #9)
 - [x] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — `batch/model-delete-by-filename` (PR #10)
+- [x] Source embeddings list from the VM (orphan visibility + delete) — `batch/embeddings-vm-source` (PR #11)
+- [x] Real-readiness status probe for Admin tab services — `batch/service-readiness-probe` (PR #12)
+
