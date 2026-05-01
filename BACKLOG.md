@@ -9,7 +9,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 
 ## Queued
 
-- [~] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — `batch/model-delete-by-filename` (PR #10)
 - [ ] Source embeddings list from the VM (orphan visibility + delete) — see prompts/embeddings-vm-source.md
 - [ ] Real-readiness status probe for Admin tab services — see prompts/service-readiness-probe.md
 
@@ -29,3 +28,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Fail closed on missing SSH env vars + validate /api/generate body — `batch/input-env-hardening` (PR #7)
 - [x] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md (PR #8)
 - [x] Prisma client touch-ups — `batch/prisma-client-touchups` (PR #9)
+- [x] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — `batch/model-delete-by-filename` (PR #10)
