@@ -54,6 +54,9 @@ export interface GenerationRecord {
   scheduler: string;
   highResFix: boolean;
   isFavorite: boolean;
+  mediaType: string;      // "image" | "video"
+  frames: number | null;  // null for images
+  fps: number | null;     // null for images
   createdAt: string;
 }
 

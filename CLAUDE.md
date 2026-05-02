@@ -17,6 +17,8 @@ Validation: after any buildWorkflow() workflow change, scan the generated workfl
 
 Runtime enforcement: the `/api/generate` route includes a structural assertion that iterates every node in the built workflow and returns HTTP 500 with a "this is a bug" message if `SaveImage` or `LoadImage` appears as a `class_type`. This catches future regressions automatically — a forbidden node causes a loud failure rather than a silent disk write on the VM.
 
+**Narrow exception — video path:** `SaveVideoWebsocket` does not exist in ComfyUI, so the video path writes one `.webm` file to the VM per generation using `SaveWEBM`. The route immediately fetches the file via `GET /view` and SSH-deletes it with `rm -f /models/ComfyUI/output/video-${generationId}*`. `SaveWEBM` is the **only** permitted disk-write class on the VM, and only via `/api/generate-video`. The video runtime guard (`validateVideoWorkflow`) enforces this by rejecting `SaveImage`, `LoadImage`, and `SaveAnimatedWEBP`.
+
 ### 2. General Agent Directives
 - Before proposing any fix, verify it aligns with the `SaveImageWebsocket` requirement.
 - If a package update or ComfyUI node change breaks the WebSocket relay, fixing the relay takes priority over all UI/UX features.
@@ -138,6 +140,9 @@ model Generation {
   sampler      String
   scheduler    String
   highResFix   Boolean
+  mediaType    String   @default("image")  // "image" | "video"
+  frames       Int?                        // null for images; frame count for videos
+  fps          Int?                        // null for images; always 16 for Wan 2.2
   createdAt    DateTime @default(now())
   @@index([createdAt(sort: Desc)])
 }
@@ -217,6 +222,42 @@ Probe endpoints:
 
 All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by `/api/generate`. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher'`.
 
+### `POST /api/generate-video`
+SSE endpoint for Wan 2.2 video generation. Returns a persistent `text/event-stream` response; the browser reads progress events then a final `complete` event. No separate `/api/progress` step — the POST itself is the SSE stream.
+
+Request body:
+```ts
+{
+  mode: 't2v' | 'i2v',
+  prompt: string,           // required, non-empty after trim
+  negativePrompt?: string,  // overrides template Chinese default if provided
+  width: number,            // integer multiple of 32, 256–1280
+  height: number,           // integer multiple of 32, 256–1280
+  frames: number,           // integer where (frames - 1) % 8 === 0, 17–121 (e.g. 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121)
+  steps: number,            // even integer, 4–40
+  cfg: number,              // 1.0–10.0
+  seed?: number,            // omit → random
+  startImageB64?: string,   // required for mode='i2v', forbidden for 't2v'
+}
+```
+
+SSE events are the same shape as `/api/progress/[promptId]`:
+| event | data shape |
+|-------|-----------|
+| `progress` | `{ value: number, max: number }` |
+| `complete` | `{ records: GenerationRecord[] }` |
+| `error` | `{ message: string }` |
+
+Flow: validate → build workflow (`buildT2VWorkflow` / `buildI2VWorkflow`) → video runtime guard → POST to ComfyUI → register video job on WS manager (15-minute watchdog) → stream progress events → on `executed` for SaveWEBM node: download webm via `GET /view`, write to `IMAGE_OUTPUT_DIR`, SSH-delete from VM, create DB row → send `complete` event.
+
+Model is Wan 2.2 14B fp8 MoE, hardcoded. Sampler: euler. Scheduler: simple. FPS: 16 (hardcoded). No model selection, no LoRA support, no FPS selection in Phase 1.
+
+**MoE step coupling:** Wan 2.2 uses two `KSamplerAdvanced` nodes (high-noise + low-noise UNETs) that must hand off at the midpoint. `applySteps(wf, total)` in `wan22-workflow.ts` writes all four fields atomically: `node57.steps`, `node57.end_at_step`, `node58.steps`, `node58.start_at_step`. Naively setting only `steps` leaves the handoff frozen at 10 and breaks sampling at any total ≠ 20.
+
+**Default negative prompt:** The template's Chinese negative string is Alibaba-recommended and must NOT be translated or replaced. It's treated as immutable by the builder unless the caller explicitly provides `negativePrompt`.
+
+**Watchdog:** 15 minutes (vs. 10 minutes for image jobs). Video generation at 1280×704 57 frames takes ~5 minutes on the A100.
+
 ### `GET /api/gallery?page=1&limit=20`
 Paginated. `limit` capped at 50. Returns:
 ```ts
@@ -271,14 +312,17 @@ src/
       models/register/       POST — thin wrapper over registerModel; used by add_model.sh
       models/ingest/         POST — SSE single-model ingestion
       models/ingest-batch/   POST — SSE batch ingestion
+      generate-video/        POST — SSE video generation via Wan 2.2 (t2v + i2v)
       services/control/      POST — SSH sudo systemctl start/stop on Core VM
       services/status/       GET  — SSH systemctl + HTTP probe for all three services
       generate/polish/route.ts     POST — LLM prompt expansion with frozen-token validation
       generate/polish/prompt.ts    POLISH_SYSTEM_PROMPT, POLISH_SAMPLING, STATIC_NEGATIVE constants
       generate/polish/validate.ts  extractFrozenTokens(), validatePreservation()
   lib/
-    comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert
+    comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert; extended for video: Job is a discriminated union (ImageJob | VideoJob), registerVideoJob(), executed handler for SaveWEBM node, 15-min watchdog for video
     workflow.ts         buildWorkflow()
+    wan22-workflow.ts   buildT2VWorkflow(), buildI2VWorkflow(); MoE step coupling via applySteps(); strips SaveAnimatedWEBP; replaces LoadImage with ETN_LoadImageBase64 for i2v
+    wan22-templates/    wan22-t2v.json, wan22-i2v.json — API-format ComfyUI workflow templates (imported as JSON modules; do not reference prompts/ at runtime)
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
     civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/
@@ -409,6 +453,50 @@ After the script completes, tap the Refresh button (↺) in Studio's model picke
 **Requires** `jq` on the local machine (`sudo apt install jq`). The CivitAI token is read from `.env` (`CIVITAI_TOKEN`); the script will refuse to run if it's missing. Per-item failures (validation, download, registration) are logged and skipped; the script always processes the entire queue and prints a summary of successes and failures at the end.
 
 ---
+
+## Video generation (Phase 1)
+
+### Disk-avoidance exception
+No `SaveVideoWebsocket` node exists in ComfyUI. The video path writes exactly one `.webm` file to the VM per generation. `SaveWEBM` is the **only** permitted disk-write class on the VM, and only via `/api/generate-video`. Immediately after ComfyUI signals completion, mint-pc fetches the file via HTTP and SSH-deletes it:
+
+```
+ComfyUI 'executed' (node 47 / SaveWEBM) → filename + subfolder
+  → GET http://127.0.0.1:8188/view?filename=...&subfolder=...&type=output
+  → writeFile to IMAGE_OUTPUT_DIR
+  → ssh: rm -f /models/ComfyUI/output/video-${generationId}*
+  → prisma.generation.create (mediaType: 'video')
+  → SSE 'complete' event
+```
+
+SSH cleanup runs in a `finally` block — a crash during download still removes the VM file. SSH errors during cleanup are logged but do not fail the request.
+
+### MoE step coupling
+Wan 2.2 is a Mixture-of-Experts model that splits sampling across two UNETs (high-noise: node 57, low-noise: node 58) handed off at the midpoint. Setting `steps = N` naively on both nodes leaves the handoff frozen at 10 (the template default), silently breaking sampling for any total ≠ 20.
+
+`applySteps(wf, total)` in `wan22-workflow.ts` writes all four fields atomically:
+- `wf['57'].inputs.steps = total`
+- `wf['57'].inputs.end_at_step = total / 2`
+- `wf['58'].inputs.steps = total`
+- `wf['58'].inputs.start_at_step = total / 2`
+
+CFG must similarly be synced on nodes 57 and 58 in lockstep.
+
+### Chinese negative prompt
+The template's default negative prompt is verbatim Alibaba-recommended Chinese. Do NOT translate or replace it. The model was trained against this exact string. `buildT2VWorkflow` / `buildI2VWorkflow` preserve it unless the caller explicitly provides `negativePrompt`.
+
+### Validation rules
+| Parameter | Constraint |
+|---|---|
+| `width`, `height` | integer, multiple of 32, 256–1280 inclusive |
+| `frames` | integer, `(frames - 1) % 8 === 0`, 17–121 inclusive |
+| `steps` | even integer, 4–40 inclusive |
+| `cfg` | float, 1.0–10.0 inclusive |
+
+### SSE shape
+Same as `/api/progress/[promptId]`: `progress`, `complete` (with `records: GenerationRecord[]`), `error`. The `GenerationRecord` for a video has `mediaType: 'video'`, `frames: N`, `fps: 16`. Duration in seconds = `frames / fps`.
+
+### Watchdog
+Video jobs use a 15-minute watchdog (`VIDEO_JOB_TIMEOUT_MS`) vs. 10 minutes for image jobs. The `ComfyWSManager.registerVideoJob()` method accepts a `timeoutMs` parameter; `registerJob()` (image path) is unchanged and still uses 10 minutes.
 
 ## Not yet implemented (planned features)
 

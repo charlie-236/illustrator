@@ -6,23 +6,37 @@ import type { Prisma } from '@prisma/client';
 import type { GenerationParams } from '@/types';
 import { prisma } from './prisma';
 
-interface Job {
+type ImageJob = {
   promptId: string;
+  mediaType: 'image';
   params: GenerationParams;
   resolvedSeed: number;
   assembledPos: string;
   assembledNeg: string;
   controller: ReadableStreamDefaultController<Uint8Array>;
-  /** Accumulates every image binary frame for this prompt (one per batch image). */
   imageBuffers: Buffer[];
   activeNode: string | null;
   finalized: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
-}
+};
+
+type VideoJob = {
+  promptId: string;
+  mediaType: 'video';
+  onVideoOutput: (filename: string, subfolder: string) => void;
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  imageBuffers: Buffer[];  // unused for video; kept for type symmetry
+  activeNode: string | null;
+  finalized: boolean;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+};
+
+type Job = ImageJob | VideoJob;
 
 const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://127.0.0.1:8188';
 const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
-const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — covers batch=4 + high-res on A100
+const IMAGE_JOB_TIMEOUT_MS = 10 * 60 * 1000;
+const VIDEO_JOB_TIMEOUT_MS = 15 * 60 * 1000;
 const encoder = new TextEncoder();
 
 function sseChunk(event: string, data: unknown): Uint8Array {
@@ -174,12 +188,12 @@ class ComfyWSManager {
         const statusStr = history[promptId]?.status?.status_str;
 
         if (statusStr === 'success') {
-          // Prompt finished during the disconnect; binary frame was sent into the dead socket.
+          // Prompt finished during the disconnect; output was sent into the dead socket.
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
           if (this.activePromptId === promptId) this.activePromptId = null;
           job.controller.enqueue(sseChunk('error', {
-            message: 'Generation completed during reconnection but the image was lost. Please retry.',
+            message: 'Generation completed during reconnection but the output was lost. Please retry.',
           }));
           try { job.controller.close(); } catch { /* already closed */ }
           this.jobs.delete(promptId);
@@ -211,10 +225,10 @@ class ComfyWSManager {
       return;
     }
 
-    // Route PNG frame directly to the active prompt — no iteration needed.
+    // Route PNG frame directly to the active image prompt — video jobs don't emit binary frames.
     if (this.activePromptId === null) return;
     const job = this.jobs.get(this.activePromptId);
-    if (!job) return;
+    if (!job || job.mediaType !== 'image') return;
     job.imageBuffers.push(Buffer.from(result.image));
   }
 
@@ -256,6 +270,36 @@ class ComfyWSManager {
       return;
     }
 
+    if (type === 'executed') {
+      // Per-node completion carrying output data. For video jobs, SaveWEBM (node 47)
+      // reports the output filename here. ComfyUI uses 'videos', 'images', or 'gifs'
+      // depending on the version and node type — check all three.
+      const promptId = data.prompt_id as string;
+      const nodeId = data.node as string;
+      const job = this.jobs.get(promptId);
+      if (job && job.mediaType === 'video' && nodeId === '47') {
+        const output = data.output as Record<string, unknown> | undefined;
+        if (output) {
+          type FileEntry = { filename: string; subfolder: string };
+          const fileList = (
+            (output.videos as FileEntry[] | undefined) ??
+            (output.images as FileEntry[] | undefined) ??
+            (output.gifs as FileEntry[] | undefined)
+          );
+          if (fileList && fileList.length > 0) {
+            const { filename, subfolder } = fileList[0];
+            job.finalized = true;
+            if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+            if (this.activePromptId === promptId) this.activePromptId = null;
+            this.jobs.delete(promptId);
+            // Callback drives download, SSH cleanup, DB write, and SSE close.
+            job.onVideoOutput(filename, subfolder);
+          }
+        }
+      }
+      return;
+    }
+
     if (type === 'execution_success') {
       const promptId = data.prompt_id as string;
       const job = this.jobs.get(promptId);
@@ -286,8 +330,18 @@ class ComfyWSManager {
     if (job.finalized) return;
     job.finalized = true;
     if (job.timeoutId !== null) clearTimeout(job.timeoutId);
-    const { params, resolvedSeed, assembledPos, assembledNeg, imageBuffers, controller } = job;
     this.jobs.delete(job.promptId);
+
+    if (job.mediaType === 'video') {
+      // Video jobs are completed via the onVideoOutput callback (triggered by 'executed' for
+      // node 47). If execution_success or executing{null} fires without that callback having run,
+      // the SaveWEBM node must have produced no output — treat it as an error.
+      job.controller.enqueue(sseChunk('error', { message: 'Video generation completed but no output was recorded' }));
+      try { job.controller.close(); } catch { /* already closed */ }
+      return;
+    }
+
+    const { params, resolvedSeed, assembledPos, assembledNeg, imageBuffers, controller } = job;
 
     if (imageBuffers.length === 0) {
       controller.enqueue(sseChunk('error', { message: 'No image data received' }));
@@ -369,7 +423,8 @@ class ComfyWSManager {
     job.finalized = true;
     job.timeoutId = null;
     if (this.activePromptId === promptId) this.activePromptId = null;
-    job.controller.enqueue(sseChunk('error', { message: 'Generation timed out after 10 minutes' }));
+    const mins = job.mediaType === 'video' ? 15 : 10;
+    job.controller.enqueue(sseChunk('error', { message: `Generation timed out after ${mins} minutes` }));
     try { job.controller.close(); } catch { /* already closed */ }
     this.jobs.delete(promptId);
   }
@@ -405,14 +460,35 @@ class ComfyWSManager {
       return;
     }
 
-    const timeoutId = setTimeout(() => this.expireJob(promptId), JOB_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => this.expireJob(promptId), IMAGE_JOB_TIMEOUT_MS);
 
     this.jobs.set(promptId, {
       promptId,
+      mediaType: 'image',
       params: entry.params,
       resolvedSeed: entry.resolvedSeed,
       assembledPos: entry.assembledPos,
       assembledNeg: entry.assembledNeg,
+      controller,
+      imageBuffers: [],
+      activeNode: null,
+      finalized: false,
+      timeoutId,
+    });
+  }
+
+  registerVideoJob(
+    promptId: string,
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    onVideoOutput: (filename: string, subfolder: string) => void,
+    timeoutMs: number = VIDEO_JOB_TIMEOUT_MS,
+  ) {
+    const timeoutId = setTimeout(() => this.expireJob(promptId), timeoutMs);
+
+    this.jobs.set(promptId, {
+      promptId,
+      mediaType: 'video',
+      onVideoOutput,
       controller,
       imageBuffers: [],
       activeNode: null,
