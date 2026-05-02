@@ -170,8 +170,13 @@ export async function POST(req: NextRequest) {
 
   const sseEncoder = new TextEncoder();
 
+  // Capture controller for use in cancel() where it isn't a parameter.
+  let capturedController: ReadableStreamDefaultController<Uint8Array> | null = null;
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      capturedController = controller;
+
       // Emit init event first so the client can obtain promptId + generationId
       // before any progress events arrive.
       controller.enqueue(
@@ -180,13 +185,20 @@ export async function POST(req: NextRequest) {
 
       manager.registerVideoJob(promptId, videoParams, controller);
 
+      // SSE stream close means the browser disconnected (refresh, tab close, network drop).
+      // It does NOT mean the user pressed Abort. The job stays alive on the server so
+      // that the next /api/jobs/active poll can reattach. Explicit abort goes through
+      // POST /api/jobs/[promptId]/abort instead.
       req.signal.addEventListener('abort', () => {
-        manager.removeJob(promptId);
+        manager.removeSubscriber(promptId, controller);
         try { controller.close(); } catch { /* already closed */ }
       });
     },
     cancel() {
-      manager.removeJob(promptId);
+      // Same reasoning as the abort handler above — stream cancel is not user intent.
+      if (capturedController) {
+        manager.removeSubscriber(promptId, capturedController);
+      }
     },
   });
 
