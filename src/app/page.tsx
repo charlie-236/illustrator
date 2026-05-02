@@ -8,7 +8,7 @@ import ServerBay from '@/components/ServerBay';
 import TabNav from '@/components/TabNav';
 import ToastContainer from '@/components/Toast';
 import { QueueProvider } from '@/contexts/QueueContext';
-import type { GenerationParams, GenerationRecord, LoraEntry } from '@/types';
+import type { GenerationParams, GenerationRecord, LoraEntry, VideoRemixData } from '@/types';
 
 export type Tab = 'studio' | 'gallery' | 'models' | 'admin';
 
@@ -42,14 +42,29 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>('studio');
   const [refreshGallery, setRefreshGallery] = useState(0);
   const [remixParams, setRemixParams] = useState<GenerationParams | null>(null);
+  const [videoRemixParams, setVideoRemixParams] = useState<VideoRemixData | null>(null);
   const [modelConfigVersion, setModelConfigVersion] = useState(0);
 
   const handleRemix = useCallback((record: GenerationRecord) => {
-    setRemixParams(recordToParams(record));
+    if (record.mediaType === 'video') {
+      setVideoRemixParams({
+        positivePrompt: record.promptPos,
+        width: record.width,
+        height: record.height,
+        frames: record.frames ?? 57,
+        steps: record.steps,
+        cfg: record.cfg,
+      });
+      setRemixParams(null);
+    } else {
+      setRemixParams(recordToParams(record));
+      setVideoRemixParams(null);
+    }
     setTab('studio');
   }, []);
 
   const handleRemixConsumed = useCallback(() => setRemixParams(null), []);
+  const handleVideoRemixConsumed = useCallback(() => setVideoRemixParams(null), []);
   const handleNavigateToGallery = useCallback(() => setTab('gallery'), []);
 
   return (
@@ -63,6 +78,8 @@ export default function Home() {
               onGenerated={() => setRefreshGallery((n) => n + 1)}
               remixParams={remixParams}
               onRemixConsumed={handleRemixConsumed}
+              videoRemixParams={videoRemixParams}
+              onVideoRemixConsumed={handleVideoRemixConsumed}
               onRemix={handleRemix}
               modelConfigVersion={modelConfigVersion}
               onNavigateToGallery={handleNavigateToGallery}

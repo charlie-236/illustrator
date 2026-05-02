@@ -548,7 +548,20 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 | `DELETE /api/jobs/[promptId]` | Aborts a job: sends error SSE, closes stream, SSH cleanup (video), adds to recentlyCompleted. |
 
 **`init` SSE event (video only).** `/api/generate-video` emits an `init` event as the first SSE frame with `{ promptId, generationId }` so the client can add the job to the queue before any `progress` events. Image jobs get promptId from the synchronous JSON response of `POST /api/generate`.
-**Single-job UX (Phase 1.2a state):** The Generate Video button and mode toggle are both disabled while a generation is in-flight. Concurrency, queue tray, and audio chime land in Phase 1.2b.
+
+### Gallery (Phase 1.3)
+
+Video generations appear in the Gallery alongside images:
+
+- **Tile thumbnails:** `<video preload="metadata">` — the browser fetches enough to render the first frame as a poster; no separate thumbnail asset needed.
+- **Duration badge:** Bottom-right corner of every video tile, dark pill: `${(frames / fps).toFixed(1)}s`. Render-only on `mediaType === 'video'` tiles.
+- **Modal playback:** `<video controls autoPlay loop playsInline>` with native HTML5 controls. No `muted` attribute — Wan 2.2 generates no audio, so autoplay without mute is permitted. Previous/Next navigation works across mixed media respecting any active filter.
+- **Sidebar metadata (modal):** Frames and FPS rows shown for video; sampler/scheduler/HRF shown for image.
+- **All/Images/Videos filter:** Pill toggle group in the filter bar alongside the favorites toggle. Default: All. Passes `mediaType=image` or `mediaType=video` to `GET /api/gallery`. Combines with favorites filter (AND).
+- **Remix from video:** Switches Studio to Video mode and populates the video form with prompt, width, height, frames, steps, cfg. The starting frame is not restored — re-pick from gallery if desired.
+- **Delete/favorite:** Work identically for video — the delete endpoint and favorite toggle are media-type-agnostic.
+
+`GET /api/gallery` accepts an optional `mediaType` query parameter (`image` or `video`). Omitting it returns all generations. Combines with `isFavorite=true` as an AND filter.
 
 ---
 

@@ -15,6 +15,8 @@ interface Props {
   onRemix: (record: GenerationRecord) => void;
 }
 
+type MediaFilter = 'all' | 'image' | 'video';
+
 function HeartIcon({ filled }: { filled: boolean }) {
   return (
     <svg className="w-5 h-5" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -31,6 +33,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [initialized, setInitialized] = useState(false);
   // null = closed; number = index of the item currently open in the modal
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -44,11 +47,13 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   const hasMoreRef = useRef(true);
   const loadingRef = useRef(false);
   const favoritesOnlyRef = useRef(false);
+  const mediaFilterRef = useRef<MediaFilter>('all');
 
   cursorRef.current = cursor;
   hasMoreRef.current = hasMore;
   loadingRef.current = loading;
   favoritesOnlyRef.current = favoritesOnly;
+  mediaFilterRef.current = mediaFilter;
 
   function clearPendingTimer() {
     if (pendingDeleteTimerRef.current !== null) {
@@ -67,6 +72,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
       const params = new URLSearchParams();
       if (cursorRef.current) params.set('cursor', cursorRef.current);
       if (favoritesOnlyRef.current) params.set('isFavorite', 'true');
+      if (mediaFilterRef.current !== 'all') params.set('mediaType', mediaFilterRef.current);
       const res = await fetch(`/api/gallery?${params}`);
       const data = await res.json() as GalleryResponse;
       setItems((prev) => [...prev, ...data.records]);
@@ -78,7 +84,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     }
   }, []);
 
-  // Reset and reload from scratch when refreshToken or favoritesOnly changes
+  // Reset and reload from scratch when refreshToken, favoritesOnly, or mediaFilter changes
   useEffect(() => {
     setItems([]);
     setCursor(null);
@@ -87,7 +93,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
     cursorRef.current = null;
     hasMoreRef.current = true;
     loadingRef.current = false;
-  }, [refreshToken, favoritesOnly]);
+  }, [refreshToken, favoritesOnly, mediaFilter]);
 
   // Fire initial load after reset
   useEffect(() => {
@@ -157,7 +163,24 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
   }
 
   const filterBar = (
-    <div className="flex items-center justify-end px-3 pt-3 pb-1">
+    <div className="flex items-center justify-between px-3 pt-3 pb-1 gap-2">
+      {/* Media type filter */}
+      <div className="flex items-center rounded-lg border border-zinc-700 overflow-hidden text-sm font-medium">
+        {(['all', 'image', 'video'] as MediaFilter[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setMediaFilter(f)}
+            className={`min-h-12 px-4 transition-colors capitalize
+              ${mediaFilter === f
+                ? 'bg-violet-600 text-white'
+                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {f === 'all' ? 'All' : f === 'image' ? 'Images' : 'Videos'}
+          </button>
+        ))}
+      </div>
+
+      {/* Favorites filter */}
       <button
         onClick={() => setFavoritesOnly((f) => !f)}
         className={`min-h-12 px-4 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors
@@ -194,20 +217,38 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
             className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors group"
             onMouseLeave={() => { if (pendingDelete === item.id) setPendingDelete(null); }}
           >
-            {/* Image — tap to open full-screen modal */}
+            {/* Thumbnail — tap to open full-screen modal */}
             <button
               onClick={() => setSelectedIdx(i)}
               className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
               aria-label={`View: ${item.promptPos.slice(0, 40)}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imgSrc(item.filePath)}
-                alt={item.promptPos.slice(0, 40)}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
+              {item.mediaType === 'video' ? (
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video
+                  src={imgSrc(item.filePath)}
+                  preload="metadata"
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imgSrc(item.filePath)}
+                  alt={item.promptPos.slice(0, 40)}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              )}
             </button>
+
+            {/* Duration badge for video tiles */}
+            {item.mediaType === 'video' && item.frames != null && item.fps != null && (
+              <div className="absolute bottom-8 right-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-medium pointer-events-none select-none">
+                {(item.frames / item.fps).toFixed(1)}s
+              </div>
+            )}
 
             {/* Heart — always visible when favorited, visible on hover otherwise */}
             <button

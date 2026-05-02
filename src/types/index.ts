@@ -100,6 +100,16 @@ export interface ModelInfo {
   embeddings: string[];
 }
 
+/** Params passed from Gallery to Studio when remixing a video generation. */
+export interface VideoRemixData {
+  positivePrompt: string;
+  width: number;
+  height: number;
+  frames: number;
+  steps: number;
+  cfg: number;
+}
+
 export type SSEEvent =
   | { type: 'progress'; value: number; max: number }
   | { type: 'complete'; records: GenerationRecord[] }
