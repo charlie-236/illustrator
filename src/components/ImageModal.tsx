@@ -121,6 +121,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
 
   if (!record) return null;
 
+  const isVideo = record.mediaType === 'video';
   const modelShort = record.model.split('/').pop()?.replace(/\.(safetensors|ckpt|pt)$/i, '') ?? record.model;
   const date = new Date(record.createdAt).toLocaleString();
 
@@ -193,26 +194,39 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
         </button>
       </div>
 
-      {/* ── Image area ── */}
+      {/* ── Media area ── */}
       <div
         className="flex-1 relative flex items-center justify-center overflow-hidden bg-black"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          key={record.id}
-          src={imgSrc(record.filePath)}
-          alt={record.promptPos.slice(0, 80)}
-          className="max-w-full max-h-full object-contain select-none"
-          draggable={false}
-        />
+        {isVideo ? (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video
+            key={record.id}
+            src={imgSrc(record.filePath)}
+            controls
+            autoPlay
+            loop
+            playsInline
+            className="max-w-full max-h-full object-contain select-none"
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={record.id}
+            src={imgSrc(record.filePath)}
+            alt={record.promptPos.slice(0, 80)}
+            className="max-w-full max-h-full object-contain select-none"
+            draggable={false}
+          />
+        )}
 
         {idx > 0 && (
           <button
             onClick={() => goTo(idx - 1)}
             className="absolute left-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 flex items-center justify-center rounded-xl bg-black/55 hover:bg-black/80 text-white backdrop-blur-sm transition-colors"
-            aria-label="Previous image"
+            aria-label="Previous"
           >
             <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -224,7 +238,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           <button
             onClick={() => goTo(idx + 1)}
             className="absolute right-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 flex items-center justify-center rounded-xl bg-black/55 hover:bg-black/80 text-white backdrop-blur-sm transition-colors"
-            aria-label="Next image"
+            aria-label="Next"
           >
             <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -243,8 +257,17 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           <span className="text-xs text-zinc-400">{record.steps} steps</span>
           <span className="text-xs text-zinc-400">CFG {record.cfg}</span>
           <span className="text-xs text-zinc-400 tabular-nums">Seed {record.seed}</span>
-          <span className="text-xs text-zinc-400">{record.sampler}/{record.scheduler}</span>
-          {record.highResFix && <span className="text-xs text-violet-400 font-medium">HRF 2×</span>}
+          {isVideo ? (
+            <>
+              {record.frames != null && <span className="text-xs text-zinc-400">{record.frames} frames</span>}
+              {record.fps != null && <span className="text-xs text-zinc-400">{record.fps} fps</span>}
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-zinc-400">{record.sampler}/{record.scheduler}</span>
+              {record.highResFix && <span className="text-xs text-violet-400 font-medium">HRF 2×</span>}
+            </>
+          )}
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
       </div>

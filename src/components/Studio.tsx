@@ -7,7 +7,7 @@ import ParamSlider from './ParamSlider';
 import ImageModal from './ImageModal';
 import GalleryPicker from './GalleryPicker';
 import QueueTray from './QueueTray';
-import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig } from '@/types';
+import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
@@ -76,6 +76,8 @@ interface Props {
   onGenerated: () => void;
   remixParams: GenerationParams | null;
   onRemixConsumed: () => void;
+  videoRemixParams: VideoRemixData | null;
+  onVideoRemixConsumed: () => void;
   onRemix: (record: GenerationRecord) => void;
   modelConfigVersion: number;
   onNavigateToGallery: () => void;
@@ -112,6 +114,8 @@ export default function Studio({
   onGenerated,
   remixParams,
   onRemixConsumed,
+  videoRemixParams,
+  onVideoRemixConsumed,
   onRemix,
   modelConfigVersion,
   onNavigateToGallery,
@@ -215,10 +219,12 @@ export default function Studio({
     };
   }, []);
 
-  // Apply remix params from Gallery
+  // Apply image remix params from Gallery
   useEffect(() => {
     if (!remixParams) return;
     setP({ ...remixParams, batchSize: remixParams.batchSize ?? 1 });
+    setMode('image');
+    try { sessionStorage.setItem('studio-mode', 'image'); } catch { /* ignore */ }
     onRemixConsumed();
     if (remixParams.checkpoint) {
       fetch(`/api/checkpoint-config?name=${encodeURIComponent(remixParams.checkpoint)}`)
@@ -235,6 +241,24 @@ export default function Studio({
       setCheckpointDefaults(null);
     }
   }, [remixParams, onRemixConsumed]);
+
+  // Apply video remix params from Gallery
+  useEffect(() => {
+    if (!videoRemixParams) return;
+    setVideoP({
+      width: videoRemixParams.width,
+      height: videoRemixParams.height,
+      frames: videoRemixParams.frames,
+      steps: videoRemixParams.steps,
+      cfg: videoRemixParams.cfg,
+    });
+    setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt }));
+    setUseStartingFrame(false);
+    setStartingFrameRecord(null);
+    setMode('video');
+    try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
+    onVideoRemixConsumed();
+  }, [videoRemixParams, onVideoRemixConsumed]);
 
   // ── Param helpers ─────────────────────────────────────────────────────────
 
