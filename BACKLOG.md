@@ -20,4 +20,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — `batch/model-delete-by-filename` (PR #10)
 - [x] Source embeddings list from the VM (orphan visibility + delete) — `batch/embeddings-vm-source` (PR #11)
 - [x] Real-readiness status probe for Admin tab services — `batch/service-readiness-probe` (PR #12)
-- [ ] Aphrodite readiness probe fix (PR #12 follow-up) — see prompts/aphrodite-readiness-probe-fix.md
+- [~] Aphrodite readiness probe fix (PR #12 follow-up) — `batch/aphrodite-readiness-probe-fix` (PR #13)

@@ -17,11 +17,11 @@ const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = 
   },
   'aphrodite-writer': {
     unit: 'aphrodite-writer',
-    probeUrl: 'http://127.0.0.1:21434/v1/models',
+    probeUrl: 'http://127.0.0.1:21434/health',
   },
   'aphrodite-illustrator-polisher': {
     unit: 'aphrodite-illustrator-polisher',
-    probeUrl: 'http://127.0.0.1:11438/v1/models',
+    probeUrl: 'http://127.0.0.1:11438/health',
   },
 };
 
