@@ -27,5 +27,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Studio video mode (Phase 1.2a of video) — `batch/wan22-studio-video-mode` (PR #18)
 - [x] Queue UX: concurrency, tray, notifications, refresh survivability (Phase 1.2b of video) — `batch/wan22-queue-ux` (PR #19)
 - [x] Gallery video support (Phase 1.3 of video) — `batch/wan22-gallery-video` (PR #20)
-- [ ] Honest disk-avoidance grep guard (i2v template fix) — see prompts/wan22-template-loadimage-fix.md
+- [~] Honest disk-avoidance grep guard (i2v template fix) — `batch/wan22-template-loadimage-fix` (PR #21)
 - [ ] Refresh survivability fix (abort vs disconnect) — see prompts/wan22-refresh-survivability-fix.md
