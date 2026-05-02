@@ -168,8 +168,16 @@ export async function POST(req: NextRequest) {
 
   // ─── SSE stream ───────────────────────────────────────────────────────────
 
+  const sseEncoder = new TextEncoder();
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      // Emit init event first so the client can obtain promptId + generationId
+      // before any progress events arrive.
+      controller.enqueue(
+        sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, generationId })}\n\n`),
+      );
+
       manager.registerVideoJob(promptId, videoParams, controller);
 
       req.signal.addEventListener('abort', () => {

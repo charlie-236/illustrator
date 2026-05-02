@@ -6,6 +6,8 @@ import Gallery from '@/components/Gallery';
 import ModelConfig from '@/components/ModelConfig';
 import ServerBay from '@/components/ServerBay';
 import TabNav from '@/components/TabNav';
+import ToastContainer from '@/components/Toast';
+import { QueueProvider } from '@/contexts/QueueContext';
 import type { GenerationParams, GenerationRecord, LoraEntry } from '@/types';
 
 export type Tab = 'studio' | 'gallery' | 'models' | 'admin';
@@ -48,31 +50,36 @@ export default function Home() {
   }, []);
 
   const handleRemixConsumed = useCallback(() => setRemixParams(null), []);
+  const handleNavigateToGallery = useCallback(() => setTab('gallery'), []);
 
   return (
-    <div className="flex flex-col min-h-screen max-w-2xl mx-auto">
-      <TabNav active={tab} onChange={setTab} />
-      <main className="flex-1 overflow-y-auto pb-24">
-        <div className={tab === 'studio' ? '' : 'hidden'}>
-          <Studio
-            tab={tab}
-            onGenerated={() => setRefreshGallery((n) => n + 1)}
-            remixParams={remixParams}
-            onRemixConsumed={handleRemixConsumed}
-            onRemix={handleRemix}
-            modelConfigVersion={modelConfigVersion}
-          />
-        </div>
-        <div className={tab === 'gallery' ? '' : 'hidden'}>
-          <Gallery refreshToken={refreshGallery} onRemix={handleRemix} />
-        </div>
-        <div className={tab === 'models' ? '' : 'hidden'}>
-          <ModelConfig onSaved={() => setModelConfigVersion((n) => n + 1)} />
-        </div>
-        <div className={tab === 'admin' ? '' : 'hidden'}>
-          <ServerBay />
-        </div>
-      </main>
-    </div>
+    <QueueProvider>
+      <div className="flex flex-col min-h-screen max-w-2xl mx-auto">
+        <TabNav active={tab} onChange={setTab} />
+        <main className="flex-1 overflow-y-auto pb-24">
+          <div className={tab === 'studio' ? '' : 'hidden'}>
+            <Studio
+              tab={tab}
+              onGenerated={() => setRefreshGallery((n) => n + 1)}
+              remixParams={remixParams}
+              onRemixConsumed={handleRemixConsumed}
+              onRemix={handleRemix}
+              modelConfigVersion={modelConfigVersion}
+              onNavigateToGallery={handleNavigateToGallery}
+            />
+          </div>
+          <div className={tab === 'gallery' ? '' : 'hidden'}>
+            <Gallery refreshToken={refreshGallery} onRemix={handleRemix} />
+          </div>
+          <div className={tab === 'models' ? '' : 'hidden'}>
+            <ModelConfig onSaved={() => setModelConfigVersion((n) => n + 1)} />
+          </div>
+          <div className={tab === 'admin' ? '' : 'hidden'}>
+            <ServerBay />
+          </div>
+        </main>
+        <ToastContainer onNavigateToGallery={handleNavigateToGallery} />
+      </div>
+    </QueueProvider>
   );
 }

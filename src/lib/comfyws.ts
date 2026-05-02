@@ -32,6 +32,12 @@ interface BaseJob {
   activeNode: string | null;
   finalized: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
+  /** First ~60 chars of the positive prompt, for the queue tray display. */
+  promptSummary: string;
+  /** Unix ms timestamp when the job was registered. */
+  startedAt: number;
+  /** Latest sampling progress, updated as WS events arrive. */
+  progress: { current: number; total: number } | null;
 }
 
 interface ImageJob extends BaseJob {
@@ -51,12 +57,38 @@ interface VideoJob extends BaseJob {
 
 type Job = ImageJob | VideoJob;
 
+// ─── recently-completed cache ─────────────────────────────────────────────────
+
+interface RecentlyCompletedEntry {
+  promptId: string;
+  generationId: string;
+  mediaType: 'image' | 'video';
+  promptSummary: string;
+  status: 'done' | 'error';
+  errorMessage?: string;
+  completedAt: number;
+}
+
+// ─── public shape returned by getActiveJobs() ─────────────────────────────────
+
+export interface ActiveJobInfo {
+  promptId: string;
+  generationId: string;
+  mediaType: 'image' | 'video';
+  promptSummary: string;
+  startedAt: number;
+  progress: { current: number; total: number } | null;
+  status: 'running' | 'done' | 'error';
+  errorMessage?: string;
+}
+
 // ─── constants ───────────────────────────────────────────────────────────────
 
 const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://127.0.0.1:8188';
 const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 const IMAGE_JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — covers batch=4 + high-res on A100
 const VIDEO_JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 min — Wan 2.2 at 1280×704 takes ~5 min; 15 gives headroom
+const RECENT_COMPLETED_TTL_MS = 5 * 60 * 1000; // 5 min — keep recently-completed for polling recovery
 const VM_USER = process.env.A100_VM_USER ?? '';
 const VM_IP = process.env.A100_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
@@ -145,6 +177,7 @@ class ComfyWSManager {
   private clientId: string;
   private jobs = new Map<string, Job>();
   private pendingParams = new Map<string, { params: GenerationParams; resolvedSeed: number; assembledPos: string; assembledNeg: string; createdAt: number }>();
+  private recentlyCompleted = new Map<string, RecentlyCompletedEntry>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private reconnectAttempts = 0;
@@ -219,6 +252,7 @@ class ComfyWSManager {
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
           if (this.activePromptId === promptId) this.activePromptId = null;
+          this.addToRecentlyCompleted(job, 'error', 'Generation completed during reconnection but the output was lost. Please retry.');
           job.controller.enqueue(sseChunk('error', {
             message: 'Generation completed during reconnection but the output was lost. Please retry.',
           }));
@@ -228,6 +262,7 @@ class ComfyWSManager {
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
           if (this.activePromptId === promptId) this.activePromptId = null;
+          this.addToRecentlyCompleted(job, 'error', 'Generation failed on the GPU server.');
           job.controller.enqueue(sseChunk('error', {
             message: 'Generation failed on the GPU server.',
           }));
@@ -271,6 +306,7 @@ class ComfyWSManager {
     if (type === 'progress') {
       const job = this.jobs.get(data.prompt_id as string);
       if (job) {
+        job.progress = { current: data.value as number, total: data.max as number };
         job.controller.enqueue(
           sseChunk('progress', { value: data.value, max: data.max }),
         );
@@ -331,6 +367,7 @@ class ComfyWSManager {
         if (job.timeoutId !== null) clearTimeout(job.timeoutId);
         if (this.activePromptId === promptId) this.activePromptId = null;
         const message = data.exception_message != null ? String(data.exception_message) : 'Generation failed';
+        this.addToRecentlyCompleted(job, 'error', message);
         job.controller.enqueue(sseChunk('error', { message }));
         try { job.controller.close(); } catch { /* already closed */ }
         this.jobs.delete(promptId);
@@ -345,6 +382,8 @@ class ComfyWSManager {
 
   private finalizeJob(job: Job) {
     if (job.finalized) return;
+    // Signal to the client that GPU computation is done and file saving is starting
+    job.controller.enqueue(sseChunk('completing', {}));
     if (job.mediaType === 'video') {
       void this.finalizeVideoJob(job);
     } else {
@@ -359,6 +398,7 @@ class ComfyWSManager {
     this.jobs.delete(job.promptId);
 
     if (imageBuffers.length === 0) {
+      this.addToRecentlyCompleted(job, 'error', 'No image data received');
       controller.enqueue(sseChunk('error', { message: 'No image data received' }));
       try { controller.close(); } catch { /* already closed */ }
       return;
@@ -423,9 +463,11 @@ class ComfyWSManager {
         }),
       );
 
+      this.addToRecentlyCompleted(job, 'done', undefined, records[0].id);
       controller.enqueue(sseChunk('complete', { records }));
     } catch (err) {
       console.error('[ComfyWS] finalizeImageJob error', err);
+      this.addToRecentlyCompleted(job, 'error', String(err));
       controller.enqueue(sseChunk('error', { message: String(err) }));
     } finally {
       try { job.controller.close(); } catch { /* already closed */ }
@@ -489,6 +531,7 @@ class ComfyWSManager {
         },
       });
 
+      this.addToRecentlyCompleted(job, 'done', undefined, record.id);
       controller.enqueue(sseChunk('complete', {
         id: record.id,
         filePath: record.filePath,
@@ -499,6 +542,7 @@ class ComfyWSManager {
       }));
     } catch (err) {
       console.error('[ComfyWS] finalizeVideoJob error', err);
+      this.addToRecentlyCompleted(job, 'error', String(err));
       controller.enqueue(sseChunk('error', { message: String(err) }));
     } finally {
       // SSH cleanup always runs — globs by prefix so partial files are removed too
@@ -534,12 +578,32 @@ class ComfyWSManager {
     job.timeoutId = null;
     if (this.activePromptId === promptId) this.activePromptId = null;
     const mins = job.mediaType === 'video' ? 15 : 10;
-    job.controller.enqueue(sseChunk('error', { message: `Generation timed out after ${mins} minutes` }));
+    const message = `Generation timed out after ${mins} minutes`;
+    this.addToRecentlyCompleted(job, 'error', message);
+    job.controller.enqueue(sseChunk('error', { message }));
     try { job.controller.close(); } catch { /* already closed */ }
     this.jobs.delete(promptId);
     if (job.mediaType === 'video') {
       void this.sshCleanupVideo(job.videoParams.filenamePrefix);
     }
+  }
+
+  private addToRecentlyCompleted(
+    job: Job,
+    status: 'done' | 'error',
+    errorMessage?: string,
+    generationId?: string,
+  ) {
+    const entry: RecentlyCompletedEntry = {
+      promptId: job.promptId,
+      generationId: generationId ?? (job.mediaType === 'video' ? job.videoParams.generationId : ''),
+      mediaType: job.mediaType,
+      promptSummary: job.promptSummary,
+      status,
+      errorMessage,
+      completedAt: Date.now(),
+    };
+    this.recentlyCompleted.set(job.promptId, entry);
   }
 
   stashJobParams(
@@ -574,6 +638,7 @@ class ComfyWSManager {
     }
 
     const timeoutId = setTimeout(() => this.expireJob(promptId), IMAGE_JOB_TIMEOUT_MS);
+    const promptSummary = entry.params.positivePrompt.slice(0, 60).trim() || 'Image generation';
 
     this.jobs.set(promptId, {
       promptId,
@@ -587,6 +652,9 @@ class ComfyWSManager {
       activeNode: null,
       finalized: false,
       timeoutId,
+      promptSummary,
+      startedAt: Date.now(),
+      progress: null,
     });
   }
 
@@ -597,6 +665,7 @@ class ComfyWSManager {
     timeoutMs = VIDEO_JOB_TIMEOUT_MS,
   ) {
     const timeoutId = setTimeout(() => this.expireJob(promptId), timeoutMs);
+    const promptSummary = videoParams.prompt.slice(0, 60).trim() || 'Video generation';
 
     this.jobs.set(promptId, {
       promptId,
@@ -607,6 +676,9 @@ class ComfyWSManager {
       activeNode: null,
       finalized: false,
       timeoutId,
+      promptSummary,
+      startedAt: Date.now(),
+      progress: null,
     });
   }
 
@@ -624,7 +696,59 @@ class ComfyWSManager {
       });
     }
 
+    // Notify the SSE client that this job was aborted, then close the stream.
+    // For in-tab SSE connections this delivers the error event; for post-refresh
+    // polling the recentlyCompleted cache entry covers the transition.
+    this.addToRecentlyCompleted(job, 'error', 'Aborted by user');
+    try {
+      job.controller.enqueue(sseChunk('error', { message: 'Aborted by user' }));
+      job.controller.close();
+    } catch { /* already closed */ }
+
     this.jobs.delete(promptId);
+  }
+
+  /** Returns all active (running) jobs plus recently-completed jobs (within 5 min). */
+  getActiveJobs(): ActiveJobInfo[] {
+    const now = Date.now();
+    const result: ActiveJobInfo[] = [];
+
+    // Active running jobs
+    for (const job of this.jobs.values()) {
+      if (!job.finalized) {
+        result.push({
+          promptId: job.promptId,
+          generationId: job.mediaType === 'video' ? job.videoParams.generationId : '',
+          mediaType: job.mediaType,
+          promptSummary: job.promptSummary,
+          startedAt: job.startedAt,
+          progress: job.progress,
+          status: 'running',
+        });
+      }
+    }
+
+    // Recently-completed jobs (for client poll-based recovery)
+    const expiredKeys: string[] = [];
+    for (const [key, entry] of this.recentlyCompleted) {
+      if (now - entry.completedAt > RECENT_COMPLETED_TTL_MS) {
+        expiredKeys.push(key);
+      } else {
+        result.push({
+          promptId: entry.promptId,
+          generationId: entry.generationId,
+          mediaType: entry.mediaType,
+          promptSummary: entry.promptSummary,
+          startedAt: 0,
+          progress: null,
+          status: entry.status,
+          errorMessage: entry.errorMessage,
+        });
+      }
+    }
+    for (const key of expiredKeys) this.recentlyCompleted.delete(key);
+
+    return result;
   }
 
   getClientId() {
