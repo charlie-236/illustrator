@@ -23,6 +23,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Aphrodite readiness probe fix (PR #12 follow-up) — `batch/aphrodite-readiness-probe-fix` (PR #13)
 - [x] Wan 2.2 video generation backend (Phase 1.1 of video) — `batch/wan22-video-backend` (PR #15)
 - [x] Wan 2.2 video generation backend fixes (Phase 1.1 of video) — `prompts/wan22-video-backend-fixes.md` — `batch/wan22-video-backend-fixes` (PR #16)
-- [ ] Obfuscate VM filename prefix for video generations — see prompts/wan22-video-filename-obfuscation.md
+- [~] Obfuscate VM filename prefix for video generations — `batch/wan22-video-filename-obfuscation` (PR #17)
 - [ ] Studio video mode (Phase 1.2a of video) — see prompts/wan22-studio-video-mode.md
 - [ ] Queue UX: concurrency, tray, notifications, refresh survivability (Phase 1.2b of video) — see prompts/wan22-queue-ux.md
