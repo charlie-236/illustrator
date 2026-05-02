@@ -707,6 +707,14 @@ class ComfyWSManager {
     if (!job) return false;
     if (job.timeoutId != null) clearTimeout(job.timeoutId);
 
+    // Tell ComfyUI to stop the currently-executing workflow immediately.
+    // /interrupt is workflow-global — it cancels whatever is at the head of
+    // ComfyUI's queue, which in our single-user setup is always the job being
+    // aborted. Fire-and-forget; abort proceeds regardless of response.
+    fetch(`${COMFYUI_HTTP}/interrupt`, { method: 'POST' }).catch((err) => {
+      console.error(`[comfyws] /interrupt failed for ${promptId}:`, err);
+    });
+
     // If this is a video job that hasn't been finalized, the file may have been
     // (or be about to be) written to the VM. Fire-and-forget SSH cleanup; the
     // glob is idempotent and will no-op if no file exists yet.
