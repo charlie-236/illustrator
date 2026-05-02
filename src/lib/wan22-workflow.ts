@@ -14,6 +14,7 @@ export const WAN22_DEFAULT_NEGATIVE_PROMPT =
 
 export interface VideoParams {
   generationId: string;
+  filenamePrefix: string;
   prompt: string;
   negativePrompt: string;
   width: number;
@@ -71,8 +72,8 @@ export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
   // CFG — both sampler nodes must stay in sync
   applyCfg(wf, params.cfg);
 
-  // SaveWEBM filename prefix for deterministic VM-side cleanup
-  wf['47'].inputs.filename_prefix = `video-${params.generationId}`;
+  // SaveWEBM filename prefix — random hex string, set by the route
+  wf['47'].inputs.filename_prefix = params.filenamePrefix;
 
   // Strip SaveAnimatedWEBP — disk write, no HTTP retrieval path, not needed
   delete wf['28'];
@@ -101,8 +102,8 @@ export function buildI2VWorkflow(params: VideoParams & { startImageB64: string }
   // CFG — both sampler nodes must stay in sync
   applyCfg(wf, params.cfg);
 
-  // SaveWEBM filename prefix for deterministic VM-side cleanup
-  wf['47'].inputs.filename_prefix = `video-${params.generationId}`;
+  // SaveWEBM filename prefix — random hex string, set by the route
+  wf['47'].inputs.filename_prefix = params.filenamePrefix;
 
   // Replace LoadImage (writes to VM disk) with ETN_LoadImageBase64 (inline base64 — no disk write)
   wf['52'] = {

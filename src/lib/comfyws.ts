@@ -11,6 +11,7 @@ import { prisma } from './prisma';
 
 export interface VideoJobParams {
   generationId: string;
+  filenamePrefix: string;
   prompt: string;
   negativePrompt: string;
   width: number;
@@ -335,7 +336,7 @@ class ComfyWSManager {
         this.jobs.delete(promptId);
         // For video jobs: still attempt SSH cleanup even on error
         if (job.mediaType === 'video') {
-          void this.sshCleanupVideo(job.videoParams.generationId);
+          void this.sshCleanupVideo(job.videoParams.filenamePrefix);
         }
       }
       return;
@@ -501,12 +502,15 @@ class ComfyWSManager {
       controller.enqueue(sseChunk('error', { message: String(err) }));
     } finally {
       // SSH cleanup always runs — globs by prefix so partial files are removed too
-      await this.sshCleanupVideo(videoParams.generationId);
+      await this.sshCleanupVideo(videoParams.filenamePrefix);
       try { controller.close(); } catch { /* already closed */ }
     }
   }
 
-  private async sshCleanupVideo(generationId: string) {
+  private async sshCleanupVideo(filenamePrefix: string) {
+    if (!/^[a-f0-9]{16}$/.test(filenamePrefix)) {
+      throw new Error(`sshCleanupVideo: invalid filenamePrefix "${filenamePrefix}" — expected 16 hex chars`);
+    }
     if (!VM_IP || !VM_USER || !SSH_KEY_PATH) {
       console.warn('[ComfyWS] SSH cleanup skipped — VM credentials not configured');
       return;
@@ -514,7 +518,7 @@ class ComfyWSManager {
     const ssh = new NodeSSH();
     try {
       await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });
-      await ssh.execCommand(`rm -f /models/ComfyUI/output/video-${generationId}*`);
+      await ssh.execCommand(`rm -f /models/ComfyUI/output/${filenamePrefix}*`);
     } catch (err) {
       // SSH cleanup failure is non-fatal — file is small and can be cleaned manually
       console.error('[ComfyWS] SSH cleanup error', err);
@@ -534,7 +538,7 @@ class ComfyWSManager {
     try { job.controller.close(); } catch { /* already closed */ }
     this.jobs.delete(promptId);
     if (job.mediaType === 'video') {
-      void this.sshCleanupVideo(job.videoParams.generationId);
+      void this.sshCleanupVideo(job.videoParams.filenamePrefix);
     }
   }
 
@@ -615,7 +619,7 @@ class ComfyWSManager {
     // (or be about to be) written to the VM. Fire-and-forget SSH cleanup; the
     // glob is idempotent and will no-op if no file exists yet.
     if (job.mediaType === 'video' && !job.finalized) {
-      this.sshCleanupVideo(job.videoParams.generationId).catch((err) => {
+      this.sshCleanupVideo(job.videoParams.filenamePrefix).catch((err) => {
         console.error(`[ComfyWS] SSH cleanup failed for aborted job ${promptId}:`, err);
       });
     }

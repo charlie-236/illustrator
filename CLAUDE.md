@@ -433,11 +433,11 @@ Unlike image generation (which uses `SaveImageWebsocket` to stream images over W
 `SaveWEBM` is the **only** allowed disk-write class on the VM, and **only** via the video path. The image-path guard remains unchanged and still rejects `SaveImage` and `LoadImage`.
 
 Per-generation flow:
-1. Workflow built with `SaveWEBM`, `filename_prefix: video-${generationId}` (deterministic glob for cleanup).
+1. Workflow built with `SaveWEBM`. The VM filename prefix is a random 16-character hex string generated per request (`randomBytes(8).toString('hex')`). The full filename including SaveWEBM's auto-suffix matches `[a-f0-9]{16}_00001_.webm`. The prefix is stored on the in-flight job record so all cleanup paths use the correct glob.
 2. Workflow POSTed to ComfyUI `/prompt`.
 3. ComfyUI sends an `executed` WS message with `{ filename, subfolder }` when SaveWEBM finishes.
 4. mint-pc fetches `http://127.0.0.1:8188/view?filename=...&subfolder=...&type=output` and writes to `IMAGE_OUTPUT_DIR`.
-5. mint-pc SSH-runs `rm -f /models/ComfyUI/output/video-${generationId}*` in a `finally` block — runs whether or not steps 3-4 succeeded.
+5. mint-pc SSH-runs `rm -f /models/ComfyUI/output/${filenamePrefix}*` in a `finally` block — runs whether or not steps 3-4 succeeded.
 
 `SaveAnimatedWEBP` (node 28, present in both templates) is stripped by the workflow builders before submitting to ComfyUI.
 

@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { randomBytes } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { buildT2VWorkflow, buildI2VWorkflow, WAN22_DEFAULT_NEGATIVE_PROMPT } from '@/lib/wan22-workflow';
 import { getComfyWSManager } from '@/lib/comfyws';
@@ -95,9 +96,11 @@ export async function POST(req: NextRequest) {
     : Math.floor(Math.random() * 2 ** 32);
 
   const generationId = uuidv4();
+  const filenamePrefix = randomBytes(8).toString('hex'); // 16 hex chars, ~64 bits entropy
 
   const videoParams = {
     generationId,
+    filenamePrefix,
     prompt: prompt.trim(),
     negativePrompt:
       negativePrompt && negativePrompt.trim().length > 0
