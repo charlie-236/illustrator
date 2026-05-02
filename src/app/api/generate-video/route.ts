@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { buildT2VWorkflow, buildI2VWorkflow } from '@/lib/wan22-workflow';
+import { buildT2VWorkflow, buildI2VWorkflow, WAN22_DEFAULT_NEGATIVE_PROMPT } from '@/lib/wan22-workflow';
 import { getComfyWSManager } from '@/lib/comfyws';
 import type { ComfyWorkflow } from '@/lib/wan22-workflow';
 
@@ -41,6 +41,14 @@ function validateVideoWorkflow(wf: ComfyWorkflow): void {
 }
 
 export async function POST(req: NextRequest) {
+  const outputDir = process.env.IMAGE_OUTPUT_DIR;
+  if (!outputDir) {
+    return new Response(
+      JSON.stringify({ error: 'IMAGE_OUTPUT_DIR is not configured' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
   let body: VideoRequest;
   try {
     body = await req.json() as VideoRequest;
@@ -91,7 +99,10 @@ export async function POST(req: NextRequest) {
   const videoParams = {
     generationId,
     prompt: prompt.trim(),
-    negativePrompt: negativePrompt ?? '',
+    negativePrompt:
+      negativePrompt && negativePrompt.trim().length > 0
+        ? negativePrompt
+        : WAN22_DEFAULT_NEGATIVE_PROMPT,
     width,
     height,
     frames,
@@ -99,6 +110,7 @@ export async function POST(req: NextRequest) {
     cfg,
     seed,
     mode,
+    outputDir,
   } as const;
 
   let workflow: ComfyWorkflow;
