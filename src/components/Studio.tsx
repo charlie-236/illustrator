@@ -550,6 +550,19 @@ export default function Studio({
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  // Video validation — computed per-render
+  const vWidthErr = !Number.isInteger(videoP.width) || videoP.width < 256 || videoP.width > 1280 || videoP.width % 32 !== 0;
+  const vHeightErr = !Number.isInteger(videoP.height) || videoP.height < 256 || videoP.height > 1280 || videoP.height % 32 !== 0;
+  const vFramesErr = !Number.isInteger(videoP.frames) || videoP.frames < 17 || videoP.frames > 121 || (videoP.frames - 1) % 8 !== 0;
+  const vStepsErr = !Number.isInteger(videoP.steps) || videoP.steps < 4 || videoP.steps > 40 || videoP.steps % 2 !== 0;
+  const vCfgErr = videoP.cfg < 1.0 || videoP.cfg > 10.0;
+  const videoGenerateDisabled = isGenerating
+    || !p.positivePrompt.trim()
+    || vWidthErr || vHeightErr || vFramesErr || vStepsErr || vCfgErr
+    || (useStartingFrame && !startingFrameRecord);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="p-4 space-y-4">
 

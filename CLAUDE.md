@@ -548,6 +548,7 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 | `DELETE /api/jobs/[promptId]` | Aborts a job: sends error SSE, closes stream, SSH cleanup (video), adds to recentlyCompleted. |
 
 **`init` SSE event (video only).** `/api/generate-video` emits an `init` event as the first SSE frame with `{ promptId, generationId }` so the client can add the job to the queue before any `progress` events. Image jobs get promptId from the synchronous JSON response of `POST /api/generate`.
+**Single-job UX (Phase 1.2a state):** The Generate Video button and mode toggle are both disabled while a generation is in-flight. Concurrency, queue tray, and audio chime land in Phase 1.2b.
 
 ---
 
