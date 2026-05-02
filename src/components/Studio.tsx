@@ -6,6 +6,7 @@ import ModelSelect from './ModelSelect';
 import ParamSlider from './ParamSlider';
 import GenerationProgress from './GenerationProgress';
 import ImageModal from './ImageModal';
+import GalleryPicker from './GalleryPicker';
 import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
@@ -33,6 +34,41 @@ const DEFAULTS: GenerationParams = {
   highResFix: false,
 };
 
+// ── Video mode types ──────────────────────────────────────────────────────────
+
+interface VideoParams {
+  width: number;
+  height: number;
+  frames: number;
+  steps: number;
+  cfg: number;
+}
+
+const VIDEO_DEFAULTS: VideoParams = {
+  width: 1280,
+  height: 704,
+  frames: 57,
+  steps: 20,
+  cfg: 3.5,
+};
+
+const VIDEO_PRESETS = [
+  { label: '1280×704', w: 1280, h: 704 },
+  { label: '768×768', w: 768, h: 768 },
+  { label: '704×1280', w: 704, h: 1280 },
+] as const;
+
+interface VideoResult {
+  id: string;
+  filePath: string;
+  frames: number;
+  fps: number;
+  seed: string;
+  createdAt: string;
+}
+
+// ── Shared state types ────────────────────────────────────────────────────────
+
 interface State {
   status: 'idle' | 'generating' | 'done' | 'error';
   progress: { value: number; max: number };
@@ -50,8 +86,47 @@ interface Props {
   modelConfigVersion: number;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function readSessionMode(): 'image' | 'video' {
+  try {
+    const v = sessionStorage.getItem('studio-mode');
+    return v === 'video' ? 'video' : 'image';
+  } catch {
+    return 'image';
+  }
+}
+
+async function encodeImageToBase64(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
+  const buf = await res.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed, onRemix, modelConfigVersion }: Props) {
+  // mode — starts 'image'; actual session value applied on mount to avoid SSR mismatch
+  const [mode, setMode] = useState<'image' | 'video'>('image');
+
+  // image params
   const [p, setP] = useState<GenerationParams>(DEFAULTS);
+
+  // video params (separate state; only active in video mode)
+  const [videoP, setVideoP] = useState<VideoParams>(VIDEO_DEFAULTS);
+  const [useStartingFrame, setUseStartingFrame] = useState(false);
+  const [startingFrameRecord, setStartingFrameRecord] = useState<GenerationRecord | null>(null);
+  const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
+  const [videoResult, setVideoResult] = useState<VideoResult | null>(null);
+
+  // generation state (shared)
   const [state, setState] = useState<State>({
     status: 'idle',
     progress: { value: 0, max: 0 },
@@ -59,11 +134,13 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     error: '',
     resolvedSeed: -1,
   });
+
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStartIdx, setModalStartIdx] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sseRef = useRef<EventSource | null>(null);
+  const videoAbortRef = useRef<AbortController | null>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
   const [checkpointConfig, setCheckpointConfig] = useState<CheckpointConfig | null>(null);
   const [baseImage, setBaseImage] = useState<string | null>(null);
@@ -75,11 +152,17 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const [polishError, setPolishError] = useState<string | null>(null);
   const polishErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Close drawer and clear stale post-generation results when navigating away from Studio
+  // Apply session mode on mount
+  useEffect(() => {
+    setMode(readSessionMode());
+  }, []);
+
+  // Clear stale results when navigating away from Studio
   useEffect(() => {
     if (tab !== 'studio') {
       setDrawerOpen(false);
       setState((s) => ({ ...s, records: [], status: s.status === 'done' ? 'idle' : s.status }));
+      setVideoResult(null);
     }
   }, [tab]);
 
@@ -99,7 +182,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     };
   }, []);
 
-  // Apply remix data when received from Gallery
+  // Apply remix params from Gallery
   useEffect(() => {
     if (!remixParams) return;
     setP({ ...remixParams, batchSize: remixParams.batchSize ?? 1 });
@@ -120,8 +203,28 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     }
   }, [remixParams, onRemixConsumed]);
 
+  // ── Param helpers ─────────────────────────────────────────────────────────
+
   function update<K extends keyof GenerationParams>(key: K, val: GenerationParams[K]) {
     setP((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function updateVideo<K extends keyof VideoParams>(key: K, val: VideoParams[K]) {
+    setVideoP((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function switchMode(newMode: 'image' | 'video') {
+    if (newMode === mode) return;
+    // Clear result display when switching modes
+    setState((s) => ({ ...s, status: 'idle', records: [], error: '', progress: { value: 0, max: 0 } }));
+    setVideoResult(null);
+    if (newMode === 'video') {
+      setVideoP(VIDEO_DEFAULTS);
+      setUseStartingFrame(false);
+      setStartingFrameRecord(null);
+    }
+    setMode(newMode);
+    try { sessionStorage.setItem('studio-mode', newMode); } catch { /* ignore */ }
   }
 
   async function handleCheckpointChange(newCheckpoint: string) {
@@ -141,6 +244,8 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       // non-critical
     }
   }
+
+  // ── Image generation ──────────────────────────────────────────────────────
 
   async function handleGenerate() {
     if (state.status === 'generating') return;
@@ -215,6 +320,112 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     };
   }
 
+  // ── Video generation ──────────────────────────────────────────────────────
+
+  async function handleGenerateVideo() {
+    if (isGenerating) return;
+
+    setState({
+      status: 'generating',
+      progress: { value: 0, max: videoP.steps },
+      records: [],
+      error: '',
+      resolvedSeed: -1,
+    });
+    setVideoResult(null);
+
+    const controller = new AbortController();
+    videoAbortRef.current = controller;
+
+    try {
+      const videoMode: 't2v' | 'i2v' = (useStartingFrame && startingFrameRecord) ? 'i2v' : 't2v';
+      let startImageB64: string | undefined;
+
+      if (videoMode === 'i2v' && startingFrameRecord) {
+        try {
+          startImageB64 = await encodeImageToBase64(imgSrc(startingFrameRecord.filePath));
+        } catch (err) {
+          setState((s) => ({ ...s, status: 'error', error: `Failed to load starting frame: ${String(err)}` }));
+          return;
+        }
+      }
+
+      const res = await fetch('/api/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: videoMode,
+          prompt: p.positivePrompt.trim(),
+          width: videoP.width,
+          height: videoP.height,
+          frames: videoP.frames,
+          steps: videoP.steps,
+          cfg: videoP.cfg,
+          seed: p.seed >= 0 ? p.seed : undefined,
+          ...(startImageB64 ? { startImageB64 } : {}),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json() as { error: string };
+        throw new Error(errBody.error);
+      }
+
+      if (!res.body) throw new Error('No response stream');
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let lineBuf = '';
+      let currentEvt = '';
+      let streamDone = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        lineBuf += dec.decode(value, { stream: true });
+        const lines = lineBuf.split('\n');
+        lineBuf = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvt = line.slice(7).trim();
+          } else if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6);
+            if (currentEvt === 'progress') {
+              const pd = JSON.parse(dataStr) as { value: number; max: number };
+              setState((s) => ({ ...s, progress: pd }));
+            } else if (currentEvt === 'complete') {
+              const vr = JSON.parse(dataStr) as VideoResult;
+              setVideoResult(vr);
+              setState((s) => ({ ...s, status: 'done' }));
+              onGenerated();
+              reader.cancel();
+              streamDone = true;
+              break;
+            } else if (currentEvt === 'error') {
+              const er = JSON.parse(dataStr) as { message: string };
+              setState((s) => ({ ...s, status: 'error', error: er.message }));
+              reader.cancel();
+              streamDone = true;
+              break;
+            }
+            currentEvt = '';
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as DOMException)?.name === 'AbortError') {
+        setState((s) => ({ ...s, status: 'idle' }));
+      } else {
+        setState((s) => ({ ...s, status: 'error', error: String(err) }));
+      }
+    } finally {
+      videoAbortRef.current = null;
+    }
+  }
+
+  // ── Misc handlers ─────────────────────────────────────────────────────────
+
   async function handleStudioDelete(id: string): Promise<void> {
     const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Delete failed');
@@ -244,7 +455,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
             .filter((c) => activeNames.has(c.loraName) && c.triggerWords?.trim())
             .flatMap((c) => c.triggerWords.split(',').map((w) => w.trim()).filter(Boolean));
         } catch {
-          // non-critical — proceed without trigger words
+          // non-critical
         }
       }
 
@@ -275,10 +486,43 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     }
   }
 
+  // ── Derived state ─────────────────────────────────────────────────────────
+
   const isGenerating = state.status === 'generating';
+
+  // Video validation — computed per-render
+  const vWidthErr = !Number.isInteger(videoP.width) || videoP.width < 256 || videoP.width > 1280 || videoP.width % 32 !== 0;
+  const vHeightErr = !Number.isInteger(videoP.height) || videoP.height < 256 || videoP.height > 1280 || videoP.height % 32 !== 0;
+  const vFramesErr = !Number.isInteger(videoP.frames) || videoP.frames < 17 || videoP.frames > 121 || (videoP.frames - 1) % 8 !== 0;
+  const vStepsErr = !Number.isInteger(videoP.steps) || videoP.steps < 4 || videoP.steps > 40 || videoP.steps % 2 !== 0;
+  const vCfgErr = videoP.cfg < 1.0 || videoP.cfg > 10.0;
+  const videoGenerateDisabled = isGenerating
+    || !p.positivePrompt.trim()
+    || vWidthErr || vHeightErr || vFramesErr || vStepsErr || vCfgErr
+    || (useStartingFrame && !startingFrameRecord);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="p-4 space-y-4">
+
+      {/* ── Mode toggle ── */}
+      <div className="flex bg-zinc-800 rounded-xl p-1 gap-1">
+        {(['image', 'video'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => switchMode(m)}
+            disabled={isGenerating}
+            className={`flex-1 min-h-12 rounded-lg font-medium text-sm transition-all
+              ${mode === m
+                ? 'bg-zinc-700 text-zinc-100 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 disabled:opacity-40'}`}
+          >
+            {m === 'image' ? 'Image' : 'Video'}
+          </button>
+        ))}
+      </div>
 
       {/* ── During generation: progress bar ── */}
       {isGenerating && (
@@ -287,8 +531,8 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         </div>
       )}
 
-      {/* ── After generation: batch thumbnail grid ── */}
-      {state.status === 'done' && state.records.length > 0 && (
+      {/* ── After image generation: thumbnail grid ── */}
+      {mode === 'image' && state.status === 'done' && state.records.length > 0 && (
         <div className="card">
           <div className="grid grid-cols-3 gap-1.5">
             {state.records.map((rec, i) => (
@@ -313,6 +557,25 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         </div>
       )}
 
+      {/* ── After video generation: video result card ── */}
+      {mode === 'video' && state.status === 'done' && videoResult && (
+        <div className="card space-y-2">
+          <p className="text-sm font-medium text-zinc-200">Video ready</p>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video
+            src={videoResult.filePath}
+            controls
+            loop
+            playsInline
+            className="w-full rounded-lg"
+          />
+          <p className="text-xs text-zinc-400 tabular-nums">Seed: {videoResult.seed}</p>
+          <p className="text-xs text-zinc-500">
+            {videoResult.frames} frames · {videoResult.fps} fps · {(videoResult.frames / videoResult.fps).toFixed(1)}s
+          </p>
+        </div>
+      )}
+
       {state.status === 'error' && (
         <div className="card border-red-900 bg-red-950/30">
           <p className="text-red-400 text-sm">{state.error}</p>
@@ -325,36 +588,233 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           label="Positive Prompt"
           value={p.positivePrompt}
           onChange={(v) => update('positivePrompt', v)}
-          placeholder="A dog sunning itself on a shag rug."
+          placeholder={mode === 'video'
+            ? 'A serene mountain lake at dawn, mist rising, cinematic, realistic.'
+            : 'A dog sunning itself on a shag rug.'}
           rows={4}
-          hint={checkpointDefaults?.positivePrompt || undefined}
+          hint={mode === 'image' ? (checkpointDefaults?.positivePrompt || undefined) : undefined}
         />
-        <PromptArea
-          label="Negative Prompt"
-          value={p.negativePrompt}
-          onChange={(v) => update('negativePrompt', v)}
-          rows={2}
-          hint={checkpointDefaults?.negativePrompt || undefined}
-        />
+        {mode === 'image' ? (
+          <PromptArea
+            label="Negative Prompt"
+            value={p.negativePrompt}
+            onChange={(v) => update('negativePrompt', v)}
+            rows={2}
+            hint={checkpointDefaults?.negativePrompt || undefined}
+          />
+        ) : (
+          <p className="text-xs text-zinc-500 pt-1">Default Wan 2.2 negative prompt applied.</p>
+        )}
       </div>
 
-      {/* ── Reference panel (img2img + FaceID identity) ── */}
-      <ReferencePanel
-        baseImage={baseImage}
-        mask={mask}
-        baseImageDenoise={baseImageDenoise}
-        faceReferences={faceReferences}
-        faceStrength={faceStrength}
-        selectedCheckpoint={p.checkpoint}
-        checkpointConfigs={checkpointConfig ? [checkpointConfig] : []}
-        onBaseImageChange={setBaseImage}
-        onMaskChange={setMask}
-        onBaseImageDenoiseChange={setBaseImageDenoise}
-        onFaceReferencesChange={setFaceReferences}
-        onFaceStrengthChange={setFaceStrength}
-      />
+      {/* ── Image mode: Reference panel ── */}
+      {mode === 'image' && (
+        <ReferencePanel
+          baseImage={baseImage}
+          mask={mask}
+          baseImageDenoise={baseImageDenoise}
+          faceReferences={faceReferences}
+          faceStrength={faceStrength}
+          selectedCheckpoint={p.checkpoint}
+          checkpointConfigs={checkpointConfig ? [checkpointConfig] : []}
+          onBaseImageChange={setBaseImage}
+          onMaskChange={setMask}
+          onBaseImageDenoiseChange={setBaseImageDenoise}
+          onFaceReferencesChange={setFaceReferences}
+          onFaceStrengthChange={setFaceStrength}
+        />
+      )}
 
-      {/* ── Bottom bar: Settings toggle + Polish + Generate ── */}
+      {/* ── Video mode: controls ── */}
+      {mode === 'video' && (
+        <div className="card space-y-5">
+
+          {/* Resolution presets */}
+          <div>
+            <p className="label mb-2">Resolution</p>
+            <div className="flex gap-2 mb-3">
+              {VIDEO_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => { updateVideo('width', preset.w); updateVideo('height', preset.h); }}
+                  className={`flex-1 min-h-12 rounded-lg text-xs font-medium border transition-all
+                    ${videoP.width === preset.w && videoP.height === preset.h
+                      ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                      : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200 active:scale-95'}`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Width / Height inputs */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Width</label>
+                <input
+                  type="number"
+                  value={videoP.width}
+                  min={256}
+                  max={1280}
+                  step={32}
+                  onChange={(e) => updateVideo('width', parseInt(e.target.value, 10))}
+                  className={`input-base ${vWidthErr ? 'border-red-500' : ''}`}
+                />
+                {vWidthErr && <p className="text-xs text-red-400 mt-1">Multiple of 32, 256–1280</p>}
+              </div>
+              <div>
+                <label className="label">Height</label>
+                <input
+                  type="number"
+                  value={videoP.height}
+                  min={256}
+                  max={1280}
+                  step={32}
+                  onChange={(e) => updateVideo('height', parseInt(e.target.value, 10))}
+                  className={`input-base ${vHeightErr ? 'border-red-500' : ''}`}
+                />
+                {vHeightErr && <p className="text-xs text-red-400 mt-1">Multiple of 32, 256–1280</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* Frames slider */}
+          <div>
+            <div className="flex justify-between items-center mb-1.5">
+              <label className="label mb-0">Frames</label>
+              <span className="text-xs text-zinc-400 tabular-nums font-mono">
+                {videoP.frames} frames ({(videoP.frames / 16).toFixed(1)}s)
+              </span>
+            </div>
+            <input
+              type="range"
+              min={17}
+              max={121}
+              step={8}
+              value={videoP.frames}
+              onChange={(e) => updateVideo('frames', parseInt(e.target.value, 10))}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
+            />
+            {vFramesErr && <p className="text-xs text-red-400 mt-1">Must be 17, 25, 33, … 121</p>}
+          </div>
+
+          {/* Steps */}
+          <div>
+            <ParamSlider
+              label="Steps"
+              value={videoP.steps}
+              min={4}
+              max={40}
+              step={2}
+              onChange={(v) => updateVideo('steps', v)}
+            />
+            {vStepsErr && <p className="text-xs text-red-400 mt-1">Even number, 4–40</p>}
+          </div>
+
+          {/* CFG */}
+          <div>
+            <ParamSlider
+              label="CFG"
+              value={videoP.cfg}
+              min={1}
+              max={10}
+              step={0.1}
+              onChange={(v) => updateVideo('cfg', Math.round(v * 10) / 10)}
+              format={(v) => v.toFixed(1)}
+            />
+            {vCfgErr && <p className="text-xs text-red-400 mt-1">1.0–10.0</p>}
+          </div>
+
+          {/* Seed — shared with image mode */}
+          <div>
+            <label className="label">Seed</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={p.seed}
+                onChange={(e) => update('seed', parseInt(e.target.value, 10))}
+                className="input-base flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => update('seed', -1)}
+                disabled={p.seed === -1}
+                title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
+                className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
+                  ${p.seed === -1
+                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
+                    : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+              >
+                {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
+              </button>
+            </div>
+          </div>
+
+          {/* Starting frame (I2V) */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <label className="label mb-0">Starting frame (I2V)</label>
+              <button
+                type="button"
+                onClick={() => setUseStartingFrame((v) => !v)}
+                className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all border
+                  ${useStartingFrame
+                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                    : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+              >
+                {useStartingFrame ? 'On' : 'Off'}
+              </button>
+            </div>
+
+            {useStartingFrame && (
+              startingFrameRecord ? (
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={imgSrc(startingFrameRecord.filePath)}
+                      alt="Starting frame"
+                      className="w-20 h-20 rounded-lg object-cover border border-zinc-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setStartingFrameRecord(null)}
+                      aria-label="Clear starting frame"
+                      className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-zinc-800 border border-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:bg-red-600 hover:text-white transition-colors"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGalleryPickerOpen(true)}
+                    className="min-h-12 px-4 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setGalleryPickerOpen(true)}
+                  className="w-full min-h-14 rounded-xl border-2 border-dashed border-zinc-700 hover:border-violet-600/60 hover:bg-violet-600/5 transition-colors flex items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 text-sm"
+                >
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                  </svg>
+                  Pick from gallery
+                </button>
+              )
+            )}
+          </div>
+
+        </div>
+      )}
+
+      {/* ── Bottom bar ── */}
       <div
         className="fixed bottom-0 left-0 right-0 px-4 pt-3 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 z-30 max-w-2xl mx-auto transition-transform duration-150 ease-out"
         style={{
@@ -362,66 +822,86 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
         }}
       >
-        {polishError && (
-          <p className="text-xs text-red-400 mb-2 truncate">✨ {polishError}</p>
-        )}
-        <div className="flex gap-3">
-          {/* Settings */}
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open settings"
-            className="min-h-12 min-w-14 flex flex-col items-center justify-center gap-0.5 rounded-xl
-                       bg-zinc-800 hover:bg-zinc-700 active:scale-95
-                       border border-zinc-700 text-zinc-300 transition-all flex-shrink-0"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-            </svg>
-          </button>
-
-          {/* Polish */}
-          <button
-            type="button"
-            onClick={() => void handlePolish()}
-            disabled={polishing || isGenerating || !p.positivePrompt.trim()}
-            aria-label="Polish prompts with AI"
-            className="min-h-12 min-w-14 flex flex-col items-center justify-center rounded-xl
-                       bg-violet-600/10 hover:bg-violet-600/20 active:scale-95
-                       border border-violet-600/30 hover:border-violet-500/50
-                       text-violet-300 transition-all flex-shrink-0
-                       disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
-          >
-            {polishing ? (
-              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
-              </svg>
-            ) : (
-              <span className="text-lg leading-none">✨</span>
+        {mode === 'image' ? (
+          <>
+            {polishError && (
+              <p className="text-xs text-red-400 mb-2 truncate">✨ {polishError}</p>
             )}
-          </button>
+            <div className="flex gap-3">
+              {/* Settings */}
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(true)}
+                aria-label="Open settings"
+                className="min-h-12 min-w-14 flex flex-col items-center justify-center gap-0.5 rounded-xl
+                           bg-zinc-800 hover:bg-zinc-700 active:scale-95
+                           border border-zinc-700 text-zinc-300 transition-all flex-shrink-0"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round"
+                    d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+                </svg>
+              </button>
 
-          {/* Generate */}
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating || !p.checkpoint}
-            className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
-                       bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
-                       disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
-                       text-white shadow-lg shadow-violet-900/40"
-          >
-            {isGenerating
-              ? `Generating… ${state.progress.value}/${state.progress.max}`
-              : p.batchSize > 1
-                ? `Generate ×${p.batchSize}`
-                : 'Generate'}
-          </button>
-        </div>
+              {/* Polish */}
+              <button
+                type="button"
+                onClick={() => void handlePolish()}
+                disabled={polishing || isGenerating || !p.positivePrompt.trim()}
+                aria-label="Polish prompts with AI"
+                className="min-h-12 min-w-14 flex flex-col items-center justify-center rounded-xl
+                           bg-violet-600/10 hover:bg-violet-600/20 active:scale-95
+                           border border-violet-600/30 hover:border-violet-500/50
+                           text-violet-300 transition-all flex-shrink-0
+                           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+              >
+                {polishing ? (
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                  </svg>
+                ) : (
+                  <span className="text-lg leading-none">✨</span>
+                )}
+              </button>
+
+              {/* Generate — image mode */}
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating || !p.checkpoint}
+                className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
+                           bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
+                           text-white shadow-lg shadow-violet-900/40"
+              >
+                {isGenerating
+                  ? `Generating… ${state.progress.value}/${state.progress.max}`
+                  : p.batchSize > 1
+                    ? `Generate ×${p.batchSize}`
+                    : 'Generate'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex gap-3">
+            {/* Generate — video mode */}
+            <button
+              onClick={() => void handleGenerateVideo()}
+              disabled={videoGenerateDisabled}
+              className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
+                         bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
+                         disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
+                         text-white shadow-lg shadow-violet-900/40"
+            >
+              {isGenerating
+                ? `Generating… ${state.progress.value}/${state.progress.max}`
+                : 'Generate Video'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* ── Drawer overlay (fades in/out without layout recalculation) ── */}
+      {/* ── Drawer overlay ── */}
       <div
         className={`fixed inset-0 bg-black/60 z-40 transition-opacity duration-300
           ${drawerOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
@@ -429,7 +909,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         aria-hidden="true"
       />
 
-      {/* ── Settings drawer (slides in from the right) ── */}
+      {/* ── Settings drawer (image mode) ── */}
       <div
         className={`fixed top-0 right-0 bottom-0 w-80 max-w-[90vw] z-50 flex flex-col
                     bg-zinc-900 border-l border-zinc-800
@@ -437,7 +917,6 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
                     ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
         aria-label="Generation settings"
       >
-        {/* Drawer header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
           <h2 className="text-base font-semibold text-zinc-100">Settings</h2>
           <button
@@ -453,10 +932,8 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           </button>
         </div>
 
-        {/* Drawer scrollable content */}
         <div className="flex-1 overflow-y-auto">
 
-          {/* Models section */}
           <div className="px-4 pt-4 pb-5">
             <p className="label mb-3">Models</p>
             <ModelSelect
@@ -470,14 +947,11 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
 
           <div className="border-t border-zinc-800" />
 
-          {/* Generation section */}
           <div className="px-4 pt-4 pb-5 space-y-4">
             <p className="label">Generation</p>
-
             <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
             <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
             <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
-
             <div>
               <label className="label">High-Res Fix</label>
               <button
@@ -495,10 +969,8 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
 
           <div className="border-t border-zinc-800" />
 
-          {/* Sampling section */}
           <div className="px-4 pt-4 pb-5 space-y-3">
             <p className="label">Sampling</p>
-
             <div>
               <label className="label">Resolution</label>
               <select
@@ -515,14 +987,12 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
                 ))}
               </select>
             </div>
-
             <div>
               <label className="label">Sampler</label>
               <select value={p.sampler} onChange={(e) => update('sampler', e.target.value)} className="input-base">
                 {SAMPLERS.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-
             <div>
               <label className="label">Scheduler</label>
               <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
@@ -533,7 +1003,6 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
 
           <div className="border-t border-zinc-800" />
 
-          {/* Seed section */}
           <div className="px-4 pt-4 pb-8">
             <label className="label">Seed</label>
             <div className="flex gap-2">
@@ -583,6 +1052,14 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           onDelete={handleStudioDelete}
         />
       )}
+
+      {/* ── Gallery picker modal (video starting frame) ── */}
+      <GalleryPicker
+        open={galleryPickerOpen}
+        onClose={() => setGalleryPickerOpen(false)}
+        onSelect={(record) => setStartingFrameRecord(record)}
+      />
+
     </div>
   );
 }
