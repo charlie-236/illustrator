@@ -206,12 +206,14 @@ Combines two checks per service, run in parallel: (1) SSH `systemctl is-active <
 - `ready` — systemd active and the probe returned 2xx.
 - `unknown` — SSH itself failed; HTTP results aren't meaningful in that case (route returns HTTP 500).
 
+Aphrodite services need an endpoint that exercises the loaded model — `/v1/models` returns 2xx as soon as the API server binds, before the model finishes loading into VRAM, so it can't be used as a readiness signal. ComfyUI loads lazily, so `/system_stats` (a process-level check) is sufficient.
+
 Probe endpoints:
 | Service | Probe URL |
 |---|---|
 | `comfy-illustrator` | `http://127.0.0.1:8188/system_stats` |
-| `aphrodite-writer` | `http://127.0.0.1:21434/v1/models` |
-| `aphrodite-illustrator-polisher` | `http://127.0.0.1:11438/v1/models` |
+| `aphrodite-writer` | `http://127.0.0.1:21434/health` |
+| `aphrodite-illustrator-polisher` | `http://127.0.0.1:11438/health` |
 
 All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by `/api/generate`. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher'`.
 
