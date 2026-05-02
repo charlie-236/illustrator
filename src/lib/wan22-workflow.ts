@@ -105,7 +105,9 @@ export function buildI2VWorkflow(params: VideoParams & { startImageB64: string }
   // SaveWEBM filename prefix — random hex string, set by the route
   wf['47'].inputs.filename_prefix = params.filenamePrefix;
 
-  // Replace LoadImage (writes to VM disk) with ETN_LoadImageBase64 (inline base64 — no disk write)
+  // Insert the base64 image loader as node 52. The template intentionally
+  // omits this node; the link from node 50 (start_image) is dangling until
+  // we add it here. ETN_LoadImageBase64 never writes to VM disk.
   wf['52'] = {
     class_type: 'ETN_LoadImageBase64',
     inputs: { image: stripDataUriPrefix(params.startImageB64) },

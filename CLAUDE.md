@@ -449,6 +449,8 @@ Per-generation flow:
 
 `SaveAnimatedWEBP` (node 28, present in both templates) is stripped by the workflow builders before submitting to ComfyUI.
 
+The i2v workflow builder constructs the `ETN_LoadImageBase64` node at runtime rather than reading it from the template. The template intentionally has a dangling link from `WanImageToVideo.start_image` that the builder resolves by inserting node 52. This keeps `LoadImage` out of the source tree entirely so the disk-avoidance grep guard remains dumb-and-correct.
+
 ### MoE step coupling
 
 The 14B MoE model splits sampling between high-noise (node 57) and low-noise (node 58) experts. Both `KSamplerAdvanced` nodes share a single conceptual "total steps" expressed in **four fields**:
