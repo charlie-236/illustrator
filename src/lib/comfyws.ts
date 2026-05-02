@@ -26,7 +26,9 @@ export interface VideoJobParams {
 
 interface BaseJob {
   promptId: string;
-  controller: ReadableStreamDefaultController<Uint8Array>;
+  /** Null when the SSE subscriber has disconnected (refresh/tab-close). The job
+   *  continues running; finalization still writes to DB and recentlyCompleted. */
+  controller: ReadableStreamDefaultController<Uint8Array> | null;
   /** Image frames accumulate here for image jobs; always empty for video jobs. */
   imageBuffers: Buffer[];
   activeNode: string | null;
@@ -99,6 +101,20 @@ const encoder = new TextEncoder();
 
 function sseChunk(event: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function pushSSE(
+  controller: ReadableStreamDefaultController<Uint8Array> | null,
+  event: string,
+  data: unknown,
+): void {
+  if (!controller) return;
+  try { controller.enqueue(sseChunk(event, data)); } catch { /* already closed */ }
+}
+
+function closeSSE(controller: ReadableStreamDefaultController<Uint8Array> | null): void {
+  if (!controller) return;
+  try { controller.close(); } catch { /* already closed */ }
 }
 
 // ComfyUI binary frame layout (server.py `send_image` / `encode_bytes`):
@@ -252,21 +268,19 @@ class ComfyWSManager {
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
           if (this.activePromptId === promptId) this.activePromptId = null;
-          this.addToRecentlyCompleted(job, 'error', 'Generation completed during reconnection but the output was lost. Please retry.');
-          job.controller.enqueue(sseChunk('error', {
-            message: 'Generation completed during reconnection but the output was lost. Please retry.',
-          }));
-          try { job.controller.close(); } catch { /* already closed */ }
+          const msg = 'Generation completed during reconnection but the output was lost. Please retry.';
+          this.addToRecentlyCompleted(job, 'error', msg);
+          pushSSE(job.controller, 'error', { message: msg });
+          closeSSE(job.controller);
           this.jobs.delete(promptId);
         } else if (statusStr === 'error') {
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
           if (this.activePromptId === promptId) this.activePromptId = null;
-          this.addToRecentlyCompleted(job, 'error', 'Generation failed on the GPU server.');
-          job.controller.enqueue(sseChunk('error', {
-            message: 'Generation failed on the GPU server.',
-          }));
-          try { job.controller.close(); } catch { /* already closed */ }
+          const msg = 'Generation failed on the GPU server.';
+          this.addToRecentlyCompleted(job, 'error', msg);
+          pushSSE(job.controller, 'error', { message: msg });
+          closeSSE(job.controller);
           this.jobs.delete(promptId);
         }
       } catch {
@@ -307,9 +321,7 @@ class ComfyWSManager {
       const job = this.jobs.get(data.prompt_id as string);
       if (job) {
         job.progress = { current: data.value as number, total: data.max as number };
-        job.controller.enqueue(
-          sseChunk('progress', { value: data.value, max: data.max }),
-        );
+        pushSSE(job.controller, 'progress', { value: data.value, max: data.max });
       }
       return;
     }
@@ -368,8 +380,8 @@ class ComfyWSManager {
         if (this.activePromptId === promptId) this.activePromptId = null;
         const message = data.exception_message != null ? String(data.exception_message) : 'Generation failed';
         this.addToRecentlyCompleted(job, 'error', message);
-        job.controller.enqueue(sseChunk('error', { message }));
-        try { job.controller.close(); } catch { /* already closed */ }
+        pushSSE(job.controller, 'error', { message });
+        closeSSE(job.controller);
         this.jobs.delete(promptId);
         // For video jobs: still attempt SSH cleanup even on error
         if (job.mediaType === 'video') {
@@ -383,7 +395,7 @@ class ComfyWSManager {
   private finalizeJob(job: Job) {
     if (job.finalized) return;
     // Signal to the client that GPU computation is done and file saving is starting
-    job.controller.enqueue(sseChunk('completing', {}));
+    pushSSE(job.controller, 'completing', {});
     if (job.mediaType === 'video') {
       void this.finalizeVideoJob(job);
     } else {
@@ -399,8 +411,8 @@ class ComfyWSManager {
 
     if (imageBuffers.length === 0) {
       this.addToRecentlyCompleted(job, 'error', 'No image data received');
-      controller.enqueue(sseChunk('error', { message: 'No image data received' }));
-      try { controller.close(); } catch { /* already closed */ }
+      pushSSE(controller, 'error', { message: 'No image data received' });
+      closeSSE(controller);
       return;
     }
 
@@ -464,13 +476,13 @@ class ComfyWSManager {
       );
 
       this.addToRecentlyCompleted(job, 'done', undefined, records[0].id);
-      controller.enqueue(sseChunk('complete', { records }));
+      pushSSE(controller, 'complete', { records });
     } catch (err) {
       console.error('[ComfyWS] finalizeImageJob error', err);
       this.addToRecentlyCompleted(job, 'error', String(err));
-      controller.enqueue(sseChunk('error', { message: String(err) }));
+      pushSSE(controller, 'error', { message: String(err) });
     } finally {
-      try { job.controller.close(); } catch { /* already closed */ }
+      closeSSE(controller);
     }
   }
 
@@ -532,22 +544,22 @@ class ComfyWSManager {
       });
 
       this.addToRecentlyCompleted(job, 'done', undefined, record.id);
-      controller.enqueue(sseChunk('complete', {
+      pushSSE(controller, 'complete', {
         id: record.id,
         filePath: record.filePath,
         frames: record.frames,
         fps: record.fps,
         seed: record.seed.toString(),
         createdAt: record.createdAt.toISOString(),
-      }));
+      });
     } catch (err) {
       console.error('[ComfyWS] finalizeVideoJob error', err);
       this.addToRecentlyCompleted(job, 'error', String(err));
-      controller.enqueue(sseChunk('error', { message: String(err) }));
+      pushSSE(controller, 'error', { message: String(err) });
     } finally {
       // SSH cleanup always runs — globs by prefix so partial files are removed too
       await this.sshCleanupVideo(videoParams.filenamePrefix);
-      try { controller.close(); } catch { /* already closed */ }
+      closeSSE(controller);
     }
   }
 
@@ -580,8 +592,8 @@ class ComfyWSManager {
     const mins = job.mediaType === 'video' ? 15 : 10;
     const message = `Generation timed out after ${mins} minutes`;
     this.addToRecentlyCompleted(job, 'error', message);
-    job.controller.enqueue(sseChunk('error', { message }));
-    try { job.controller.close(); } catch { /* already closed */ }
+    pushSSE(job.controller, 'error', { message });
+    closeSSE(job.controller);
     this.jobs.delete(promptId);
     if (job.mediaType === 'video') {
       void this.sshCleanupVideo(job.videoParams.filenamePrefix);
@@ -682,9 +694,17 @@ class ComfyWSManager {
     });
   }
 
-  removeJob(promptId: string) {
+  /**
+   * Explicit user abort. Cancels the watchdog, SSH-cleans any VM video file,
+   * adds a recentlyCompleted error entry, pushes an abort event to any live
+   * subscriber, and removes the job from the active map.
+   *
+   * Only called by the POST /api/jobs/[promptId]/abort endpoint — never by
+   * SSE stream-close handlers (those call removeSubscriber instead).
+   */
+  abortJob(promptId: string): boolean {
     const job = this.jobs.get(promptId);
-    if (!job) return;
+    if (!job) return false;
     if (job.timeoutId != null) clearTimeout(job.timeoutId);
 
     // If this is a video job that hasn't been finalized, the file may have been
@@ -696,16 +716,36 @@ class ComfyWSManager {
       });
     }
 
-    // Notify the SSE client that this job was aborted, then close the stream.
-    // For in-tab SSE connections this delivers the error event; for post-refresh
-    // polling the recentlyCompleted cache entry covers the transition.
+    // Notify any live SSE subscriber, then close that stream.
+    // For post-refresh polling the recentlyCompleted cache entry covers recovery.
     this.addToRecentlyCompleted(job, 'error', 'Aborted by user');
-    try {
-      job.controller.enqueue(sseChunk('error', { message: 'Aborted by user' }));
-      job.controller.close();
-    } catch { /* already closed */ }
+    pushSSE(job.controller, 'error', { message: 'Aborted by user' });
+    closeSSE(job.controller);
 
     this.jobs.delete(promptId);
+    return true;
+  }
+
+  /**
+   * Detaches the SSE controller from its job when the client disconnects
+   * (browser refresh, tab close, network drop). The job continues running
+   * on the VM — the watchdog still ticks, finalization still writes to DB
+   * and recentlyCompleted. The next /api/jobs/active poll will surface the
+   * job status to any reconnected client.
+   *
+   * SSE stream close ≠ user intent. Never call abortJob from stream-close
+   * handlers — that conflates "refreshed" with "cancelled" and breaks refresh
+   * survivability.
+   */
+  removeSubscriber(
+    promptId: string,
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    const job = this.jobs.get(promptId);
+    if (job && job.controller === controller) {
+      job.controller = null;
+    }
+    // Job stays in the map. Watchdog still ticks. Completion still fires.
   }
 
   /** Returns all active (running) jobs plus recently-completed jobs (within 5 min). */

@@ -4,7 +4,7 @@ import { getComfyWSManager } from '@/lib/comfyws';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function DELETE(
+export async function POST(
   _req: NextRequest,
   { params }: { params: { promptId: string } },
 ) {

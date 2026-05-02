@@ -289,7 +289,8 @@ src/
       generate/polish/validate.ts  extractFrozenTokens(), validatePreservation()
       generate-video/route.ts      POST — SSE video generation via Wan 2.2; handles t2v and i2v modes; emits init event with promptId+generationId
       jobs/active/route.ts         GET  — returns running + recently-completed jobs from comfyws singleton
-      jobs/[promptId]/route.ts     DELETE — aborts a job (removeJob → error SSE + SSH cleanup)
+      jobs/[promptId]/route.ts     DELETE — aborts a job (abortJob → error SSE + SSH cleanup)
+      jobs/[promptId]/abort/route.ts  POST — same as DELETE; preferred explicit-abort endpoint
   lib/
     comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert; tracks promptSummary/startedAt/progress per job; recentlyCompleted cache (5 min); getActiveJobs()
     notification.ts     playChime() Web Audio API bell tone; requestNotificationPermission(); sendBrowserNotification()
@@ -537,17 +538,20 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 - **In-app toast** (`src/components/Toast.tsx`): "Image/Video generated" card in bottom-right, auto-dismisses after 5 s. Rendered at page level via `ToastContainer`.
 - **Browser Notification API:** fires if `document.hidden` and `Notification.permission === 'granted'`. `onclick` focuses the tab.
 
-**Refresh survivability.** `GET /api/jobs/active` returns all running jobs + recently-completed jobs (5-min cache). On Studio mount, this endpoint is fetched and any found jobs are added to the queue without re-notifying. The `QueueContext` polls this endpoint every 5 s while any jobs are `running` or `completing`, detecting completions via status transitions.
+**Refresh survivability.** SSE stream close is treated as silent — it just stops pushing events to that subscriber. The job continues on the VM. To intentionally abort a running job, the client calls `POST /api/jobs/[promptId]/abort`. This separation is what makes refresh survivability work: a refresh closes the SSE stream, the job stays alive on the server, the next `/api/jobs/active` poll on mount finds it, and the tray reattaches.
+
+`GET /api/jobs/active` returns all running jobs + recently-completed jobs (5-min cache). On Studio mount, this endpoint is fetched and any found jobs are added to the queue without re-notifying. The `QueueContext` polls this endpoint every 5 s while any jobs are `running` or `completing`, detecting completions via status transitions.
 
 **`completing` status.** When GPU computation ends (`execution_success`), `finalizeJob` emits a `completing` SSE event before the async save. The client transitions the job to `completing` status and shows `Saving…` in the tray — especially noticeable for video (2-min HTTP transfer from VM).
 
-**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}`. The server calls `manager.removeJob`, sends an `error` SSE event (`'Aborted by user'`), closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. The in-tab SSE handler calls `failJob`; post-refresh polling detects it via `recentlyCompleted`.
+**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}` (or `POST /api/jobs/{promptId}/abort`). The server calls `manager.abortJob`, sends an `error` SSE event (`'Aborted by user'`) to any live subscriber, closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. The in-tab SSE handler calls `failJob`; post-refresh polling detects it via `recentlyCompleted`.
 
 **New API routes:**
 | Route | Description |
 |---|---|
 | `GET /api/jobs/active` | Returns running + recently-completed jobs from comfyws singleton. Shape: `{ jobs: ActiveJobInfo[] }`. |
-| `DELETE /api/jobs/[promptId]` | Aborts a job: sends error SSE, closes stream, SSH cleanup (video), adds to recentlyCompleted. |
+| `DELETE /api/jobs/[promptId]` | Aborts a job: calls `abortJob`, sends error SSE, closes stream, SSH cleanup (video), adds to recentlyCompleted. |
+| `POST /api/jobs/[promptId]/abort` | Same as DELETE — preferred explicit-abort endpoint. Returns 200 `{ ok: true }` or 404 if the job is not active. |
 
 **`init` SSE event (video only).** `/api/generate-video` emits an `init` event as the first SSE frame with `{ promptId, generationId }` so the client can add the job to the queue before any `progress` events. Image jobs get promptId from the synchronous JSON response of `POST /api/generate`.
 

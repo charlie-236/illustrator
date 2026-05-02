@@ -15,8 +15,12 @@ export async function GET(
     start(controller) {
       manager.registerJob(promptId, controller);
 
+      // SSE stream close means the browser disconnected (refresh, tab close, network drop).
+      // It does NOT mean the user pressed Abort. The job stays alive on the server so
+      // that the next /api/jobs/active poll can reattach. Explicit abort goes through
+      // POST /api/jobs/[promptId]/abort instead.
       req.signal.addEventListener('abort', () => {
-        manager.removeJob(promptId);
+        manager.removeSubscriber(promptId, controller);
         try { controller.close(); } catch { /* already closed */ }
       });
     },

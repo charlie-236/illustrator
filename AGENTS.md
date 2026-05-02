@@ -75,6 +75,11 @@ The batch is NOT complete until the BACKLOG.md commit is pushed. The wrapper scr
 - Do not run `git checkout main` or create branches yourself. The script handles that.
 - Do not attempt to push to main. It will be rejected and is a policy violation regardless.
 
+## Common pitfalls
+
+- SSE stream close ≠ user intent. Don't treat client disconnect as an abort signal — that conflates "user pressed cancel" with "browser refreshed" and breaks refresh survivability. Aborts must be explicit endpoint calls (`POST /api/jobs/[promptId]/abort`).
+- Never add `beforeunload`/`pagehide` handlers that call abort or cleanup on the server — same reasoning as above.
+
 ## When uncertain — STOP
 
 - If the prompt is ambiguous between two reasonable approaches, do not pick. Push what you have, and write the ambiguity in the PR description so the user can clarify.
