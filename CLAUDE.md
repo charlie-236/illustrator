@@ -544,7 +544,7 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 
 **`completing` status.** When GPU computation ends (`execution_success`), `finalizeJob` emits a `completing` SSE event before the async save. The client transitions the job to `completing` status and shows `Saving…` in the tray — especially noticeable for video (2-min HTTP transfer from VM).
 
-**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}` (or `POST /api/jobs/{promptId}/abort`). The server calls `manager.abortJob`, sends an `error` SSE event (`'Aborted by user'`) to any live subscriber, closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. The in-tab SSE handler calls `failJob`; post-refresh polling detects it via `recentlyCompleted`.
+**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}` (or `POST /api/jobs/{promptId}/abort`). The server calls `manager.abortJob`, sends an `error` SSE event (`'Aborted by user'`) to any live subscriber, closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. The in-tab SSE handler calls `failJob`; post-refresh polling detects it via `recentlyCompleted`. `abortJob` also fires `POST /interrupt` to ComfyUI fire-and-forget, releasing the GPU immediately rather than letting the cancelled workflow finish naturally.
 
 **New API routes:**
 | Route | Description |
