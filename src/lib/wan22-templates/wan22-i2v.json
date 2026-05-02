@@ -132,15 +132,6 @@
       "title": "WanImageToVideo"
     }
   },
-  "52": {
-    "inputs": {
-      "image": "a-cute-asian-anime-girl-in-a-traditional-japanese-dress-vector.jpg"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
   "54": {
     "inputs": {
       "shift": 8.000000000000002,
