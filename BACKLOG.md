@@ -22,3 +22,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Real-readiness status probe for Admin tab services — `batch/service-readiness-probe` (PR #12)
 - [x] Aphrodite readiness probe fix (PR #12 follow-up) — `batch/aphrodite-readiness-probe-fix` (PR #13)
 - [~] Wan 2.2 video generation backend (Phase 1.1 of video) — `batch/wan22-video-backend` (PR #15)
+- [ ] Wan 2.2 video generation backend fixes (Phase 1.1 of video) — `batch/wan22-video-backend-fixes.md`
