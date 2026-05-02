@@ -4,14 +4,16 @@ import { useState, useRef, useEffect } from 'react';
 import PromptArea from './PromptArea';
 import ModelSelect from './ModelSelect';
 import ParamSlider from './ParamSlider';
-import GenerationProgress from './GenerationProgress';
 import ImageModal from './ImageModal';
 import GalleryPicker from './GalleryPicker';
+import QueueTray from './QueueTray';
 import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
 import ReferencePanel from './ReferencePanel';
+import { useQueue, type ActiveJob } from '@/contexts/QueueContext';
+import type { ActiveJobInfo } from '@/lib/comfyws';
 
 interface CheckpointDefaults {
   positivePrompt: string;
@@ -67,15 +69,7 @@ interface VideoResult {
   createdAt: string;
 }
 
-// ── Shared state types ────────────────────────────────────────────────────────
-
-interface State {
-  status: 'idle' | 'generating' | 'done' | 'error';
-  progress: { value: number; max: number };
-  records: GenerationRecord[];
-  error: string;
-  resolvedSeed: number;
-}
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   tab: Tab;
@@ -84,6 +78,7 @@ interface Props {
   onRemixConsumed: () => void;
   onRemix: (record: GenerationRecord) => void;
   modelConfigVersion: number;
+  onNavigateToGallery: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,7 +107,24 @@ async function encodeImageToBase64(url: string): Promise<string> {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed, onRemix, modelConfigVersion }: Props) {
+export default function Studio({
+  tab,
+  onGenerated,
+  remixParams,
+  onRemixConsumed,
+  onRemix,
+  modelConfigVersion,
+  onNavigateToGallery,
+}: Props) {
+  const {
+    addJob,
+    updateProgress,
+    setCompleting,
+    completeJob,
+    failJob,
+    requestPermissionIfNeeded,
+  } = useQueue();
+
   // mode — starts 'image'; actual session value applied on mount to avoid SSR mismatch
   const [mode, setMode] = useState<'image' | 'video'>('image');
 
@@ -126,21 +138,17 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
   const [videoResult, setVideoResult] = useState<VideoResult | null>(null);
 
-  // generation state (shared)
-  const [state, setState] = useState<State>({
-    status: 'idle',
-    progress: { value: 0, max: 0 },
-    records: [],
-    error: '',
-    resolvedSeed: -1,
-  });
+  // Inline result display for the most recently completed image/video
+  const [lastImageRecords, setLastImageRecords] = useState<GenerationRecord[]>([]);
+  const [lastResolvedSeed, setLastResolvedSeed] = useState(-1);
+
+  // Submit-level errors (network failures before job starts)
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStartIdx, setModalStartIdx] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
-  const sseRef = useRef<EventSource | null>(null);
-  const videoAbortRef = useRef<AbortController | null>(null);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
   const [checkpointConfig, setCheckpointConfig] = useState<CheckpointConfig | null>(null);
   const [baseImage, setBaseImage] = useState<string | null>(null);
@@ -152,17 +160,42 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   const [polishError, setPolishError] = useState<string | null>(null);
   const polishErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Apply session mode on mount
+  // Apply session mode on mount + recover in-flight jobs from server
   useEffect(() => {
     setMode(readSessionMode());
+
+    // On mount, poll for any in-flight jobs on the server (post-refresh recovery)
+    fetch('/api/jobs/active')
+      .then((r) => r.json())
+      .then(({ jobs: serverJobs }: { jobs: ActiveJobInfo[] }) => {
+        for (const sj of serverJobs) {
+          const job: ActiveJob = {
+            promptId: sj.promptId,
+            generationId: sj.generationId,
+            mediaType: sj.mediaType,
+            promptSummary: sj.promptSummary,
+            startedAt: sj.startedAt || Date.now(),
+            progress: sj.progress,
+            // Map server status to client status
+            status: sj.status === 'done' ? 'done'
+              : sj.status === 'error' ? 'error'
+              : 'running',
+          };
+          if (sj.status === 'error') job.errorMessage = sj.errorMessage;
+          addJob(job);
+        }
+      })
+      .catch(() => { /* non-critical — queue will be empty on fresh load */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Clear stale results when navigating away from Studio
   useEffect(() => {
     if (tab !== 'studio') {
       setDrawerOpen(false);
-      setState((s) => ({ ...s, records: [], status: s.status === 'done' ? 'idle' : s.status }));
+      setLastImageRecords([]);
       setVideoResult(null);
+      setSubmitError(null);
     }
   }, [tab]);
 
@@ -215,9 +248,9 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
 
   function switchMode(newMode: 'image' | 'video') {
     if (newMode === mode) return;
-    // Clear result display when switching modes
-    setState((s) => ({ ...s, status: 'idle', records: [], error: '', progress: { value: 0, max: 0 } }));
+    setLastImageRecords([]);
     setVideoResult(null);
+    setSubmitError(null);
     if (newMode === 'video') {
       setVideoP(VIDEO_DEFAULTS);
       setUseStartingFrame(false);
@@ -248,17 +281,11 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   // ── Image generation ──────────────────────────────────────────────────────
 
   async function handleGenerate() {
-    if (state.status === 'generating') return;
     setDrawerOpen(false);
+    setSubmitError(null);
 
-    setState({
-      status: 'generating',
-      progress: { value: 0, max: p.steps },
-      records: [],
-      error: '',
-      resolvedSeed: -1,
-    });
-    sseRef.current?.close();
+    const submitTime = Date.now();
+    const promptSummary = p.positivePrompt.slice(0, 60).trim() || 'Image generation';
 
     let promptId: string;
     let resolvedSeed: number;
@@ -284,23 +311,43 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       }
       ({ promptId, resolvedSeed } = await res.json() as { promptId: string; resolvedSeed: number });
     } catch (err) {
-      setState((s) => ({ ...s, status: 'error', error: String(err) }));
+      setSubmitError(String(err));
       return;
     }
 
-    setState((s) => ({ ...s, resolvedSeed }));
+    setLastResolvedSeed(resolvedSeed);
 
+    // Add to queue immediately — form stays unlocked
+    addJob({
+      promptId,
+      generationId: '',
+      mediaType: 'image',
+      promptSummary,
+      startedAt: submitTime,
+      progress: null,
+      status: 'running',
+    });
+
+    // Request notification permission on first submit
+    requestPermissionIfNeeded();
+
+    // Open SSE for progress updates
     const sse = new EventSource(`/api/progress/${promptId}`);
-    sseRef.current = sse;
 
     sse.addEventListener('progress', (e) => {
       const d = JSON.parse(e.data) as { value: number; max: number };
-      setState((s) => ({ ...s, progress: d }));
+      updateProgress(promptId, { current: d.value, total: d.max });
+    });
+
+    sse.addEventListener('completing', () => {
+      setCompleting(promptId);
     });
 
     sse.addEventListener('complete', (e) => {
       const d = JSON.parse(e.data) as { records: GenerationRecord[] };
-      setState((s) => ({ ...s, status: 'done', records: d.records }));
+      setLastImageRecords(d.records);
+      setLastResolvedSeed(resolvedSeed);
+      completeJob(promptId, d.records[0]?.id ?? '');
       sse.close();
       onGenerated();
     });
@@ -309,13 +356,13 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       const msg = e instanceof MessageEvent
         ? (JSON.parse(e.data) as { message: string }).message
         : 'Unknown error';
-      setState((s) => ({ ...s, status: 'error', error: msg }));
+      failJob(promptId, msg);
       sse.close();
     });
 
     sse.onerror = () => {
       if (sse.readyState === EventSource.CLOSED) return;
-      setState((s) => ({ ...s, status: 'error', error: 'SSE connection lost' }));
+      failJob(promptId, 'SSE connection lost');
       sse.close();
     };
   }
@@ -323,19 +370,10 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   // ── Video generation ──────────────────────────────────────────────────────
 
   async function handleGenerateVideo() {
-    if (isGenerating) return;
+    setSubmitError(null);
 
-    setState({
-      status: 'generating',
-      progress: { value: 0, max: videoP.steps },
-      records: [],
-      error: '',
-      resolvedSeed: -1,
-    });
-    setVideoResult(null);
-
-    const controller = new AbortController();
-    videoAbortRef.current = controller;
+    const submitTime = Date.now();
+    const promptSummary = p.positivePrompt.slice(0, 60).trim() || 'Video generation';
 
     try {
       const videoMode: 't2v' | 'i2v' = (useStartingFrame && startingFrameRecord) ? 'i2v' : 't2v';
@@ -345,7 +383,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         try {
           startImageB64 = await encodeImageToBase64(imgSrc(startingFrameRecord.filePath));
         } catch (err) {
-          setState((s) => ({ ...s, status: 'error', error: `Failed to load starting frame: ${String(err)}` }));
+          setSubmitError(`Failed to load starting frame: ${String(err)}`);
           return;
         }
       }
@@ -364,7 +402,6 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
           seed: p.seed >= 0 ? p.seed : undefined,
           ...(startImageB64 ? { startImageB64 } : {}),
         }),
-        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -379,6 +416,9 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       let lineBuf = '';
       let currentEvt = '';
       let streamDone = false;
+      let jobPromptId = '';
+      let jobGenerationId = '';
+      let jobAdded = false;
 
       while (!streamDone) {
         const { done, value } = await reader.read();
@@ -391,20 +431,43 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
             currentEvt = line.slice(7).trim();
           } else if (line.startsWith('data: ')) {
             const dataStr = line.slice(6);
-            if (currentEvt === 'progress') {
+            if (currentEvt === 'init') {
+              const initData = JSON.parse(dataStr) as { promptId: string; generationId: string };
+              jobPromptId = initData.promptId;
+              jobGenerationId = initData.generationId;
+              if (!jobAdded) {
+                jobAdded = true;
+                addJob({
+                  promptId: jobPromptId,
+                  generationId: jobGenerationId,
+                  mediaType: 'video',
+                  promptSummary,
+                  startedAt: submitTime,
+                  progress: null,
+                  status: 'running',
+                });
+                requestPermissionIfNeeded();
+              }
+            } else if (currentEvt === 'progress') {
               const pd = JSON.parse(dataStr) as { value: number; max: number };
-              setState((s) => ({ ...s, progress: pd }));
+              if (jobPromptId) updateProgress(jobPromptId, { current: pd.value, total: pd.max });
+            } else if (currentEvt === 'completing') {
+              if (jobPromptId) setCompleting(jobPromptId);
             } else if (currentEvt === 'complete') {
               const vr = JSON.parse(dataStr) as VideoResult;
               setVideoResult(vr);
-              setState((s) => ({ ...s, status: 'done' }));
+              if (jobPromptId) completeJob(jobPromptId, vr.id);
               onGenerated();
               reader.cancel();
               streamDone = true;
               break;
             } else if (currentEvt === 'error') {
               const er = JSON.parse(dataStr) as { message: string };
-              setState((s) => ({ ...s, status: 'error', error: er.message }));
+              if (jobPromptId) {
+                failJob(jobPromptId, er.message);
+              } else {
+                setSubmitError(er.message);
+              }
               reader.cancel();
               streamDone = true;
               break;
@@ -414,13 +477,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         }
       }
     } catch (err) {
-      if ((err as DOMException)?.name === 'AbortError') {
-        setState((s) => ({ ...s, status: 'idle' }));
-      } else {
-        setState((s) => ({ ...s, status: 'error', error: String(err) }));
-      }
-    } finally {
-      videoAbortRef.current = null;
+      setSubmitError(String(err));
     }
   }
 
@@ -429,19 +486,12 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   async function handleStudioDelete(id: string): Promise<void> {
     const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Delete failed');
-    setState((s) => {
-      const remaining = s.records.filter((r) => r.id !== id);
-      return {
-        ...s,
-        records: remaining,
-        status: remaining.length === 0 ? 'idle' : s.status,
-      };
-    });
+    setLastImageRecords((prev) => prev.filter((r) => r.id !== id));
     onGenerated();
   }
 
   async function handlePolish() {
-    if (polishing || isGenerating) return;
+    if (polishing) return;
     setPolishing(true);
     setPolishError(null);
     if (polishErrorTimer.current) clearTimeout(polishErrorTimer.current);
@@ -486,9 +536,19 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     }
   }
 
-  // ── Derived state ─────────────────────────────────────────────────────────
+  // ── Video validation ──────────────────────────────────────────────────────
 
-  const isGenerating = state.status === 'generating';
+  const vWidthErr = !Number.isInteger(videoP.width) || videoP.width < 256 || videoP.width > 1280 || videoP.width % 32 !== 0;
+  const vHeightErr = !Number.isInteger(videoP.height) || videoP.height < 256 || videoP.height > 1280 || videoP.height % 32 !== 0;
+  const vFramesErr = !Number.isInteger(videoP.frames) || videoP.frames < 17 || videoP.frames > 121 || (videoP.frames - 1) % 8 !== 0;
+  const vStepsErr = !Number.isInteger(videoP.steps) || videoP.steps < 4 || videoP.steps > 40 || videoP.steps % 2 !== 0;
+  const vCfgErr = videoP.cfg < 1.0 || videoP.cfg > 10.0;
+  const videoGenerateDisabled =
+    !p.positivePrompt.trim()
+    || vWidthErr || vHeightErr || vFramesErr || vStepsErr || vCfgErr
+    || (useStartingFrame && !startingFrameRecord);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   // Video validation — computed per-render
   const vWidthErr = !Number.isInteger(videoP.width) || videoP.width < 256 || videoP.width > 1280 || videoP.width % 32 !== 0;
@@ -506,36 +566,31 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
   return (
     <div className="p-4 space-y-4">
 
-      {/* ── Mode toggle ── */}
-      <div className="flex bg-zinc-800 rounded-xl p-1 gap-1">
-        {(['image', 'video'] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => switchMode(m)}
-            disabled={isGenerating}
-            className={`flex-1 min-h-12 rounded-lg font-medium text-sm transition-all
-              ${mode === m
-                ? 'bg-zinc-700 text-zinc-100 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 disabled:opacity-40'}`}
-          >
-            {m === 'image' ? 'Image' : 'Video'}
-          </button>
-        ))}
+      {/* ── Studio header: mode toggle + queue tray ── */}
+      <div className="flex items-center gap-3">
+        <div className="flex flex-1 bg-zinc-800 rounded-xl p-1 gap-1">
+          {(['image', 'video'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => switchMode(m)}
+              className={`flex-1 min-h-12 rounded-lg font-medium text-sm transition-all
+                ${mode === m
+                  ? 'bg-zinc-700 text-zinc-100 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              {m === 'image' ? 'Image' : 'Video'}
+            </button>
+          ))}
+        </div>
+        <QueueTray onNavigateToGallery={onNavigateToGallery} />
       </div>
 
-      {/* ── During generation: progress bar ── */}
-      {isGenerating && (
-        <div className="card">
-          <GenerationProgress value={state.progress.value} max={state.progress.max} />
-        </div>
-      )}
-
       {/* ── After image generation: thumbnail grid ── */}
-      {mode === 'image' && state.status === 'done' && state.records.length > 0 && (
+      {mode === 'image' && lastImageRecords.length > 0 && (
         <div className="card">
           <div className="grid grid-cols-3 gap-1.5">
-            {state.records.map((rec, i) => (
+            {lastImageRecords.map((rec, i) => (
               <div
                 key={rec.id}
                 className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors"
@@ -551,14 +606,14 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
               </div>
             ))}
           </div>
-          {state.resolvedSeed !== -1 && (
-            <p className="text-xs text-zinc-400 mt-2 tabular-nums">Seed: {state.resolvedSeed}</p>
+          {lastResolvedSeed !== -1 && (
+            <p className="text-xs text-zinc-400 mt-2 tabular-nums">Seed: {lastResolvedSeed}</p>
           )}
         </div>
       )}
 
       {/* ── After video generation: video result card ── */}
-      {mode === 'video' && state.status === 'done' && videoResult && (
+      {mode === 'video' && videoResult && (
         <div className="card space-y-2">
           <p className="text-sm font-medium text-zinc-200">Video ready</p>
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
@@ -576,9 +631,10 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
         </div>
       )}
 
-      {state.status === 'error' && (
+      {/* ── Submit error (network/validation failures before job starts) ── */}
+      {submitError && (
         <div className="card border-red-900 bg-red-950/30">
-          <p className="text-red-400 text-sm">{state.error}</p>
+          <p className="text-red-400 text-sm">{submitError}</p>
         </div>
       )}
 
@@ -847,7 +903,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
               <button
                 type="button"
                 onClick={() => void handlePolish()}
-                disabled={polishing || isGenerating || !p.positivePrompt.trim()}
+                disabled={polishing || !p.positivePrompt.trim()}
                 aria-label="Polish prompts with AI"
                 className="min-h-12 min-w-14 flex flex-col items-center justify-center rounded-xl
                            bg-violet-600/10 hover:bg-violet-600/20 active:scale-95
@@ -865,20 +921,16 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
                 )}
               </button>
 
-              {/* Generate — image mode */}
+              {/* Generate — image mode (always enabled when checkpoint is selected) */}
               <button
-                onClick={handleGenerate}
-                disabled={isGenerating || !p.checkpoint}
+                onClick={() => void handleGenerate()}
+                disabled={!p.checkpoint}
                 className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
                            bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
                            disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
                            text-white shadow-lg shadow-violet-900/40"
               >
-                {isGenerating
-                  ? `Generating… ${state.progress.value}/${state.progress.max}`
-                  : p.batchSize > 1
-                    ? `Generate ×${p.batchSize}`
-                    : 'Generate'}
+                {p.batchSize > 1 ? `Generate ×${p.batchSize}` : 'Generate'}
               </button>
             </div>
           </>
@@ -893,9 +945,7 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
                          disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
                          text-white shadow-lg shadow-violet-900/40"
             >
-              {isGenerating
-                ? `Generating… ${state.progress.value}/${state.progress.max}`
-                : 'Generate Video'}
+              Generate Video
             </button>
           </div>
         )}
@@ -1025,12 +1075,12 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
                 {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
               </button>
             </div>
-            {state.resolvedSeed !== -1 && (
+            {lastResolvedSeed !== -1 && (
               <div className="flex items-center justify-between mt-2">
-                <span className="text-xs text-zinc-400 tabular-nums">Last seed: {state.resolvedSeed}</span>
+                <span className="text-xs text-zinc-400 tabular-nums">Last seed: {lastResolvedSeed}</span>
                 <button
                   type="button"
-                  onClick={() => update('seed', state.resolvedSeed)}
+                  onClick={() => update('seed', lastResolvedSeed)}
                   className="min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95"
                 >
                   ♻ Reuse
@@ -1043,9 +1093,9 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
       </div>
 
       {/* ── Full-screen image modal ── */}
-      {modalOpen && state.records.length > 0 && (
+      {modalOpen && lastImageRecords.length > 0 && (
         <ImageModal
-          items={state.records}
+          items={lastImageRecords}
           startIndex={modalStartIdx}
           onClose={() => setModalOpen(false)}
           onRemix={(record) => { onRemix(record); setModalOpen(false); }}
@@ -1063,3 +1113,4 @@ export default function Studio({ tab, onGenerated, remixParams, onRemixConsumed,
     </div>
   );
 }
+

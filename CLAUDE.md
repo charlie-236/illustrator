@@ -271,7 +271,7 @@ Watchdog: 15 minutes (vs 10 for image jobs).
 src/
   app/
     layout.tsx          root layout, sets dark theme + viewport meta
-    page.tsx            tab state (studio | gallery | models | admin); passes refreshToken to Gallery, modelConfigVersion to Studio, onSaved to ModelConfig
+    page.tsx            tab state (studio | gallery | models | admin); wraps app in QueueProvider; renders ToastContainer; passes onNavigateToGallery to Studio
     globals.css         Tailwind directives + utility classes: .input-base, .label, .card
     api/
       models/           GET — checkpoint + lora lists from ComfyUI
@@ -287,9 +287,12 @@ src/
       generate/polish/route.ts     POST — LLM prompt expansion with frozen-token validation
       generate/polish/prompt.ts    POLISH_SYSTEM_PROMPT, POLISH_SAMPLING, STATIC_NEGATIVE constants
       generate/polish/validate.ts  extractFrozenTokens(), validatePreservation()
-      generate-video/route.ts      POST — SSE video generation via Wan 2.2; handles t2v and i2v modes
+      generate-video/route.ts      POST — SSE video generation via Wan 2.2; handles t2v and i2v modes; emits init event with promptId+generationId
+      jobs/active/route.ts         GET  — returns running + recently-completed jobs from comfyws singleton
+      jobs/[promptId]/route.ts     DELETE — aborts a job (removeJob → error SSE + SSH cleanup)
   lib/
-    comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert; extended for video jobs (registerVideoJob, finalizeVideoJob, sshCleanupVideo)
+    comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert; tracks promptSummary/startedAt/progress per job; recentlyCompleted cache (5 min); getActiveJobs()
+    notification.ts     playChime() Web Audio API bell tone; requestNotificationPermission(); sendBrowserNotification()
     workflow.ts         buildWorkflow() — image path
     wan22-workflow.ts   buildT2VWorkflow(), buildI2VWorkflow() — Wan 2.2 video path; exports VideoParams, ComfyWorkflow
     wan22-templates/    wan22-t2v.json, wan22-i2v.json — API-format ComfyUI workflow templates (runtime data; do not reference prompts/ at runtime)
@@ -305,7 +308,9 @@ src/
                         SAMPLERS, SCHEDULERS, RESOLUTIONS constants
   components/
     TabNav.tsx          sticky header with Studio / Gallery tabs
-    Studio.tsx          full generation form; owns all GenerationParams state + SSE lifecycle; renders ReferencePanel between prompts and the generate bar
+    Studio.tsx          full generation form; form never locks; integrates useQueue for job tracking; on mount calls /api/jobs/active for post-refresh recovery
+    QueueTray.tsx       badge + dropdown tray (Studio header, right of mode toggle); job rows with progress/abort/view/dismiss
+    Toast.tsx           ToastContainer + Toast; fixed bottom-right; auto-dismiss 5 s; rendered at page level
     ReferencePanel.tsx  img2img + FaceID identity reference upload zones (collapsible card in Studio)
     PromptArea.tsx      labelled textarea
     ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves) or when the user taps the Refresh button in the picker sheet
@@ -317,6 +322,8 @@ src/
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
     GalleryPicker.tsx   Modal for selecting a gallery image as I2V starting frame; images-only filter (mediaType=image), infinite scroll, no delete/remix/favorite actions
+  contexts/
+    QueueContext.tsx    Global job queue state; Context + useReducer; notification side effects; 5 s polling while jobs run; 30 s auto-dismiss for done jobs
 
 ```
 public/
@@ -507,6 +514,40 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 
 **Generate Video button:** replaces the image-mode "Generate" button. POSTs to `/api/generate-video` as a streaming fetch (not EventSource, since the route is a direct POST→SSE response). Progress and error events are parsed from the SSE stream inline. On `complete`, a `<video>` element is shown in Studio with controls/loop.
 
+**Queue UX (Phase 1.2b):** The Generate/Generate Video buttons are never locked. Each submit adds a job to the queue and returns immediately. See **Queue UX** section below.
+
+---
+
+### Queue UX (Phase 1.2b)
+
+**Concurrency model.** Submitting a generation never locks the form. Each submit immediately adds a job to the in-memory `ActiveJob` queue (client-side, `QueueContext`) and returns. Multiple image, video, or mixed jobs can run concurrently. The queue is single-user and has no cap.
+
+**`QueueContext` (`src/contexts/QueueContext.tsx`).** React Context + useReducer. Provides:
+- `addJob`, `updateProgress`, `setCompleting`, `completeJob`, `failJob`, `removeJob` — called from Studio's SSE handlers
+- `toggleMute` / `muted` — persisted to localStorage (`queue-muted`)
+- `toasts` / `dismissToast` — in-app toast list (one per completion)
+- `requestPermissionIfNeeded` — requests browser notification permission on first submit; denial stored in localStorage (`queue-notif-perm`) and never re-prompted
+
+**`QueueTray` (`src/components/QueueTray.tsx`).** Badge + dropdown in the Studio header (right of the mode toggle). Badge shows count of running jobs; invisible at zero. Expanded dropdown shows one row per job with: media-type icon, prompt summary (60 chars), progress bar (`N/total steps` or `Saving…`), elapsed time, abort button (×), View link (done), and dismiss button (done/error). Mute toggle (speaker icon) in the tray header. Closes on click-outside or Escape.
+
+**Notification chain** (fires on `completeJob`):
+- **Audio chime:** synthesised via Web Audio API (880 Hz → 660 Hz bell tone, ~0.8 s). Skipped if muted.
+- **In-app toast** (`src/components/Toast.tsx`): "Image/Video generated" card in bottom-right, auto-dismisses after 5 s. Rendered at page level via `ToastContainer`.
+- **Browser Notification API:** fires if `document.hidden` and `Notification.permission === 'granted'`. `onclick` focuses the tab.
+
+**Refresh survivability.** `GET /api/jobs/active` returns all running jobs + recently-completed jobs (5-min cache). On Studio mount, this endpoint is fetched and any found jobs are added to the queue without re-notifying. The `QueueContext` polls this endpoint every 5 s while any jobs are `running` or `completing`, detecting completions via status transitions.
+
+**`completing` status.** When GPU computation ends (`execution_success`), `finalizeJob` emits a `completing` SSE event before the async save. The client transitions the job to `completing` status and shows `Saving…` in the tray — especially noticeable for video (2-min HTTP transfer from VM).
+
+**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}`. The server calls `manager.removeJob`, sends an `error` SSE event (`'Aborted by user'`), closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. The in-tab SSE handler calls `failJob`; post-refresh polling detects it via `recentlyCompleted`.
+
+**New API routes:**
+| Route | Description |
+|---|---|
+| `GET /api/jobs/active` | Returns running + recently-completed jobs from comfyws singleton. Shape: `{ jobs: ActiveJobInfo[] }`. |
+| `DELETE /api/jobs/[promptId]` | Aborts a job: sends error SSE, closes stream, SSH cleanup (video), adds to recentlyCompleted. |
+
+**`init` SSE event (video only).** `/api/generate-video` emits an `init` event as the first SSE frame with `{ promptId, generationId }` so the client can add the job to the queue before any `progress` events. Image jobs get promptId from the synchronous JSON response of `POST /api/generate`.
 **Single-job UX (Phase 1.2a state):** The Generate Video button and mode toggle are both disabled while a generation is in-flight. Concurrency, queue tray, and audio chime land in Phase 1.2b.
 
 ---
