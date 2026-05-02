@@ -316,6 +316,7 @@ src/
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
+    GalleryPicker.tsx   Modal for selecting a gallery image as I2V starting frame; images-only filter (mediaType=image), infinite scroll, no delete/remix/favorite actions
 
 ```
 public/
@@ -481,6 +482,32 @@ The default negative prompt on node 7 is verbatim Alibaba-recommended Chinese te
 **Watchdog timeout:** 15 minutes (image jobs use 10 minutes). Set via `registerVideoJob`'s `timeoutMs` parameter.
 
 **DB record:** `Generation` row with `mediaType: 'video'`, `frames`, `fps: 16`, `model: 'wan2.2-t2v'` or `'wan2.2-i2v'`. `sampler: 'euler'`, `scheduler: 'simple'` are hardcoded (Wan 2.2 defaults).
+
+### Studio UI (Phase 1.2a)
+
+A pill toggle at the top of Studio switches between **Image** and **Video** modes. Mode persists for the session via `sessionStorage`. Positive prompt and seed carry across when switching; all other params reset to that mode's defaults. The mode toggle is disabled while a generation is in-flight.
+
+**Video controls** (visible only in Video mode):
+
+| Control | Default | Bounds |
+|---|---|---|
+| Positive prompt | — | required |
+| Negative prompt | hidden — hint: "Default Wan 2.2 negative prompt applied." | — |
+| Resolution presets | — | 1280×704 / 768×768 / 704×1280 quick-pick buttons |
+| Width / Height | 1280 / 704 | See validation rules above |
+| Frames slider | 57 | 17–121, step 8; label shows `N frames (N/16s)` |
+| Steps slider | 20 | 4–40, step 2 (even-only) |
+| CFG slider | 3.5 | 1.0–10.0, step 0.1 |
+| Seed | -1 (random) | shared with image mode |
+| Starting frame toggle | Off | On → I2V mode; Off → T2V mode |
+
+Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA stack, ReferencePanel, Hi-Res Fix, sampler/scheduler, batch size, and the Polish button.
+
+**Starting frame picker:** When the starting frame toggle is On, a "Pick from gallery" button appears. Clicking it opens `GalleryPicker` — a modal that shows the gallery grid filtered to `mediaType=image` only. Selecting an image closes the modal and populates a thumbnail preview. The × button clears the selection (keeps the toggle on). The i2v `startImageB64` field is populated by fetching the selected image's URL client-side and base64-encoding it at submit time.
+
+**Generate Video button:** replaces the image-mode "Generate" button. POSTs to `/api/generate-video` as a streaming fetch (not EventSource, since the route is a direct POST→SSE response). Progress and error events are parsed from the SSE stream inline. On `complete`, a `<video>` element is shown in Studio with controls/loop.
+
+**Single-job UX (Phase 1.2a state):** The Generate Video button and mode toggle are both disabled while a generation is in-flight. Concurrency, queue tray, and audio chime land in Phase 1.2b.
 
 ---
 

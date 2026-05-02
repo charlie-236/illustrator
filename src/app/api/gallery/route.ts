@@ -12,9 +12,12 @@ export async function GET(req: NextRequest) {
 
   const cursor = cursorParam ? new Date(cursorParam) : undefined;
 
+  const mediaTypeParam = url.searchParams.get('mediaType');
+
   const where = {
     ...(favoritesOnly ? { isFavorite: true } : {}),
     ...(cursor ? { createdAt: { lt: cursor } } : {}),
+    ...(mediaTypeParam ? { mediaType: mediaTypeParam } : {}),
   };
 
   try {

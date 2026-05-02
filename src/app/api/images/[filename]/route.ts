@@ -22,7 +22,10 @@ export async function GET(
   try {
     const data = await readFile(filePath);
     const ext = path.extname(filename).toLowerCase();
-    const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
+    const contentType =
+      ext === '.png' ? 'image/png' :
+      ext === '.webm' ? 'video/webm' :
+      'image/jpeg';
 
     return new NextResponse(data, {
       headers: {
