@@ -21,4 +21,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Source embeddings list from the VM (orphan visibility + delete) — `batch/embeddings-vm-source` (PR #11)
 - [x] Real-readiness status probe for Admin tab services — `batch/service-readiness-probe` (PR #12)
 - [x] Aphrodite readiness probe fix (PR #12 follow-up) — `batch/aphrodite-readiness-probe-fix` (PR #13)
-- [ ] Wan 2.2 video generation backend (Phase 1.1 of video) — see prompts/wan22-video-backend.md
+- [~] Wan 2.2 video generation backend (Phase 1.1 of video) — `batch/wan22-video-backend` (PR #15)
+- [~] Wan 2.2 video generation backend fixes (Phase 1.1 of video) — `prompts/wan22-video-backend-fixes.md` — `batch/wan22-video-backend-fixes` (PR #16)

@@ -26,6 +26,9 @@ model Generation {
   scheduler    String   @default("normal")
   highResFix   Boolean  @default(false)
   isFavorite   Boolean  @default(false)
+  mediaType    String   @default("image")  // "image" | "video"
+  frames       Int?                         // null for images; frame count for videos
+  fps          Int?                         // null for images; frame rate for videos
   createdAt    DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])

@@ -4,26 +4,65 @@ import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import type { Prisma } from '@prisma/client';
 import type { GenerationParams } from '@/types';
+import { NodeSSH } from 'node-ssh';
 import { prisma } from './prisma';
 
-interface Job {
+// ─── job types ───────────────────────────────────────────────────────────────
+
+export interface VideoJobParams {
+  generationId: string;
+  prompt: string;
+  negativePrompt: string;
+  width: number;
+  height: number;
+  frames: number;
+  steps: number;
+  cfg: number;
+  seed: number;
+  mode: 't2v' | 'i2v';
+  outputDir: string;
+}
+
+interface BaseJob {
   promptId: string;
-  params: GenerationParams;
-  resolvedSeed: number;
-  assembledPos: string;
-  assembledNeg: string;
   controller: ReadableStreamDefaultController<Uint8Array>;
-  /** Accumulates every image binary frame for this prompt (one per batch image). */
+  /** Image frames accumulate here for image jobs; always empty for video jobs. */
   imageBuffers: Buffer[];
   activeNode: string | null;
   finalized: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
+interface ImageJob extends BaseJob {
+  mediaType: 'image';
+  params: GenerationParams;
+  resolvedSeed: number;
+  assembledPos: string;
+  assembledNeg: string;
+}
+
+interface VideoJob extends BaseJob {
+  mediaType: 'video';
+  videoParams: VideoJobParams;
+  /** Set by the `executed` message handler when SaveWEBM reports its output. */
+  videoResult?: { filename: string; subfolder: string };
+}
+
+type Job = ImageJob | VideoJob;
+
+// ─── constants ───────────────────────────────────────────────────────────────
+
 const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://127.0.0.1:8188';
 const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
-const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — covers batch=4 + high-res on A100
+const IMAGE_JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — covers batch=4 + high-res on A100
+const VIDEO_JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 min — Wan 2.2 at 1280×704 takes ~5 min; 15 gives headroom
+const VM_USER = process.env.A100_VM_USER ?? '';
+const VM_IP = process.env.A100_VM_IP ?? '';
+const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
+
 const encoder = new TextEncoder();
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
 function sseChunk(event: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -98,6 +137,8 @@ function slugifyPrompt(prompt: string): string {
   return slug || 'generation';
 }
 
+// ─── manager ─────────────────────────────────────────────────────────────────
+
 class ComfyWSManager {
   private ws: WebSocket | null = null;
   private clientId: string;
@@ -161,7 +202,6 @@ class ComfyWSManager {
   }
 
   private async flushJobsOnReconnect() {
-    // Snapshot keys — we'll mutate the map per-job below.
     const promptIds = [...this.jobs.keys()];
     for (const promptId of promptIds) {
       const job = this.jobs.get(promptId);
@@ -174,12 +214,12 @@ class ComfyWSManager {
         const statusStr = history[promptId]?.status?.status_str;
 
         if (statusStr === 'success') {
-          // Prompt finished during the disconnect; binary frame was sent into the dead socket.
+          // Prompt finished during disconnect; binary/video frame was sent into the dead socket.
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
           if (this.activePromptId === promptId) this.activePromptId = null;
           job.controller.enqueue(sseChunk('error', {
-            message: 'Generation completed during reconnection but the image was lost. Please retry.',
+            message: 'Generation completed during reconnection but the output was lost. Please retry.',
           }));
           try { job.controller.close(); } catch { /* already closed */ }
           this.jobs.delete(promptId);
@@ -193,9 +233,6 @@ class ComfyWSManager {
           try { job.controller.close(); } catch { /* already closed */ }
           this.jobs.delete(promptId);
         }
-        // Empty object, unknown status, or still running → leave job in place.
-        // ComfyUI will resume sending events on the new connection (stable clientId).
-        // The per-job watchdog will reap it if events never resume.
       } catch {
         // /history fetch failed — leave job in place and let the watchdog handle it.
       }
@@ -212,9 +249,10 @@ class ComfyWSManager {
     }
 
     // Route PNG frame directly to the active prompt — no iteration needed.
+    // Video jobs don't emit binary frames; this path is image-only.
     if (this.activePromptId === null) return;
     const job = this.jobs.get(this.activePromptId);
-    if (!job) return;
+    if (!job || job.mediaType !== 'image') return;
     job.imageBuffers.push(Buffer.from(result.image));
   }
 
@@ -256,6 +294,24 @@ class ComfyWSManager {
       return;
     }
 
+    if (type === 'executed') {
+      // ComfyUI sends this when a node finishes with output. For video jobs, SaveWEBM
+      // reports the output file here (not over binary WS like SaveImageWebsocket does).
+      const promptId = data.prompt_id as string;
+      const job = this.jobs.get(promptId);
+      if (job && job.mediaType === 'video') {
+        const output = data.output as Record<string, Array<{ filename: string; subfolder: string }>> | undefined;
+        if (output) {
+          // ComfyUI's choice of key (videos/images/gifs) depends on the save node and build version
+          const fileList = output.videos ?? output.images ?? output.gifs;
+          if (fileList?.[0]) {
+            job.videoResult = { filename: fileList[0].filename, subfolder: fileList[0].subfolder };
+          }
+        }
+      }
+      return;
+    }
+
     if (type === 'execution_success') {
       const promptId = data.prompt_id as string;
       const job = this.jobs.get(promptId);
@@ -277,13 +333,25 @@ class ComfyWSManager {
         job.controller.enqueue(sseChunk('error', { message }));
         try { job.controller.close(); } catch { /* already closed */ }
         this.jobs.delete(promptId);
+        // For video jobs: still attempt SSH cleanup even on error
+        if (job.mediaType === 'video') {
+          void this.sshCleanupVideo(job.videoParams.generationId);
+        }
       }
       return;
     }
   }
 
-  private async finalizeJob(job: Job) {
+  private finalizeJob(job: Job) {
     if (job.finalized) return;
+    if (job.mediaType === 'video') {
+      void this.finalizeVideoJob(job);
+    } else {
+      void this.finalizeImageJob(job);
+    }
+  }
+
+  private async finalizeImageJob(job: ImageJob) {
     job.finalized = true;
     if (job.timeoutId !== null) clearTimeout(job.timeoutId);
     const { params, resolvedSeed, assembledPos, assembledNeg, imageBuffers, controller } = job;
@@ -317,7 +385,6 @@ class ComfyWSManager {
       const records = await Promise.all(
         imageBuffers.map(async (buf, i) => {
           const ext = 'png'; // SaveImageWebsocket always emits PNG; only PNG frames reach imageBuffers
-          // Batch images get a _1, _2 … suffix so filenames stay unique.
           const filename = isBatch
             ? `${slug}_${timestamp}_${i + 1}.${ext}`
             : `${slug}_${timestamp}.${ext}`;
@@ -343,6 +410,7 @@ class ComfyWSManager {
               sampler: params.sampler,
               scheduler: params.scheduler,
               highResFix: params.highResFix ?? false,
+              mediaType: 'image',
             },
           });
 
@@ -356,10 +424,102 @@ class ComfyWSManager {
 
       controller.enqueue(sseChunk('complete', { records }));
     } catch (err) {
-      console.error('[ComfyWS] finalizeJob error', err);
+      console.error('[ComfyWS] finalizeImageJob error', err);
       controller.enqueue(sseChunk('error', { message: String(err) }));
     } finally {
       try { job.controller.close(); } catch { /* already closed */ }
+    }
+  }
+
+  private async finalizeVideoJob(job: VideoJob) {
+    job.finalized = true;
+    if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+    const { videoParams, videoResult, controller } = job;
+    this.jobs.delete(job.promptId);
+
+    try {
+      if (!videoResult) {
+        throw new Error('No video output received from ComfyUI (SaveWEBM did not report a file)');
+      }
+
+      const { filename, subfolder } = videoResult;
+
+      // Fetch video file from ComfyUI /view — it lives on the VM's output folder
+      const viewUrl = new URL(`${COMFYUI_HTTP}/view`);
+      viewUrl.searchParams.set('filename', filename);
+      viewUrl.searchParams.set('subfolder', subfolder);
+      viewUrl.searchParams.set('type', 'output');
+
+      const videoRes = await fetch(viewUrl.toString(), {
+        signal: AbortSignal.timeout(120_000), // 2-min timeout for file transfer
+      });
+      if (!videoRes.ok) {
+        throw new Error(`ComfyUI /view returned ${videoRes.status} ${videoRes.statusText}`);
+      }
+      const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+      // Write to local storage alongside image files
+      await mkdir(videoParams.outputDir, { recursive: true });
+
+      const slug = slugifyPrompt(videoParams.prompt);
+      const localFilename = `${slug}_${Date.now()}.webm`;
+      await writeFile(path.join(videoParams.outputDir, localFilename), videoBuffer);
+      const filePath = `/api/images/${localFilename}`;
+
+      // Create DB row
+      const record = await prisma.generation.create({
+        data: {
+          id: videoParams.generationId,
+          filePath,
+          promptPos: videoParams.prompt,
+          promptNeg: videoParams.negativePrompt,
+          model: `wan2.2-${videoParams.mode}`,
+          seed: BigInt(videoParams.seed),
+          cfg: videoParams.cfg,
+          steps: videoParams.steps,
+          width: videoParams.width,
+          height: videoParams.height,
+          sampler: 'euler',
+          scheduler: 'simple',
+          highResFix: false,
+          mediaType: 'video',
+          frames: videoParams.frames,
+          fps: 16,
+        },
+      });
+
+      controller.enqueue(sseChunk('complete', {
+        id: record.id,
+        filePath: record.filePath,
+        frames: record.frames,
+        fps: record.fps,
+        seed: record.seed.toString(),
+        createdAt: record.createdAt.toISOString(),
+      }));
+    } catch (err) {
+      console.error('[ComfyWS] finalizeVideoJob error', err);
+      controller.enqueue(sseChunk('error', { message: String(err) }));
+    } finally {
+      // SSH cleanup always runs — globs by prefix so partial files are removed too
+      await this.sshCleanupVideo(videoParams.generationId);
+      try { controller.close(); } catch { /* already closed */ }
+    }
+  }
+
+  private async sshCleanupVideo(generationId: string) {
+    if (!VM_IP || !VM_USER || !SSH_KEY_PATH) {
+      console.warn('[ComfyWS] SSH cleanup skipped — VM credentials not configured');
+      return;
+    }
+    const ssh = new NodeSSH();
+    try {
+      await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });
+      await ssh.execCommand(`rm -f /models/ComfyUI/output/video-${generationId}*`);
+    } catch (err) {
+      // SSH cleanup failure is non-fatal — file is small and can be cleaned manually
+      console.error('[ComfyWS] SSH cleanup error', err);
+    } finally {
+      ssh.dispose();
     }
   }
 
@@ -369,9 +529,13 @@ class ComfyWSManager {
     job.finalized = true;
     job.timeoutId = null;
     if (this.activePromptId === promptId) this.activePromptId = null;
-    job.controller.enqueue(sseChunk('error', { message: 'Generation timed out after 10 minutes' }));
+    const mins = job.mediaType === 'video' ? 15 : 10;
+    job.controller.enqueue(sseChunk('error', { message: `Generation timed out after ${mins} minutes` }));
     try { job.controller.close(); } catch { /* already closed */ }
     this.jobs.delete(promptId);
+    if (job.mediaType === 'video') {
+      void this.sshCleanupVideo(job.videoParams.generationId);
+    }
   }
 
   stashJobParams(
@@ -387,7 +551,7 @@ class ComfyWSManager {
       if (now - entry.createdAt > 60_000) this.pendingParams.delete(id);
     }
 
-    // Strip baseImage and denoise — not needed in finalizeJob, and baseImage can be several MB
+    // Strip baseImage and denoise — not needed in finalizeImageJob, and baseImage can be several MB
     const { baseImage: _bi, denoise: _d, ...rest } = params;
     this.pendingParams.set(promptId, { params: rest as GenerationParams, resolvedSeed, assembledPos, assembledNeg, createdAt: now });
   }
@@ -405,10 +569,11 @@ class ComfyWSManager {
       return;
     }
 
-    const timeoutId = setTimeout(() => this.expireJob(promptId), JOB_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => this.expireJob(promptId), IMAGE_JOB_TIMEOUT_MS);
 
     this.jobs.set(promptId, {
       promptId,
+      mediaType: 'image',
       params: entry.params,
       resolvedSeed: entry.resolvedSeed,
       assembledPos: entry.assembledPos,
@@ -421,9 +586,40 @@ class ComfyWSManager {
     });
   }
 
+  registerVideoJob(
+    promptId: string,
+    videoParams: VideoJobParams,
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    timeoutMs = VIDEO_JOB_TIMEOUT_MS,
+  ) {
+    const timeoutId = setTimeout(() => this.expireJob(promptId), timeoutMs);
+
+    this.jobs.set(promptId, {
+      promptId,
+      mediaType: 'video',
+      videoParams,
+      controller,
+      imageBuffers: [],
+      activeNode: null,
+      finalized: false,
+      timeoutId,
+    });
+  }
+
   removeJob(promptId: string) {
     const job = this.jobs.get(promptId);
-    if (job?.timeoutId != null) clearTimeout(job.timeoutId);
+    if (!job) return;
+    if (job.timeoutId != null) clearTimeout(job.timeoutId);
+
+    // If this is a video job that hasn't been finalized, the file may have been
+    // (or be about to be) written to the VM. Fire-and-forget SSH cleanup; the
+    // glob is idempotent and will no-op if no file exists yet.
+    if (job.mediaType === 'video' && !job.finalized) {
+      this.sshCleanupVideo(job.videoParams.generationId).catch((err) => {
+        console.error(`[ComfyWS] SSH cleanup failed for aborted job ${promptId}:`, err);
+      });
+    }
+
     this.jobs.delete(promptId);
   }
 
@@ -435,6 +631,8 @@ class ComfyWSManager {
     return this.connected;
   }
 }
+
+// ─── singleton ───────────────────────────────────────────────────────────────
 
 declare global {
   // eslint-disable-next-line no-var
