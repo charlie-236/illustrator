@@ -20,6 +20,7 @@ export interface VideoJobParams {
   cfg: number;
   seed: number;
   mode: 't2v' | 'i2v';
+  outputDir: string;
 }
 
 interface BaseJob {
@@ -458,15 +459,11 @@ class ComfyWSManager {
       const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
 
       // Write to local storage alongside image files
-      const IMAGE_OUTPUT_DIR = process.env.IMAGE_OUTPUT_DIR;
-      if (!IMAGE_OUTPUT_DIR) {
-        throw new Error('IMAGE_OUTPUT_DIR not configured');
-      }
-      await mkdir(IMAGE_OUTPUT_DIR, { recursive: true });
+      await mkdir(videoParams.outputDir, { recursive: true });
 
       const slug = slugifyPrompt(videoParams.prompt);
       const localFilename = `${slug}_${Date.now()}.webm`;
-      await writeFile(path.join(IMAGE_OUTPUT_DIR, localFilename), videoBuffer);
+      await writeFile(path.join(videoParams.outputDir, localFilename), videoBuffer);
       const filePath = `/api/images/${localFilename}`;
 
       // Create DB row
@@ -611,7 +608,18 @@ class ComfyWSManager {
 
   removeJob(promptId: string) {
     const job = this.jobs.get(promptId);
-    if (job?.timeoutId != null) clearTimeout(job.timeoutId);
+    if (!job) return;
+    if (job.timeoutId != null) clearTimeout(job.timeoutId);
+
+    // If this is a video job that hasn't been finalized, the file may have been
+    // (or be about to be) written to the VM. Fire-and-forget SSH cleanup; the
+    // glob is idempotent and will no-op if no file exists yet.
+    if (job.mediaType === 'video' && !job.finalized) {
+      this.sshCleanupVideo(job.videoParams.generationId).catch((err) => {
+        console.error(`[ComfyWS] SSH cleanup failed for aborted job ${promptId}:`, err);
+      });
+    }
+
     this.jobs.delete(promptId);
   }
 

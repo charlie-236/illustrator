@@ -7,10 +7,15 @@ export type ComfyWorkflow = Record<string, {
   _meta?: { title: string };
 }>;
 
+// Verbatim Alibaba-recommended negative prompt — do not translate or replace.
+// The model was trained against this exact string.
+export const WAN22_DEFAULT_NEGATIVE_PROMPT =
+  '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走';
+
 export interface VideoParams {
   generationId: string;
   prompt: string;
-  negativePrompt?: string;
+  negativePrompt: string;
   width: number;
   height: number;
   frames: number;
@@ -50,9 +55,7 @@ export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
 
   // Prompts
   wf['6'].inputs.text = params.prompt;
-  if (params.negativePrompt !== undefined) {
-    wf['7'].inputs.text = params.negativePrompt;
-  }
+  wf['7'].inputs.text = params.negativePrompt;
 
   // Dimensions and frame count (node 61 = EmptyHunyuanLatentVideo)
   wf['61'].inputs.width = params.width;
@@ -82,9 +85,7 @@ export function buildI2VWorkflow(params: VideoParams & { startImageB64: string }
 
   // Prompts
   wf['6'].inputs.text = params.prompt;
-  if (params.negativePrompt !== undefined) {
-    wf['7'].inputs.text = params.negativePrompt;
-  }
+  wf['7'].inputs.text = params.negativePrompt;
 
   // Dimensions and frame count (node 50 = WanImageToVideo)
   wf['50'].inputs.width = params.width;
