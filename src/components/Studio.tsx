@@ -7,11 +7,13 @@ import ParamSlider from './ParamSlider';
 import ImageModal from './ImageModal';
 import GalleryPicker from './GalleryPicker';
 import QueueTray from './QueueTray';
-import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext } from '@/types';
+import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
 import ReferencePanel from './ReferencePanel';
+import ProjectPicker from './ProjectPicker';
+import NewProjectModal from './NewProjectModal';
 import { useQueue, type ActiveJob } from '@/contexts/QueueContext';
 import type { ActiveJobInfo } from '@/lib/comfyws';
 
@@ -171,6 +173,10 @@ export default function Studio({
   // "Use last frame of previous clip" checkbox — only relevant when projectContext has a latestClipId
   const [useLastFrame, setUseLastFrame] = useState(false);
   const [extractingLastFrame, setExtractingLastFrame] = useState(false);
+  // Project picker (clickable badge)
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [switchingProject, setSwitchingProject] = useState(false);
 
   // Inline result display for the most recently completed image/video
   const [lastImageRecords, setLastImageRecords] = useState<GenerationRecord[]>([]);
@@ -366,6 +372,114 @@ export default function Studio({
     setProjectContext(null);
     saveSessionProjectContext(null);
     setUseLastFrame(false);
+  }
+
+  async function handleProjectSwitch(projectId: string | null, projectName: string | null) {
+    setShowProjectPicker(false);
+    if (!projectId) {
+      // "None" — clear context without touching form values
+      clearProjectContext();
+      return;
+    }
+    // Same project — no-op
+    if (projectId === projectContext?.projectId) return;
+
+    setSwitchingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (!res.ok) return;
+      const { project, clips } = await res.json() as { project: ProjectDetail; clips: ProjectClip[] };
+
+      // Latest clip = last entry in position-ascending order
+      const latestClip = clips.length > 0 ? clips[clips.length - 1] : null;
+
+      const newCtx: ProjectContext = {
+        projectId: project.id,
+        projectName: project.name,
+        latestClipId: latestClip?.id ?? null,
+        latestClipPrompt: latestClip?.prompt ?? null,
+        latestClipMediaType: latestClip?.mediaType ?? null,
+        latestClipFilePath: latestClip?.filePath ?? null,
+        defaults: {
+          frames: project.defaultFrames ?? null,
+          steps: project.defaultSteps ?? null,
+          cfg: project.defaultCfg ?? null,
+          width: project.defaultWidth ?? null,
+          height: project.defaultHeight ?? null,
+        },
+      };
+
+      setProjectContext(newCtx);
+      saveSessionProjectContext(newCtx);
+
+      // Hard reset video params to new project's defaults
+      setVideoP({
+        frames: newCtx.defaults.frames ?? VIDEO_DEFAULTS.frames,
+        steps: newCtx.defaults.steps ?? VIDEO_DEFAULTS.steps,
+        cfg: newCtx.defaults.cfg ?? VIDEO_DEFAULTS.cfg,
+        width: newCtx.defaults.width ?? VIDEO_DEFAULTS.width,
+        height: newCtx.defaults.height ?? VIDEO_DEFAULTS.height,
+      });
+
+      // Pre-fill prompt from latest clip; clear if no clips
+      setP((prev) => ({ ...prev, positivePrompt: newCtx.latestClipPrompt ?? '' }));
+
+      // Reset starting-frame state
+      setUseStartingFrame(false);
+      setStartingFrameRecord(null);
+      setUseLastFrame(false);
+
+      // Switch to video mode
+      setMode('video');
+      setVideoResult(null);
+      setSubmitError(null);
+      try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
+    } catch {
+      // non-critical — don't switch context on fetch failure
+    } finally {
+      setSwitchingProject(false);
+    }
+  }
+
+  function handleNewProjectCreated(project: ProjectDetail) {
+    setShowNewProjectModal(false);
+    const newCtx: ProjectContext = {
+      projectId: project.id,
+      projectName: project.name,
+      latestClipId: null,
+      latestClipPrompt: null,
+      latestClipMediaType: null,
+      latestClipFilePath: null,
+      defaults: {
+        frames: project.defaultFrames ?? null,
+        steps: project.defaultSteps ?? null,
+        cfg: project.defaultCfg ?? null,
+        width: project.defaultWidth ?? null,
+        height: project.defaultHeight ?? null,
+      },
+    };
+    setProjectContext(newCtx);
+    saveSessionProjectContext(newCtx);
+
+    setVideoP({
+      frames: newCtx.defaults.frames ?? VIDEO_DEFAULTS.frames,
+      steps: newCtx.defaults.steps ?? VIDEO_DEFAULTS.steps,
+      cfg: newCtx.defaults.cfg ?? VIDEO_DEFAULTS.cfg,
+      width: newCtx.defaults.width ?? VIDEO_DEFAULTS.width,
+      height: newCtx.defaults.height ?? VIDEO_DEFAULTS.height,
+    });
+
+    // Clear prompt — new project has no clips
+    setP((prev) => ({ ...prev, positivePrompt: '' }));
+
+    setUseStartingFrame(false);
+    setStartingFrameRecord(null);
+    setUseLastFrame(false);
+
+    setMode('video');
+    setVideoResult(null);
+    setSubmitError(null);
+    try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
   }
 
   function switchMode(newMode: 'image' | 'video') {
@@ -769,15 +883,21 @@ export default function Studio({
         <QueueTray onNavigateToGallery={onNavigateToGallery} />
       </div>
 
-      {/* ── Project context badge ── */}
-      {projectContext && (
+      {/* ── Project context badge / picker ── */}
+      {projectContext ? (
+        /* State B: project active */
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-600/10 border border-violet-600/20">
           <svg className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
-          <span className="text-xs font-medium text-violet-300 flex-1 truncate">
-            Project: {projectContext.projectName}
-          </span>
+          <button
+            type="button"
+            onClick={() => setShowProjectPicker(true)}
+            disabled={switchingProject}
+            className="text-xs font-medium text-violet-300 flex-1 truncate text-left min-h-8 hover:text-violet-200 transition-colors disabled:opacity-70"
+          >
+            {switchingProject ? 'Switching…' : `Project: ${projectContext.projectName}`}
+          </button>
           <button
             type="button"
             onClick={clearProjectContext}
@@ -789,6 +909,21 @@ export default function Studio({
             </svg>
           </button>
         </div>
+      ) : (
+        /* State A: no project */
+        <button
+          type="button"
+          onClick={() => setShowProjectPicker(true)}
+          disabled={switchingProject}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-70 transition-colors w-full min-h-12"
+        >
+          <svg className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <span className="text-xs font-medium text-zinc-400 flex-1 truncate text-left">
+            {switchingProject ? 'Switching…' : 'No project'}
+          </span>
+        </button>
       )}
 
       {/* ── After image generation: thumbnail grid ── */}
@@ -1389,6 +1524,24 @@ export default function Studio({
         onClose={() => setGalleryPickerOpen(false)}
         onSelect={(record) => setStartingFrameRecord(record)}
       />
+
+      {/* ── Studio project picker ── */}
+      <ProjectPicker
+        open={showProjectPicker}
+        currentProjectId={projectContext?.projectId ?? null}
+        title="Switch project"
+        onClose={() => setShowProjectPicker(false)}
+        onSelect={(projectId, projectName) => { void handleProjectSwitch(projectId, projectName); }}
+        onCreateNew={() => { setShowProjectPicker(false); setShowNewProjectModal(true); }}
+      />
+
+      {/* ── New project modal (from picker "+ Create new project") ── */}
+      {showNewProjectModal && (
+        <NewProjectModal
+          onClose={() => setShowNewProjectModal(false)}
+          onCreated={handleNewProjectCreated}
+        />
+      )}
 
     </div>
   );
