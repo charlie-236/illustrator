@@ -4,3 +4,4 @@ node_modules/
 .env.*
 public/generations/
 prisma/migrations/
+model_instructions/
