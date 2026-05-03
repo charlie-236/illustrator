@@ -8,6 +8,8 @@ interface Props {
   checkpoint: string;
   loras: LoraEntry[];
   onCheckpointChange: (v: string) => void;
+  /** Called on auto-selection at mount time (not a user gesture). Does not trigger generation defaults. */
+  onInitialCheckpoint?: (v: string) => void;
   onLorasChange: (loras: LoraEntry[]) => void;
   refreshToken?: number;
 }
@@ -233,7 +235,7 @@ function LoraRow({ weight, displayName, triggerPills, onOpenPicker, onWeightChan
   );
 }
 
-export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onLorasChange, refreshToken }: Props) {
+export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onInitialCheckpoint, onLorasChange, refreshToken }: Props) {
   const { data: lists, loading, error, refresh } = useModelLists(refreshToken);
   const [ckptBrowserOpen, setCkptBrowserOpen] = useState(false);
   // null = closed; number = index of the LoRA slot being picked
@@ -241,9 +243,11 @@ export default function ModelSelect({ checkpoint, loras, onCheckpointChange, onL
 
   useEffect(() => {
     if (!checkpoint && lists.checkpoints.length > 0) {
-      onCheckpointChange(lists.checkpoints[0]);
+      // Auto-selection on mount — use onInitialCheckpoint when provided so Studio
+      // can skip applying generation defaults (user hasn't explicitly chosen anything yet)
+      (onInitialCheckpoint ?? onCheckpointChange)(lists.checkpoints[0]);
     }
-  }, [checkpoint, lists.checkpoints, onCheckpointChange]);
+  }, [checkpoint, lists.checkpoints, onCheckpointChange, onInitialCheckpoint]);
 
   function addLora() {
     if (!lists.loras[0]) return;

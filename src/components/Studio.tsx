@@ -378,6 +378,41 @@ export default function Studio({
         positivePrompt: config.defaultPositivePrompt,
         negativePrompt: config.defaultNegativePrompt,
       });
+      // Soft-fill: apply all non-null defaults from this checkpoint config.
+      // Width/height are always applied (existing behaviour). New generation params
+      // (steps, cfg, sampler, scheduler, hrf) are only applied when non-null.
+      setP((s) => {
+        const updates: Partial<GenerationParams> = {
+          width: config.defaultWidth,
+          height: config.defaultHeight,
+        };
+        if (config.defaultSteps != null) updates.steps = config.defaultSteps;
+        if (config.defaultCfg != null) updates.cfg = config.defaultCfg;
+        if (config.defaultSampler != null) updates.sampler = config.defaultSampler;
+        if (config.defaultScheduler != null) updates.scheduler = config.defaultScheduler;
+        if (config.defaultHrf != null) updates.highResFix = config.defaultHrf;
+        return { ...s, ...updates };
+      });
+    } catch {
+      // non-critical
+    }
+  }
+
+  // Called by ModelSelect's auto-selection on mount (not an explicit user gesture).
+  // Applies width/height and hints only — does NOT apply new generation defaults,
+  // so the user's last-session values are preserved after a page refresh.
+  async function handleInitialCheckpoint(newCheckpoint: string) {
+    update('checkpoint', newCheckpoint);
+    if (!newCheckpoint) { setCheckpointDefaults(null); return; }
+    try {
+      const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);
+      if (!res.ok) { setCheckpointConfig(null); setCheckpointDefaults(null); return; }
+      const config = await res.json() as CheckpointConfig;
+      setCheckpointConfig(config);
+      setCheckpointDefaults({
+        positivePrompt: config.defaultPositivePrompt,
+        negativePrompt: config.defaultNegativePrompt,
+      });
       setP((s) => ({ ...s, width: config.defaultWidth, height: config.defaultHeight }));
     } catch {
       // non-critical
@@ -1180,6 +1215,7 @@ export default function Studio({
               checkpoint={p.checkpoint}
               loras={p.loras}
               onCheckpointChange={handleCheckpointChange}
+              onInitialCheckpoint={handleInitialCheckpoint}
               onLorasChange={(v) => update('loras', v)}
               refreshToken={modelConfigVersion}
             />
