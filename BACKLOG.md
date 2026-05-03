@@ -32,6 +32,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Wire abortJob to ComfyUI /interrupt — `batch/wan22-abort-comfyui-interrupt` (PR #23)
 - [~] Projects schema and Projects tab (Phase 2.1) — `batch/wan22-projects-schema-and-tab` (PR #24)
 - [~] Project generation flow + prompt threading + play-through (Phase 2.2) — `batch/wan22-project-generation-flow` (PR #25)
-- [ ] Per-checkpoint defaults — see prompts/checkpoint-defaults.md
+- [~] Per-checkpoint defaults — `batch/checkpoint-defaults` (PR #26)
 - [ ] Video settings popout (Studio UX consistency) — see prompts/wan22-studio-video-settings-popout.md
 - [ ] Project stitching (Phase 3) — see prompts/wan22-project-stitching.md
