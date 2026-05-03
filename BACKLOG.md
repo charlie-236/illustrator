@@ -45,4 +45,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Wan 2.2 Lightning toggle (Phase 1.4a) — `batch/wan22-lightning-toggle` (PR #36)
 - [x] Wan 2.2 LoRA support (Phase 1.4b) — `batch/wan22-lora-support` (PR #37)
 - [x] Phase 2.3 / 3.1 follow-up bundle (starting-frame picker, stitched in strip, friendly-name fallbacks) — `batch/phase-2-3-followup-bundle` (PR #39)
-- [ ] Rollback type-to-confirm; restore tap-based delete UX — see prompts/delete-confirm-tablet-rollback.md
+- [~] Rollback type-to-confirm; restore tap-based delete UX — `batch/delete-confirm-tablet-rollback` (PR #40)
