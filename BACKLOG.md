@@ -40,5 +40,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Phase 2/3 cleanup bundle (orphan position + Studio pill staleness + ckpt resolution UX) — `batch/phase-2-3-cleanup-bundle` (PR #31)
 - [~] Queue tray "Queued" status — `batch/queue-tray-queued-status` (PR #32)
 - [~] Delete confirmation dialog (consistency across destructive actions) — `batch/delete-confirm-dialog` (PR #33)
-- [ ] Studio project switcher — see prompts/studio-project-switcher.md
+- [~] Studio project switcher — `batch/studio-project-switcher` (PR #34)
 - [ ] Cascade delete option on projects — see prompts/project-cascade-delete.md
