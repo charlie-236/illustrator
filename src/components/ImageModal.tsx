@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { GenerationRecord } from '@/types';
+import type { GenerationRecord, ProjectSummary } from '@/types';
 import { imgSrc } from '@/lib/imageSrc';
 import NewProjectModal from './NewProjectModal';
 import DeleteConfirmDialog from './DeleteConfirmDialog';
