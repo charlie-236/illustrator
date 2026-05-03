@@ -282,9 +282,15 @@ Returns `{ project: ProjectDetail, clips: ProjectClip[] }`. Clips ordered by `po
 Partial update. Same validation on default fields. Returns updated project or 404.
 
 ### `DELETE /api/projects/[id]`
-Deletes project. Runs a Prisma transaction that clears `position` on all member clips first, then deletes the project row. DB `onDelete: SetNull` then drops `projectId` on those clips. Returns `{ ok: true }`.
+Deletes project. Accepts optional `cascade=true` query parameter. Returns `{ ok: true }` (keep-items) or `{ ok: true, deletedItems: N, deletedStitches: M }` (cascade).
+
+**`cascade=false` (default):** Runs a Prisma transaction that clears `position` on all member clips, then deletes the project row. DB `onDelete: SetNull` drops `projectId` on those clips. Items remain in gallery.
+
+**`cascade=true`:** Aborts any in-flight jobs for this project (video and stitch jobs) via `abortJobsByProjectId`, deletes all source items and stitched exports from disk and DB in a transaction, then runs a straggler sweep to handle the abort-race edge case where a stitch ffmpeg completes between the abort signal and the main deleteMany. Individual file-delete errors log but don't abort the run.
 
 Project deletion clears both `projectId` and `position` on member clips, in a single transaction. Client-side state holding the deleted project's ID is broadcast-cleared via a `project-deleted` CustomEvent so the Studio pill and any persisted sessionStorage references update immediately.
+
+The delete dialog offers a cascade option: "Delete everything" removes source items, stitched exports made from the project, and aborts any in-flight related jobs before deletion. Default is the keep-items behavior — items drop to project-less state. The cascade path is non-transactional across filesystem and DB; individual file-delete errors log but don't abort the run, and a straggler sweep handles the abort-race edge case where a stitch ffmpeg completes between the abort signal and the main deleteMany.
 
 ### `PATCH /api/projects/[id]/reorder`
 Body `{ clipOrder: string[] }`. Validates all IDs belong to this project and count matches. Updates `position` fields in a Prisma transaction. Returns `{ ok: true }` or 400 on validation failure.
@@ -675,7 +681,7 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 | `POST /api/projects` | Create a project. Validates default params against Wan 2.2 rules. Returns 201 with the created project. |
 | `GET /api/projects/[id]` | Full project + ordered clips (image and video). Response: `{ project: ProjectDetail, clips: ProjectClip[] }`. |
 | `PATCH /api/projects/[id]` | Partial update — name, description, styleNote, defaultFrames/Steps/Cfg/Width/Height. |
-| `DELETE /api/projects/[id]` | Delete project; clips set `projectId=null` via DB cascade. Returns `{ ok: true }`. |
+| `DELETE /api/projects/[id]` | Delete project. Optional `?cascade=true` removes all source items, stitched exports, and aborts in-flight jobs. Default keeps items. Returns `{ ok: true }` or `{ ok: true, deletedItems: N, deletedStitches: M }`. |
 | `PATCH /api/projects/[id]/reorder` | Reorder clips: `{ clipOrder: string[] }`. Validates all IDs belong to this project; updates `position` in a Prisma transaction. |
 | `PATCH /api/generations/[id]/project` | Assign or unassign a clip to a project. Body: `{ projectId: string \| null }`. Sets `position` to `max+1` in the target project (or null when unassigning). Returns `{ ok: true }`, 404 if generation not found, 400 if projectId is invalid. |
 

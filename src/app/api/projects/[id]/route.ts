@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { unlink } from 'fs/promises';
+import path from 'path';
 import { prisma } from '@/lib/prisma';
+import { getComfyWSManager } from '@/lib/comfyws';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +34,23 @@ function validateDefaults(body: Record<string, unknown>): string | null {
     }
   }
   return null;
+}
+
+/** Delete a generation's file from local disk. Errors are logged but not thrown. */
+async function deleteItemFile(filePath: string, outputDir: string): Promise<void> {
+  const filename = filePath
+    .replace('/api/images/', '')
+    .replace('/generations/', '');
+  if (!filename || filename.includes('..') || filename.includes('/')) return;
+  const localPath = path.join(outputDir, filename);
+  try {
+    await unlink(localPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      console.error(`[cascade-delete] unlink failed for ${localPath}:`, err);
+    }
+  }
 }
 
 export async function GET(
@@ -180,23 +200,114 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
+  const cascadeParam = req.nextUrl.searchParams.get('cascade');
+  if (cascadeParam !== null && cascadeParam !== 'true' && cascadeParam !== 'false') {
+    return NextResponse.json({ error: 'cascade must be "true" or "false"' }, { status: 400 });
+  }
+  const cascade = cascadeParam === 'true';
+
+  if (!cascade) {
+    // ── Keep-items path (existing behavior) ─────────────────────────────────
+    try {
+      await prisma.$transaction([
+        prisma.generation.updateMany({
+          where: { projectId: id },
+          data: { position: null },
+        }),
+        prisma.project.delete({ where: { id } }),
+      ]);
+      return NextResponse.json({ ok: true });
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code === 'P2025') return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      console.error('[DELETE /api/projects/[id]]', err);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+  }
+
+  // ── Cascade delete path ──────────────────────────────────────────────────
+
+  const outputDir = process.env.IMAGE_OUTPUT_DIR;
+  if (!outputDir) {
+    return NextResponse.json({ error: 'IMAGE_OUTPUT_DIR not configured' }, { status: 500 });
+  }
+
+  // Verify project exists first
+  const project = await prisma.project.findUnique({ where: { id }, select: { id: true } });
+  if (!project) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  // 1. Abort in-flight jobs related to this project (fire-and-forget)
+  try {
+    const manager = getComfyWSManager();
+    const aborted = manager.abortJobsByProjectId(id);
+    if (aborted.length > 0) {
+      console.log(`[cascade-delete] Aborted ${aborted.length} in-flight job(s) for project ${id}: ${aborted.join(', ')}`);
+    }
+  } catch (err) {
+    console.error('[cascade-delete] abortJobsByProjectId failed:', err);
+  }
+
+  // 2. Find all items the cascade will touch
+  const [sourceItems, stitchedExports] = await Promise.all([
+    prisma.generation.findMany({
+      where: { projectId: id },
+      select: { id: true, filePath: true },
+    }),
+    prisma.generation.findMany({
+      where: { parentProjectId: id },
+      select: { id: true, filePath: true },
+    }),
+  ]);
+  const allToDelete = [...sourceItems, ...stitchedExports];
+
+  // 3. Delete files from disk (errors log but don't abort)
+  await Promise.all(allToDelete.map((item) => deleteItemFile(item.filePath, outputDir)));
+
+  // 4. Delete DB rows in a single transaction
   try {
     await prisma.$transaction([
-      prisma.generation.updateMany({
-        where: { projectId: id },
-        data: { position: null },
+      prisma.generation.deleteMany({
+        where: {
+          OR: [
+            { projectId: id },
+            { parentProjectId: id },
+          ],
+        },
       }),
       prisma.project.delete({ where: { id } }),
     ]);
-    return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const code = (err as { code?: string }).code;
     if (code === 'P2025') return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    console.error('[DELETE /api/projects/[id]]', err);
+    console.error('[DELETE /api/projects/[id] cascade]', err);
     return NextResponse.json({ error: 'Database error' }, { status: 500 });
   }
+
+  // 5. Straggler sweep — catch any rows that appeared between abort and deleteMany
+  //    (e.g. a stitch ffmpeg that completed before SIGTERM landed)
+  const stragglers = await prisma.generation.findMany({
+    where: { OR: [{ projectId: id }, { parentProjectId: id }] },
+    select: { id: true, filePath: true },
+  }).catch(() => [] as { id: string; filePath: string }[]);
+
+  if (stragglers.length > 0) {
+    console.warn(`[cascade-delete] ${stragglers.length} straggler(s) appeared after deleteMany — abort race window`);
+    await Promise.all(stragglers.map((s) => deleteItemFile(s.filePath, outputDir).catch(() => {})));
+    await prisma.generation.deleteMany({ where: { id: { in: stragglers.map((s) => s.id) } } }).catch((err) => {
+      console.error('[cascade-delete] straggler deleteMany failed:', err);
+    });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    deletedItems: sourceItems.length,
+    deletedStitches: stitchedExports.length,
+  });
 }
