@@ -41,4 +41,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Queue tray "Queued" status — `batch/queue-tray-queued-status` (PR #32)
 - [~] Delete confirmation dialog (consistency across destructive actions) — `batch/delete-confirm-dialog` (PR #33)
 - [~] Studio project switcher — `batch/studio-project-switcher` (PR #34)
-- [ ] Cascade delete option on projects — see prompts/project-cascade-delete.md
+- [~] Cascade delete option on projects — `batch/project-cascade-delete` (PR #35)
