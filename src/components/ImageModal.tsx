@@ -73,6 +73,9 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
   // Close picker when navigating
   useEffect(() => { setShowPicker(false); setPickerSearch(''); }, [idx]);
 
+  // Close picker when navigating
+  useEffect(() => { setShowPicker(false); setPickerSearch(''); }, [idx]);
+
   const record = items[idx] ?? null;
 
   function goTo(newIdx: number) {
