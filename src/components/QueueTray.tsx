@@ -12,7 +12,9 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
   const [expanded, setExpanded] = useState(false);
   const trayRef = useRef<HTMLDivElement>(null);
 
-  const runningCount = jobs.filter((j) => j.status === 'running' || j.status === 'completing').length;
+  const activeCount = jobs.filter(
+    (j) => j.status === 'queued' || j.status === 'running' || j.status === 'completing',
+  ).length;
 
   // Close on click outside
   useEffect(() => {
@@ -45,15 +47,15 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="relative min-h-10 min-w-10 flex items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all"
-        aria-label={`${runningCount} active generation${runningCount !== 1 ? 's' : ''} — open queue`}
+        aria-label={`${activeCount} active generation${activeCount !== 1 ? 's' : ''} — open queue`}
       >
         {/* Queue icon */}
         <svg className="w-4 h-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
         </svg>
-        {runningCount > 0 && (
+        {activeCount > 0 && (
           <span className="absolute -top-1.5 -right-1.5 min-w-[1.25rem] h-5 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center px-1 leading-none">
-            {runningCount}
+            {activeCount}
           </span>
         )}
       </button>
@@ -89,22 +91,30 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
 
           {/* Job rows */}
           <div className="max-h-96 overflow-y-auto divide-y divide-zinc-800/60">
-            {jobs.map((job) => (
-              <JobRow
-                key={job.promptId}
-                job={job}
-                onRemove={() => removeJob(job.promptId)}
-                onAbort={async () => {
-                  await fetch(`/api/jobs/${job.promptId}`, { method: 'DELETE' });
-                  // The SSE error event fires failJob in the generating tab's handler;
-                  // for post-refresh polling the recentlyCompleted cache covers it.
-                }}
-                onView={() => {
-                  onNavigateToGallery();
-                  setExpanded(false);
-                }}
-              />
-            ))}
+            {jobs.map((job) => {
+              const queuedJobs = jobs.filter((j) => j.status === 'queued');
+              const queuePosition = job.status === 'queued'
+                ? queuedJobs.findIndex((j) => j.promptId === job.promptId) + 1
+                : 0;
+              return (
+                <JobRow
+                  key={job.promptId}
+                  job={job}
+                  queuePosition={queuePosition}
+                  queuedTotal={queuedJobs.length}
+                  onRemove={() => removeJob(job.promptId)}
+                  onAbort={async () => {
+                    await fetch(`/api/jobs/${job.promptId}`, { method: 'DELETE' });
+                    // The SSE error event fires failJob in the generating tab's handler;
+                    // for post-refresh polling the recentlyCompleted cache covers it.
+                  }}
+                  onView={() => {
+                    onNavigateToGallery();
+                    setExpanded(false);
+                  }}
+                />
+              );
+            })}
           </div>
         </div>
       )}
@@ -116,27 +126,43 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
 
 function JobRow({
   job,
+  queuePosition,
+  queuedTotal,
   onRemove,
   onAbort,
   onView,
 }: {
   job: ActiveJob;
+  queuePosition: number;
+  queuedTotal: number;
   onRemove: () => void;
   onAbort: () => Promise<void>;
   onView: () => void;
 }) {
-  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - job.startedAt) / 1000));
+  // Elapsed counts from execution start (runningSince), not submission time.
+  // For queued jobs we don't display elapsed at all.
+  const [elapsed, setElapsed] = useState(() =>
+    Math.floor((Date.now() - (job.runningSince ?? job.startedAt)) / 1000),
+  );
   const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
-    if (job.status === 'done' || job.status === 'error') return;
+    if (job.status === 'done' || job.status === 'error' || job.status === 'queued') return;
+    const base = job.runningSince ?? job.startedAt;
     const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - job.startedAt) / 1000));
+      setElapsed(Math.floor((Date.now() - base) / 1000));
     }, 1000);
     return () => clearInterval(id);
-  }, [job.startedAt, job.status]);
+  }, [job.runningSince, job.startedAt, job.status]);
 
-  const isActive = job.status === 'running' || job.status === 'completing';
+  // Snap elapsed to 0 when the job transitions from queued → running.
+  useEffect(() => {
+    if (job.status === 'running' && job.runningSince !== null) {
+      setElapsed(Math.floor((Date.now() - job.runningSince) / 1000));
+    }
+  }, [job.status, job.runningSince]);
+
+  const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'completing';
 
   return (
     <div className="px-4 py-3 space-y-1.5">
@@ -208,8 +234,15 @@ function JobRow({
         </div>
       </div>
 
-      {/* Progress bar / status line */}
-      {isActive && (
+      {/* Queued status — no progress bar, no elapsed counter */}
+      {job.status === 'queued' && (
+        <p className="text-xs text-zinc-500">
+          {queuedTotal > 1 ? `Queued (${queuePosition} of ${queuedTotal})` : 'Queued'}
+        </p>
+      )}
+
+      {/* Progress bar / status line for running/completing */}
+      {(job.status === 'running' || job.status === 'completing') && (
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-zinc-500 tabular-nums">
             <span>

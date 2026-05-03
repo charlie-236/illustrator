@@ -374,7 +374,7 @@ src/
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
     GalleryPicker.tsx   Modal for selecting a gallery image as I2V starting frame; images-only filter (mediaType=image), infinite scroll, no delete/remix/favorite actions
   contexts/
-    QueueContext.tsx    Global job queue state; Context + useReducer; notification side effects; 5 s polling while jobs run; 30 s auto-dismiss for done jobs
+    QueueContext.tsx    Global job queue state; Context + useReducer; job status: queued|running|completing|done|error; 5 s polling while jobs active; 30 s auto-dismiss for done jobs
 
 ```
 public/
@@ -585,13 +585,15 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 
 **Concurrency model.** Submitting a generation never locks the form. Each submit immediately adds a job to the in-memory `ActiveJob` queue (client-side, `QueueContext`) and returns. Multiple image, video, or mixed jobs can run concurrently. The queue is single-user and has no cap.
 
+**Job status lifecycle.** Jobs are registered with status `'queued'` and transition to `'running'` when the first WS `executing` event arrives from ComfyUI for that prompt (meaning ComfyUI dequeued it and started GPU work). The full status union is: `'queued' | 'running' | 'completing' | 'done' | 'error'`. The tray distinguishes queued (no elapsed counter, no progress bar, shows "Queued" or "Queued (N of M)") from running (live progress, elapsed since execution start). Elapsed is tracked from `runningSince` (execution start), not `startedAt` (submission time), so a job that sat queued for 5 minutes shows elapsed starting from 0 when execution begins. Stitch jobs (local ffmpeg) skip the `'queued'` state and start `'running'` immediately.
+
 **`QueueContext` (`src/contexts/QueueContext.tsx`).** React Context + useReducer. Provides:
 - `addJob`, `updateProgress`, `setCompleting`, `completeJob`, `failJob`, `removeJob` — called from Studio's SSE handlers
 - `toggleMute` / `muted` — persisted to localStorage (`queue-muted`)
 - `toasts` / `dismissToast` — in-app toast list (one per completion)
 - `requestPermissionIfNeeded` — requests browser notification permission on first submit; denial stored in localStorage (`queue-notif-perm`) and never re-prompted
 
-**`QueueTray` (`src/components/QueueTray.tsx`).** Badge + dropdown in the Studio header (right of the mode toggle). Badge shows count of running jobs; invisible at zero. Expanded dropdown shows one row per job with: media-type icon, prompt summary (60 chars), progress bar (`N/total steps` or `Saving…`), elapsed time, abort button (×), View link (done), and dismiss button (done/error). Mute toggle (speaker icon) in the tray header. Closes on click-outside or Escape.
+**`QueueTray` (`src/components/QueueTray.tsx`).** Badge + dropdown in the Studio header (right of the mode toggle). Badge shows count of active (queued + running + completing) jobs; invisible at zero. Expanded dropdown shows one row per job with: media-type icon, prompt summary (60 chars), for queued: "Queued" label (or "Queued (N of M)" when multiple are queued); for running: progress bar (`N/total steps` or `Saving…`) + elapsed since execution start; abort button (×), View link (done), dismiss button (done/error). Mute toggle (speaker icon) in the tray header. Closes on click-outside or Escape.
 
 **Notification chain** (fires on `completeJob`):
 - **Audio chime:** synthesised via Web Audio API (880 Hz → 660 Hz bell tone, ~0.8 s). Skipped if muted.
@@ -600,16 +602,18 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 
 **Refresh survivability.** SSE stream close is treated as silent — it just stops pushing events to that subscriber. The job continues on the VM. To intentionally abort a running job, the client calls `POST /api/jobs/[promptId]/abort`. This separation is what makes refresh survivability work: a refresh closes the SSE stream, the job stays alive on the server, the next `/api/jobs/active` poll on mount finds it, and the tray reattaches.
 
-`GET /api/jobs/active` returns all running jobs + recently-completed jobs (5-min cache). On Studio mount, this endpoint is fetched and any found jobs are added to the queue without re-notifying. The `QueueContext` polls this endpoint every 5 s while any jobs are `running` or `completing`, detecting completions via status transitions.
+`GET /api/jobs/active` returns all queued/running jobs + recently-completed jobs (5-min cache). On Studio mount, this endpoint is fetched and any found jobs are added to the queue without re-notifying. The `QueueContext` polls this endpoint every 5 s while any jobs are `queued`, `running`, or `completing`, detecting completions and queued→running transitions via status changes.
 
 **`completing` status.** When GPU computation ends (`execution_success`), `finalizeJob` emits a `completing` SSE event before the async save. The client transitions the job to `completing` status and shows `Saving…` in the tray — especially noticeable for video (2-min HTTP transfer from VM).
 
-**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}` (or `POST /api/jobs/{promptId}/abort`). The server calls `manager.abortJob`, sends an `error` SSE event (`'Aborted by user'`) to any live subscriber, closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. The in-tab SSE handler calls `failJob`; post-refresh polling detects it via `recentlyCompleted`. `abortJob` also fires `POST /interrupt` to ComfyUI fire-and-forget, releasing the GPU immediately rather than letting the cancelled workflow finish naturally.
+**Abort.** Clicking × in the tray sends `DELETE /api/jobs/{promptId}` (or `POST /api/jobs/{promptId}/abort`). The server calls `manager.abortJob`, sends an `error` SSE event (`'Aborted by user'`) to any live subscriber, closes the SSE stream, adds to `recentlyCompleted`, and (for video) fires SSH cleanup. For **queued** jobs (not yet executing), `abortJob` calls `POST /queue` with `{ delete: [promptId] }` to remove the prompt from ComfyUI's internal queue without killing the currently-running job. For **running** jobs, it calls `POST /interrupt` to stop GPU work mid-execution.
+
+**Watchdog timeout.** The 60-minute sanity timeout starts at job registration (when the job is `'queued'`), not when execution begins. A job that sits queued for a long time still trips the watchdog.
 
 **New API routes:**
 | Route | Description |
 |---|---|
-| `GET /api/jobs/active` | Returns running + recently-completed jobs from comfyws singleton. Shape: `{ jobs: ActiveJobInfo[] }`. |
+| `GET /api/jobs/active` | Returns queued/running + recently-completed jobs from comfyws singleton. Shape: `{ jobs: ActiveJobInfo[] }`. |
 | `DELETE /api/jobs/[promptId]` | Aborts a job: calls `abortJob`, sends error SSE, closes stream, SSH cleanup (video), adds to recentlyCompleted. |
 | `POST /api/jobs/[promptId]/abort` | Same as DELETE — preferred explicit-abort endpoint. Returns 200 `{ ok: true }` or 404 if the job is not active. |
 

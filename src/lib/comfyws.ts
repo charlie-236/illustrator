@@ -39,8 +39,11 @@ interface BaseJob {
   timeoutId: ReturnType<typeof setTimeout> | null;
   /** First ~60 chars of the positive prompt, for the queue tray display. */
   promptSummary: string;
-  /** Unix ms timestamp when the job was registered. */
+  /** Unix ms timestamp when the job was registered (submitted to ComfyUI). */
   startedAt: number;
+  /** Unix ms timestamp when ComfyUI began executing this job (first `executing` WS message).
+   *  Null while the job sits in ComfyUI's queue waiting for the GPU. */
+  runningSince: number | null;
   /** Latest sampling progress, updated as WS events arrive. */
   progress: { current: number; total: number } | null;
 }
@@ -89,8 +92,10 @@ export interface ActiveJobInfo {
   mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
   startedAt: number;
+  /** Unix ms when ComfyUI started executing the job; null while queued. */
+  runningSince: number | null;
   progress: { current: number; total: number } | null;
-  status: 'running' | 'done' | 'error';
+  status: 'queued' | 'running' | 'done' | 'error';
   errorMessage?: string;
 }
 
@@ -346,6 +351,8 @@ class ComfyWSManager {
           this.activePromptId = null;
           this.finalizeJob(job);
         } else {
+          // First non-null executing message: ComfyUI has dequeued this prompt and started GPU work.
+          if (job.runningSince === null) job.runningSince = Date.now();
           this.activePromptId = promptId;
           job.activeNode = node;
         }
@@ -694,6 +701,7 @@ class ComfyWSManager {
       timeoutId,
       promptSummary,
       startedAt: Date.now(),
+      runningSince: null,
       progress: null,
     });
   }
@@ -718,6 +726,7 @@ class ComfyWSManager {
       timeoutId,
       promptSummary,
       startedAt: Date.now(),
+      runningSince: null,
       progress: null,
     });
   }
@@ -742,11 +751,19 @@ class ComfyWSManager {
         job.childProcess.kill('SIGTERM');
       }
       void unlink(job.outputPath).catch(() => {});
+    } else if (job.runningSince === null) {
+      // Job is still in ComfyUI's queue (not yet executing). Use the queue-delete
+      // API to remove it without killing whatever is actually running on the GPU.
+      fetch(`${COMFYUI_HTTP}/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete: [promptId] }),
+      }).catch((err) => {
+        console.error(`[comfyws] /queue delete failed for ${promptId}:`, err);
+      });
     } else {
-      // Tell ComfyUI to stop the currently-executing workflow immediately.
-      // /interrupt is workflow-global — it cancels whatever is at the head of
-      // ComfyUI's queue, which in our single-user setup is always the job being
-      // aborted. Fire-and-forget; abort proceeds regardless of response.
+      // Job is actively executing on the GPU. /interrupt is workflow-global —
+      // it cancels whatever is at the head of ComfyUI's queue (our running job).
       fetch(`${COMFYUI_HTTP}/interrupt`, { method: 'POST' }).catch((err) => {
         console.error(`[comfyws] /interrupt failed for ${promptId}:`, err);
       });
@@ -793,12 +810,12 @@ class ComfyWSManager {
     // Job stays in the map. Watchdog still ticks. Completion still fires.
   }
 
-  /** Returns all active (running) jobs plus recently-completed jobs (within 5 min). */
+  /** Returns all active (queued/running) jobs plus recently-completed jobs (within 5 min). */
   getActiveJobs(): ActiveJobInfo[] {
     const now = Date.now();
     const result: ActiveJobInfo[] = [];
 
-    // Active running jobs
+    // Active jobs (queued or running)
     for (const job of this.jobs.values()) {
       if (!job.finalized) {
         const generationId =
@@ -810,8 +827,10 @@ class ComfyWSManager {
           mediaType: job.mediaType,
           promptSummary: job.promptSummary,
           startedAt: job.startedAt,
+          runningSince: job.runningSince,
           progress: job.progress,
-          status: 'running',
+          // Stitch jobs start ffmpeg immediately; no ComfyUI queue involved.
+          status: job.mediaType === 'stitch' || job.runningSince !== null ? 'running' : 'queued',
         });
       }
     }
@@ -828,6 +847,7 @@ class ComfyWSManager {
           mediaType: entry.mediaType,
           promptSummary: entry.promptSummary,
           startedAt: 0,
+          runningSince: null,
           progress: null,
           status: entry.status,
           errorMessage: entry.errorMessage,
@@ -863,6 +883,7 @@ class ComfyWSManager {
       timeoutId,
       promptSummary,
       startedAt: Date.now(),
+      runningSince: Date.now(), // ffmpeg starts immediately; no ComfyUI queue
       progress: null,
     });
   }

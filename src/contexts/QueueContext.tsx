@@ -20,8 +20,10 @@ export interface ActiveJob {
   mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
   startedAt: number;
+  /** Unix ms when ComfyUI began executing this job. Null while in ComfyUI's queue. */
+  runningSince: number | null;
   progress: { current: number; total: number } | null;
-  status: 'running' | 'completing' | 'done' | 'error';
+  status: 'queued' | 'running' | 'completing' | 'done' | 'error';
   errorMessage?: string;
 }
 
@@ -41,6 +43,7 @@ interface QueueState {
 type QueueAction =
   | { type: 'ADD_JOB'; job: ActiveJob }
   | { type: 'UPDATE_PROGRESS'; promptId: string; progress: { current: number; total: number } }
+  | { type: 'TRANSITION_TO_RUNNING'; promptId: string; runningSince: number }
   | { type: 'SET_COMPLETING'; promptId: string }
   | { type: 'COMPLETE_JOB'; promptId: string; generationId: string }
   | { type: 'FAIL_JOB'; promptId: string; errorMessage: string }
@@ -60,9 +63,26 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
     case 'UPDATE_PROGRESS': {
       return {
         ...state,
+        jobs: state.jobs.map((j) => {
+          if (j.promptId !== action.promptId) return j;
+          // First progress event while queued → auto-transition to running
+          if (j.status === 'queued') {
+            return { ...j, status: 'running', runningSince: j.runningSince ?? Date.now(), progress: action.progress };
+          }
+          if (j.status === 'running') {
+            return { ...j, progress: action.progress };
+          }
+          return j;
+        }),
+      };
+    }
+
+    case 'TRANSITION_TO_RUNNING': {
+      return {
+        ...state,
         jobs: state.jobs.map((j) =>
-          j.promptId === action.promptId && j.status === 'running'
-            ? { ...j, progress: action.progress }
+          j.promptId === action.promptId && j.status === 'queued'
+            ? { ...j, status: 'running', runningSince: action.runningSince }
             : j,
         ),
       };
@@ -72,8 +92,9 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       return {
         ...state,
         jobs: state.jobs.map((j) =>
-          j.promptId === action.promptId && (j.status === 'running' || j.status === 'completing')
-            ? { ...j, status: 'completing' }
+          j.promptId === action.promptId &&
+          (j.status === 'queued' || j.status === 'running' || j.status === 'completing')
+            ? { ...j, status: 'completing', runningSince: j.runningSince ?? Date.now() }
             : j,
         ),
       };
@@ -219,20 +240,29 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     };
   }, [state.jobs]);
 
-  // ── poll /api/jobs/active while any jobs are running ──────────────────────
+  // ── poll /api/jobs/active while any jobs are active (queued/running/completing)
   // This provides refresh-survivability: after a page reload the client reattaches
   // to in-flight jobs via the mount-recovery effect in Studio, and the polling
-  // here keeps progress updated and detects completions.
-  const runningJobIds = state.jobs
-    .filter((j) => j.status === 'running' || j.status === 'completing')
+  // here keeps progress updated and detects completions and queued→running transitions.
+  const activeJobIds = state.jobs
+    .filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'completing')
     .map((j) => j.promptId)
     .sort()
     .join(',');
 
-  useEffect(() => {
-    if (!runningJobIds) return;
+  // Ref tracks queued job IDs without requiring an extra effect dependency.
+  // Updated every render so the polling closure always reads current queued IDs.
+  const queuedJobIdsRef = useRef<Set<string>>(new Set());
+  queuedJobIdsRef.current = new Set(
+    state.jobs.filter((j) => j.status === 'queued').map((j) => j.promptId),
+  );
 
-    const knownRunning = new Set(runningJobIds.split(',').filter(Boolean));
+  useEffect(() => {
+    if (!activeJobIds) return;
+
+    const knownActive = new Set(activeJobIds.split(',').filter(Boolean));
+    // Snapshot queued IDs at effect-fire time; updated in-place as transitions are dispatched.
+    const localQueuedIds = new Set(queuedJobIdsRef.current);
 
     const poll = async () => {
       try {
@@ -241,16 +271,23 @@ export function QueueProvider({ children }: { children: ReactNode }) {
         const { jobs: serverJobs } = await res.json() as { jobs: ActiveJobInfo[] };
 
         for (const sj of serverJobs) {
+          if (!knownActive.has(sj.promptId)) continue;
+
           if (sj.status === 'running') {
-            if (sj.progress && knownRunning.has(sj.promptId)) {
+            // If client had this job as queued but server says running, transition it.
+            if (localQueuedIds.has(sj.promptId)) {
+              dispatch({ type: 'TRANSITION_TO_RUNNING', promptId: sj.promptId, runningSince: sj.runningSince ?? Date.now() });
+              localQueuedIds.delete(sj.promptId);
+            }
+            if (sj.progress) {
               dispatch({ type: 'UPDATE_PROGRESS', promptId: sj.promptId, progress: sj.progress });
             }
-          } else if (sj.status === 'done' && knownRunning.has(sj.promptId)) {
+          } else if (sj.status === 'done') {
             dispatch({ type: 'COMPLETE_JOB', promptId: sj.promptId, generationId: sj.generationId });
-            knownRunning.delete(sj.promptId);
-          } else if (sj.status === 'error' && knownRunning.has(sj.promptId)) {
+            knownActive.delete(sj.promptId);
+          } else if (sj.status === 'error') {
             dispatch({ type: 'FAIL_JOB', promptId: sj.promptId, errorMessage: sj.errorMessage ?? 'Failed' });
-            knownRunning.delete(sj.promptId);
+            knownActive.delete(sj.promptId);
           }
         }
       } catch { /* ignore poll errors */ }
@@ -258,7 +295,7 @@ export function QueueProvider({ children }: { children: ReactNode }) {
 
     const interval = setInterval(poll, 5_000);
     return () => clearInterval(interval);
-  }, [runningJobIds]);
+  }, [activeJobIds]);
 
   // ── permission request (called on first submit) ────────────────────────────
   const permRequestedRef = useRef(false);
