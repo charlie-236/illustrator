@@ -35,7 +35,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Per-checkpoint defaults — `batch/checkpoint-defaults` (PR #26)
 - [x] Video settings popout (Studio UX consistency) — `batch/wan22-studio-video-settings-popout` (PR #27)
 - [x] Project stitching (Phase 3 of video) — `batch/wan22-project-stitching` (PR #28)
-- [ ] Assign-to-project + image clips as project members (Phase 2.3) — see prompts/wan22-assign-to-project.md
+- [~] Assign-to-project + image clips as project members (Phase 2.3) — `batch/wan22-assign-to-project` (PR #29)
 - [ ] Stitch clip selection (Phase 3.1) — see prompts/wan22-stitch-clip-selection.md
 - [ ] Phase 2/3 cleanup bundle (orphan position + Studio pill staleness + ckpt resolution UX) — see prompts/phase-2-3-cleanup-bundle.md
 - [ ] Queue tray "Queued" status — see prompts/queue-tray-queued-status.md
