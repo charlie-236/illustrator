@@ -44,3 +44,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Cascade delete option on projects — `batch/project-cascade-delete` (PR #35)
 - [~] Wan 2.2 Lightning toggle (Phase 1.4a) — `batch/wan22-lightning-toggle` (PR #36)
 - [~] Wan 2.2 LoRA support (Phase 1.4b) — `batch/wan22-lora-support` (PR #37)
+- [ ] Phase 2.3 / 3.1 follow-up bundle (starting-frame picker, stitched in strip, friendly-name fallbacks) — see prompts/phase-2-3-followup-bundle.md
