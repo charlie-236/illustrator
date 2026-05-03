@@ -13,6 +13,7 @@ interface GalleryResponse {
 interface Props {
   refreshToken: number;
   onRemix: (record: GenerationRecord) => void;
+  onNavigateToProject?: (projectId: string) => void;
 }
 
 type MediaFilter = 'all' | 'image' | 'video';
@@ -27,7 +28,7 @@ function HeartIcon({ filled }: { filled: boolean }) {
   );
 }
 
-export default function Gallery({ refreshToken, onRemix }: Props) {
+export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: Props) {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -326,6 +327,7 @@ export default function Gallery({ refreshToken, onRemix }: Props) {
           onRemix={onRemix}
           onDelete={deleteById}
           onFavoriteToggle={handleFavoriteToggle}
+          onNavigateToProject={onNavigateToProject}
         />
       )}
     </>

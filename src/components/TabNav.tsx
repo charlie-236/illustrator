@@ -9,6 +9,7 @@ interface Props {
 
 const TAB_LABELS: Record<Tab, string> = {
   studio: 'Studio',
+  projects: 'Projects',
   gallery: 'Gallery',
   models: 'Models',
   admin: 'Admin',

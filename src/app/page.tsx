@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import Studio from '@/components/Studio';
 import Gallery from '@/components/Gallery';
+import Projects from '@/components/Projects';
 import ModelConfig from '@/components/ModelConfig';
 import ServerBay from '@/components/ServerBay';
 import TabNav from '@/components/TabNav';
@@ -10,7 +11,7 @@ import ToastContainer from '@/components/Toast';
 import { QueueProvider } from '@/contexts/QueueContext';
 import type { GenerationParams, GenerationRecord, LoraEntry, VideoRemixData } from '@/types';
 
-export type Tab = 'studio' | 'gallery' | 'models' | 'admin';
+export type Tab = 'studio' | 'projects' | 'gallery' | 'models' | 'admin';
 
 function parseLoras(loraStr: string | null): LoraEntry[] {
   if (!loraStr) return [];
@@ -44,6 +45,7 @@ export default function Home() {
   const [remixParams, setRemixParams] = useState<GenerationParams | null>(null);
   const [videoRemixParams, setVideoRemixParams] = useState<VideoRemixData | null>(null);
   const [modelConfigVersion, setModelConfigVersion] = useState(0);
+  const [projectsKey, setProjectsKey] = useState(0);
 
   const handleRemix = useCallback((record: GenerationRecord) => {
     if (record.mediaType === 'video') {
@@ -66,6 +68,10 @@ export default function Home() {
   const handleRemixConsumed = useCallback(() => setRemixParams(null), []);
   const handleVideoRemixConsumed = useCallback(() => setVideoRemixParams(null), []);
   const handleNavigateToGallery = useCallback(() => setTab('gallery'), []);
+  const handleNavigateToProjects = useCallback(() => {
+    setProjectsKey((k) => k + 1);
+    setTab('projects');
+  }, []);
 
   return (
     <QueueProvider>
@@ -85,8 +91,11 @@ export default function Home() {
               onNavigateToGallery={handleNavigateToGallery}
             />
           </div>
+          <div className={tab === 'projects' ? '' : 'hidden'}>
+            <Projects key={projectsKey} onNavigateToGallery={handleNavigateToGallery} />
+          </div>
           <div className={tab === 'gallery' ? '' : 'hidden'}>
-            <Gallery refreshToken={refreshGallery} onRemix={handleRemix} />
+            <Gallery refreshToken={refreshGallery} onRemix={handleRemix} onNavigateToProject={handleNavigateToProjects} />
           </div>
           <div className={tab === 'models' ? '' : 'hidden'}>
             <ModelConfig onSaved={() => setModelConfigVersion((n) => n + 1)} />

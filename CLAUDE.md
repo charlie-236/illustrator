@@ -254,6 +254,24 @@ Same as `/ingest` but accepts `{ items: [...] }` with up to 20 items. Each item 
 ### `DELETE /api/models/[type]/[filename]`
 Removes a checkpoint, LoRA, or embedding by filename. `type` is `'checkpoint' | 'lora' | 'embedding'`; filename is the on-disk filename including extension. SSH-deletes the file from the A100 VM via `rm -f` (idempotent) and removes any matching DB row via Prisma `deleteMany` (also idempotent). Used by ModelConfig's delete buttons. Works whether or not a DB row exists for the filename, so orphan files are deletable from the UI.
 
+### `GET /api/projects`
+Returns `{ projects: ProjectSummary[] }` ordered by `updatedAt DESC`. Each entry includes `clipCount` (via `_count`) and `coverFrame` (most-recent video clip's `filePath`).
+
+### `POST /api/projects`
+Creates a project. Validates `defaultFrames/Steps/Cfg/Width/Height` against the same Wan 2.2 rules as `/api/generate-video`. Returns 201 with the project object.
+
+### `GET /api/projects/[id]`
+Returns `{ project: ProjectDetail, clips: ProjectClip[] }`. Clips ordered by `position ASC, createdAt ASC`.
+
+### `PATCH /api/projects/[id]`
+Partial update. Same validation on default fields. Returns updated project or 404.
+
+### `DELETE /api/projects/[id]`
+Deletes project. DB `onDelete: SetNull` drops clips to project-less. Returns `{ ok: true }`.
+
+### `PATCH /api/projects/[id]/reorder`
+Body `{ clipOrder: string[] }`. Validates all IDs belong to this project and count matches. Updates `position` fields in a Prisma transaction. Returns `{ ok: true }` or 400 on validation failure.
+
 ### `POST /api/generate-video`
 SSE-streaming video generation via Wan 2.2 14B fp8 MoE. Returns an SSE stream directly (no separate `/progress` route). See **Video generation (Phase 1)** section for full details.
 
@@ -271,7 +289,7 @@ Watchdog: 15 minutes (vs 10 for image jobs).
 src/
   app/
     layout.tsx          root layout, sets dark theme + viewport meta
-    page.tsx            tab state (studio | gallery | models | admin); wraps app in QueueProvider; renders ToastContainer; passes onNavigateToGallery to Studio
+    page.tsx            tab state (studio | projects | gallery | models | admin); wraps app in QueueProvider; renders ToastContainer; passes onNavigateToGallery/onNavigateToProjects to Studio/Gallery
     globals.css         Tailwind directives + utility classes: .input-base, .label, .card
     api/
       models/           GET — checkpoint + lora lists from ComfyUI
@@ -305,10 +323,10 @@ src/
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
     useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config + /api/embedding-config; consumed by ModelSelect and ModelConfig
   types/
-    index.ts            GenerationParams, GenerationRecord, ModelInfo (now includes embeddings[]), EmbeddingConfig, SSEEvent,
-                        SAMPLERS, SCHEDULERS, RESOLUTIONS constants
+    index.ts            GenerationParams, GenerationRecord (now includes projectId/projectName), ModelInfo (now includes embeddings[]), EmbeddingConfig,
+                        ProjectSummary, ProjectDetail, ProjectClip, SSEEvent, SAMPLERS, SCHEDULERS, RESOLUTIONS constants
   components/
-    TabNav.tsx          sticky header with Studio / Gallery tabs
+    TabNav.tsx          sticky header with Studio / Projects / Gallery / Models / Admin tabs
     Studio.tsx          full generation form; form never locks; integrates useQueue for job tracking; on mount calls /api/jobs/active for post-refresh recovery
     QueueTray.tsx       badge + dropdown tray (Studio header, right of mode toggle); job rows with progress/abort/view/dismiss
     Toast.tsx           ToastContainer + Toast; fixed bottom-right; auto-dismiss 5 s; rendered at page level
@@ -317,8 +335,10 @@ src/
     ModelSelect.tsx     checkpoint + LoRA dropdowns; re-fetches /api/models + configs when refreshToken changes (incremented by ModelConfig saves) or when the user taps the Refresh button in the picker sheet
     ParamSlider.tsx     range slider + number input pair
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
-    Gallery.tsx         3-col image grid, cursor-based infinite-scroll via IntersectionObserver, opens ImageModal
-    ImageModal.tsx      bottom-sheet modal with full image + all metadata fields
+    Gallery.tsx         3-col image grid, cursor-based infinite-scroll via IntersectionObserver, opens ImageModal; accepts onNavigateToProject callback
+    ImageModal.tsx      bottom-sheet modal with full image + all metadata fields; shows Project link for video clips
+    Projects.tsx        Projects tab — 2-col project card grid, New Project modal
+    ProjectDetail.tsx   Project detail view — inline-editable header, horizontal DnD clip strip (@dnd-kit), Settings modal
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
@@ -568,6 +588,76 @@ Video generations appear in the Gallery alongside images:
 - **Delete/favorite:** Work identically for video — the delete endpoint and favorite toggle are media-type-agnostic.
 
 `GET /api/gallery` accepts an optional `mediaType` query parameter (`image` or `video`). Omitting it returns all generations. Combines with `isFavorite=true` as an AND filter.
+
+---
+
+---
+
+## Projects (Phase 2)
+
+### Schema additions
+
+```prisma
+model Project {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  styleNote      String?
+  defaultFrames  Int?
+  defaultSteps   Int?
+  defaultCfg     Float?
+  defaultWidth   Int?
+  defaultHeight  Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  generations    Generation[]
+}
+
+// New fields on Generation:
+projectId    String?
+project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+position     Int?
+```
+
+`onDelete: SetNull` — deleting a project drops clips back to project-less state; they remain in the unified Gallery. `position` has no unique constraint; ordering is enforced at write-time.
+
+Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
+
+### API routes
+
+| Route | Description |
+|---|---|
+| `GET /api/projects` | List all projects, most-recently-updated first. Response: `{ projects: ProjectSummary[] }`. |
+| `POST /api/projects` | Create a project. Validates default params against Wan 2.2 rules. Returns 201 with the created project. |
+| `GET /api/projects/[id]` | Full project + ordered clips. Response: `{ project: ProjectDetail, clips: ProjectClip[] }`. |
+| `PATCH /api/projects/[id]` | Partial update — name, description, styleNote, defaultFrames/Steps/Cfg/Width/Height. |
+| `DELETE /api/projects/[id]` | Delete project; clips set `projectId=null` via DB cascade. Returns `{ ok: true }`. |
+| `PATCH /api/projects/[id]/reorder` | Reorder clips: `{ clipOrder: string[] }`. Validates all IDs belong to this project; updates `position` in a Prisma transaction. |
+
+### Projects tab and UI
+
+**Projects** tab is positioned between Studio and Gallery in the tab bar. It has two sub-views:
+
+**Listing view** (`Projects.tsx`): 2-column card grid. Each card shows a cover frame (most-recent clip), project name, description, clip count, and relative last-updated time. "+ New Project" button top-right. Empty state shows a CTA button. Clicking a card navigates to the detail view.
+
+**New Project modal**: Form with name (required), description, style note, and a collapsible "Default settings" section (resolution presets + frames/steps/CFG number inputs). POSTs to `/api/projects`.
+
+**Project detail view** (`ProjectDetail.tsx`):
+- Header: back button, inline-editable name and description, Settings gear, overflow menu (Delete, two-tap confirm).
+- Style note rendered in a muted box below description (read-only; editable via Settings modal).
+- "Generate new clip in this project" button — disabled with a "coming in 2.2" tooltip.
+- **Linear strip**: horizontal-scrollable `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`). Each tile is a `<video preload="metadata">` thumbnail with position badge (top-left) and duration badge (bottom-right). Click opens `ImageModal` scoped to project clips.
+- Drag to reorder: optimistic update, then `PATCH /api/projects/[id]/reorder`. Reverts on error with a brief toast.
+- Empty strip: placeholder text.
+- **Settings modal**: description, style note, and default generation params (resolution presets + frames/steps/CFG inputs). PATCHes `/api/projects/[id]`.
+
+### Gallery integration
+
+`GenerationRecord` now includes `projectId: string | null` and `projectName: string | null`. The gallery API (`/api/gallery`) includes the project relation. `ImageModal` shows a **Project** row in the metadata footer for video clips: a tappable link to the project, or "None". `Gallery` accepts `onNavigateToProject` callback to wire the link back to the Projects tab.
+
+### Generation from project
+
+Not yet implemented. Phase 2.2 will add prompt carry-forward, last-frame extraction, and direct clip generation from the project detail view.
 
 ---
 

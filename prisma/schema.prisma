@@ -29,9 +29,28 @@ model Generation {
   mediaType    String   @default("image")  // "image" | "video"
   frames       Int?                         // null for images; frame count for videos
   fps          Int?                         // null for images; frame rate for videos
+  projectId    String?
+  project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  position     Int?                         // null for non-project generations; sort order within a project
   createdAt    DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
+  @@index([projectId])
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  styleNote      String?
+  defaultFrames  Int?
+  defaultSteps   Int?
+  defaultCfg     Float?
+  defaultWidth   Int?
+  defaultHeight  Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  generations    Generation[]
 }
 
 model CheckpointConfig {

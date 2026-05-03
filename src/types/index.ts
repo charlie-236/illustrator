@@ -57,7 +57,47 @@ export interface GenerationRecord {
   mediaType: string;
   frames: number | null;
   fps: number | null;
+  projectId: string | null;
+  projectName: string | null;
   createdAt: string;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  styleNote: string | null;
+  clipCount: number;
+  coverFrame: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectClip {
+  id: string;
+  filePath: string;
+  prompt: string;
+  frames: number;
+  fps: number;
+  width: number;
+  height: number;
+  position: number;
+  createdAt: string;
+  isFavorite: boolean;
+}
+
+export interface ProjectDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  styleNote: string | null;
+  defaultFrames: number | null;
+  defaultSteps: number | null;
+  defaultCfg: number | null;
+  defaultWidth: number | null;
+  defaultHeight: number | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CheckpointConfig {
