@@ -68,6 +68,8 @@ interface StitchJob extends BaseJob {
   generationId: string;
   outputPath: string;
   childProcess: ChildProcessWithoutNullStreams | null;
+  /** Source project for this stitch — used to abort jobs when cascade-deleting a project. */
+  projectId?: string;
 }
 
 type Job = ImageJob | VideoJob | StitchJob;
@@ -868,6 +870,7 @@ class ComfyWSManager {
     controller: ReadableStreamDefaultController<Uint8Array>,
     promptSummary: string,
     timeoutMs = 5 * 60 * 1000,
+    projectId?: string,
   ) {
     const timeoutId = setTimeout(() => this.expireJob(promptId), timeoutMs);
     this.jobs.set(promptId, {
@@ -885,6 +888,7 @@ class ComfyWSManager {
       startedAt: Date.now(),
       runningSince: Date.now(), // ffmpeg starts immediately; no ComfyUI queue
       progress: null,
+      projectId,
     });
   }
 
@@ -926,6 +930,24 @@ class ComfyWSManager {
     this.addToRecentlyCompleted(job, 'error', message);
     pushSSE(job.controller, 'error', { message });
     closeSSE(job.controller);
+  }
+
+  /**
+   * Abort all active jobs associated with a project (fire-and-forget, for cascade delete).
+   * Returns the promptIds of aborted jobs.
+   */
+  abortJobsByProjectId(projectId: string): string[] {
+    const aborted: string[] = [];
+    for (const [promptId, job] of this.jobs) {
+      const matches =
+        (job.mediaType === 'video' && job.videoParams.projectId === projectId) ||
+        (job.mediaType === 'stitch' && job.projectId === projectId);
+      if (matches) {
+        this.abortJob(promptId);
+        aborted.push(promptId);
+      }
+    }
+    return aborted;
   }
 
   getClientId() {

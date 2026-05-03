@@ -999,7 +999,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
             resourceType={pendingDeleteType as DeleteResourceType}
             resourceName={resourceName}
             warningMessage="The file will be deleted from the VM and the metadata row from the database. This cannot be undone."
-            onConfirm={() => { void executeDelete(); }}
+            onConfirm={(_cascade: boolean) => { void executeDelete(); }}
             onCancel={() => { setShowDeleteDialog(false); setPendingDeleteType(null); }}
           />
         );

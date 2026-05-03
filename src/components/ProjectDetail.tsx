@@ -784,11 +784,14 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }
   }
 
-  async function confirmDeleteProject() {
+  async function confirmDeleteProject(cascade: boolean) {
     setShowDeleteDialog(false);
     setDeleting(true);
     try {
-      await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      const url = cascade
+        ? `/api/projects/${projectId}?cascade=true`
+        : `/api/projects/${projectId}`;
+      await fetch(url, { method: 'DELETE' });
       window.dispatchEvent(new CustomEvent('project-deleted', { detail: { id: projectId } }));
       onDeleted();
     } finally {
@@ -1230,8 +1233,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         open={showDeleteDialog}
         resourceType="project"
         resourceName={project.name}
-        warningMessage={`${clips.length} clip${clips.length === 1 ? '' : 's'} will be unassigned (not deleted).`}
-        onConfirm={() => { void confirmDeleteProject(); }}
+        cascadeInfo={{ itemCount: clips.length, stitchCount: stitchedExports.length }}
+        onConfirm={(cascade: boolean) => { void confirmDeleteProject(cascade); }}
         onCancel={() => setShowDeleteDialog(false)}
       />
     </div>

@@ -366,7 +366,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           open={showDeleteDialog}
           resourceType="clip"
           resourceName={record.promptPos.slice(0, 60)}
-          onConfirm={() => { void confirmDeleteRecord(); }}
+          onConfirm={(_cascade: boolean) => { void confirmDeleteRecord(); }}
           onCancel={() => setShowDeleteDialog(false)}
         />
       )}

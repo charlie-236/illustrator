@@ -170,7 +170,7 @@ export async function POST(
         sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, generationId })}\n\n`),
       );
 
-      manager.registerStitchJob(promptId, generationId, outputPath, controller, promptSummary);
+      manager.registerStitchJob(promptId, generationId, outputPath, controller, promptSummary, undefined, projectId);
 
       // Client disconnect — detach controller; ffmpeg keeps running (refresh survivability)
       req.signal.addEventListener('abort', () => {
