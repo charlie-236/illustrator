@@ -857,131 +857,9 @@ export default function Studio({
         />
       )}
 
-      {/* ── Video mode: controls ── */}
+      {/* ── Video mode: Starting frame (I2V) — always visible ── */}
       {mode === 'video' && (
-        <div className="card space-y-5">
-
-          {/* Resolution presets */}
-          <div>
-            <p className="label mb-2">Resolution</p>
-            <div className="flex gap-2 mb-3">
-              {VIDEO_PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => { updateVideo('width', preset.w); updateVideo('height', preset.h); }}
-                  className={`flex-1 min-h-12 rounded-lg text-xs font-medium border transition-all
-                    ${videoP.width === preset.w && videoP.height === preset.h
-                      ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
-                      : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200 active:scale-95'}`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Width / Height inputs */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Width</label>
-                <input
-                  type="number"
-                  value={videoP.width}
-                  min={256}
-                  max={1280}
-                  step={32}
-                  onChange={(e) => updateVideo('width', parseInt(e.target.value, 10))}
-                  className={`input-base ${vWidthErr ? 'border-red-500' : ''}`}
-                />
-                {vWidthErr && <p className="text-xs text-red-400 mt-1">Multiple of 32, 256–1280</p>}
-              </div>
-              <div>
-                <label className="label">Height</label>
-                <input
-                  type="number"
-                  value={videoP.height}
-                  min={256}
-                  max={1280}
-                  step={32}
-                  onChange={(e) => updateVideo('height', parseInt(e.target.value, 10))}
-                  className={`input-base ${vHeightErr ? 'border-red-500' : ''}`}
-                />
-                {vHeightErr && <p className="text-xs text-red-400 mt-1">Multiple of 32, 256–1280</p>}
-              </div>
-            </div>
-          </div>
-
-          {/* Frames slider */}
-          <div>
-            <div className="flex justify-between items-center mb-1.5">
-              <label className="label mb-0">Frames</label>
-              <span className="text-xs text-zinc-400 tabular-nums font-mono">
-                {videoP.frames} frames ({(videoP.frames / 16).toFixed(1)}s)
-              </span>
-            </div>
-            <input
-              type="range"
-              min={17}
-              max={121}
-              step={8}
-              value={videoP.frames}
-              onChange={(e) => updateVideo('frames', parseInt(e.target.value, 10))}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
-            />
-            {vFramesErr && <p className="text-xs text-red-400 mt-1">Must be 17, 25, 33, … 121</p>}
-          </div>
-
-          {/* Steps */}
-          <div>
-            <ParamSlider
-              label="Steps"
-              value={videoP.steps}
-              min={4}
-              max={40}
-              step={2}
-              onChange={(v) => updateVideo('steps', v)}
-            />
-            {vStepsErr && <p className="text-xs text-red-400 mt-1">Even number, 4–40</p>}
-          </div>
-
-          {/* CFG */}
-          <div>
-            <ParamSlider
-              label="CFG"
-              value={videoP.cfg}
-              min={1}
-              max={10}
-              step={0.1}
-              onChange={(v) => updateVideo('cfg', Math.round(v * 10) / 10)}
-              format={(v) => v.toFixed(1)}
-            />
-            {vCfgErr && <p className="text-xs text-red-400 mt-1">1.0–10.0</p>}
-          </div>
-
-          {/* Seed — shared with image mode */}
-          <div>
-            <label className="label">Seed</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={p.seed}
-                onChange={(e) => update('seed', parseInt(e.target.value, 10))}
-                className="input-base flex-1"
-              />
-              <button
-                type="button"
-                onClick={() => update('seed', -1)}
-                disabled={p.seed === -1}
-                title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
-                className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
-                  ${p.seed === -1
-                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
-                    : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
-              >
-                {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
-              </button>
-            </div>
-          </div>
+        <div className="card space-y-3">
 
           {/* Starting frame (I2V) */}
           <div>
@@ -1161,6 +1039,21 @@ export default function Studio({
           </>
         ) : (
           <div className="flex gap-3">
+            {/* Settings — video mode */}
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open settings"
+              className="min-h-12 min-w-14 flex flex-col items-center justify-center gap-0.5 rounded-xl
+                         bg-zinc-800 hover:bg-zinc-700 active:scale-95
+                         border border-zinc-700 text-zinc-300 transition-all flex-shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+              </svg>
+            </button>
+
             {/* Generate — video mode */}
             <button
               onClick={() => void handleGenerateVideo()}
@@ -1184,7 +1077,7 @@ export default function Studio({
         aria-hidden="true"
       />
 
-      {/* ── Settings drawer (image mode) ── */}
+      {/* ── Settings drawer ── */}
       <div
         className={`fixed top-0 right-0 bottom-0 w-80 max-w-[90vw] z-50 flex flex-col
                     bg-zinc-900 border-l border-zinc-800
@@ -1209,111 +1102,237 @@ export default function Studio({
 
         <div className="flex-1 overflow-y-auto">
 
-          <div className="px-4 pt-4 pb-5">
-            <p className="label mb-3">Models</p>
-            <ModelSelect
-              checkpoint={p.checkpoint}
-              loras={p.loras}
-              onCheckpointChange={handleCheckpointChange}
-              onInitialCheckpoint={handleInitialCheckpoint}
-              onLorasChange={(v) => update('loras', v)}
-              refreshToken={modelConfigVersion}
-            />
-          </div>
-
-          <div className="border-t border-zinc-800" />
-
-          <div className="px-4 pt-4 pb-5 space-y-4">
-            <p className="label">Generation</p>
-            <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
-            <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
-            <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
-            <div>
-              <label className="label">High-Res Fix</label>
-              <button
-                type="button"
-                onClick={() => update('highResFix', !p.highResFix)}
-                className={`min-h-12 w-full rounded-lg text-sm font-medium transition-all border
-                  ${p.highResFix
-                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
-                    : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
-              >
-                {p.highResFix ? 'HRF On — 2× Upscale' : 'HRF Off'}
-              </button>
-            </div>
-          </div>
-
-          <div className="border-t border-zinc-800" />
-
-          <div className="px-4 pt-4 pb-5 space-y-3">
-            <p className="label">Sampling</p>
-            <div>
-              <label className="label">Resolution</label>
-              <select
-                value={`${p.width}x${p.height}`}
-                onChange={(e) => {
-                  const [w, h] = e.target.value.split('x').map(Number);
-                  update('width', w);
-                  update('height', h);
-                }}
-                className="input-base"
-              >
-                {RESOLUTIONS.map((r) => (
-                  <option key={r.label} value={`${r.w}x${r.h}`}>{r.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Sampler</label>
-              <select value={p.sampler} onChange={(e) => update('sampler', e.target.value)} className="input-base">
-                {SAMPLERS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Scheduler</label>
-              <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
-                {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="border-t border-zinc-800" />
-
-          <div className="px-4 pt-4 pb-8">
-            <label className="label">Seed</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={p.seed}
-                onChange={(e) => update('seed', parseInt(e.target.value, 10))}
-                className="input-base flex-1"
-              />
-              <button
-                type="button"
-                onClick={() => update('seed', -1)}
-                disabled={p.seed === -1}
-                title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
-                className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
-                  ${p.seed === -1
-                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
-                    : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
-              >
-                {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
-              </button>
-            </div>
-            {lastResolvedSeed !== -1 && (
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-xs text-zinc-400 tabular-nums">Last seed: {lastResolvedSeed}</span>
-                <button
-                  type="button"
-                  onClick={() => update('seed', lastResolvedSeed)}
-                  className="min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95"
-                >
-                  ♻ Reuse
-                </button>
+          {mode === 'image' ? (
+            <>
+              <div className="px-4 pt-4 pb-5">
+                <p className="label mb-3">Models</p>
+                <ModelSelect
+                  checkpoint={p.checkpoint}
+                  loras={p.loras}
+                  onCheckpointChange={handleCheckpointChange}
+                  onInitialCheckpoint={handleInitialCheckpoint}
+                  onLorasChange={(v) => update('loras', v)}
+                  refreshToken={modelConfigVersion}
+                />
               </div>
-            )}
-          </div>
+
+              <div className="border-t border-zinc-800" />
+
+              <div className="px-4 pt-4 pb-5 space-y-4">
+                <p className="label">Generation</p>
+                <ParamSlider label="Steps" value={p.steps} min={1} max={100} step={1} onChange={(v) => update('steps', v)} />
+                <ParamSlider label="CFG Scale" value={p.cfg} min={1} max={20} step={0.5} onChange={(v) => update('cfg', v)} format={(v) => v.toFixed(1)} />
+                <ParamSlider label="Batch Size" value={p.batchSize} min={1} max={4} step={1} onChange={(v) => update('batchSize', v)} />
+                <div>
+                  <label className="label">High-Res Fix</label>
+                  <button
+                    type="button"
+                    onClick={() => update('highResFix', !p.highResFix)}
+                    className={`min-h-12 w-full rounded-lg text-sm font-medium transition-all border
+                      ${p.highResFix
+                        ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                        : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+                  >
+                    {p.highResFix ? 'HRF On — 2× Upscale' : 'HRF Off'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-zinc-800" />
+
+              <div className="px-4 pt-4 pb-5 space-y-3">
+                <p className="label">Sampling</p>
+                <div>
+                  <label className="label">Resolution</label>
+                  <select
+                    value={`${p.width}x${p.height}`}
+                    onChange={(e) => {
+                      const [w, h] = e.target.value.split('x').map(Number);
+                      update('width', w);
+                      update('height', h);
+                    }}
+                    className="input-base"
+                  >
+                    {RESOLUTIONS.map((r) => (
+                      <option key={r.label} value={`${r.w}x${r.h}`}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Sampler</label>
+                  <select value={p.sampler} onChange={(e) => update('sampler', e.target.value)} className="input-base">
+                    {SAMPLERS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Scheduler</label>
+                  <select value={p.scheduler} onChange={(e) => update('scheduler', e.target.value)} className="input-base">
+                    {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="border-t border-zinc-800" />
+
+              <div className="px-4 pt-4 pb-8">
+                <label className="label">Seed</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={p.seed}
+                    onChange={(e) => update('seed', parseInt(e.target.value, 10))}
+                    className="input-base flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => update('seed', -1)}
+                    disabled={p.seed === -1}
+                    title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
+                    className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
+                      ${p.seed === -1
+                        ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
+                        : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+                  >
+                    {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
+                  </button>
+                </div>
+                {lastResolvedSeed !== -1 && (
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-xs text-zinc-400 tabular-nums">Last seed: {lastResolvedSeed}</span>
+                    <button
+                      type="button"
+                      onClick={() => update('seed', lastResolvedSeed)}
+                      className="min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95"
+                    >
+                      ♻ Reuse
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="px-4 pt-4 pb-5 space-y-3">
+                <p className="label">Resolution</p>
+                <div className="flex gap-2">
+                  {VIDEO_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => { updateVideo('width', preset.w); updateVideo('height', preset.h); }}
+                      className={`flex-1 min-h-12 rounded-lg text-xs font-medium border transition-all
+                        ${videoP.width === preset.w && videoP.height === preset.h
+                          ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                          : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200 active:scale-95'}`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Width</label>
+                    <input
+                      type="number"
+                      value={videoP.width}
+                      min={256}
+                      max={1280}
+                      step={32}
+                      onChange={(e) => updateVideo('width', parseInt(e.target.value, 10))}
+                      className={`input-base ${vWidthErr ? 'border-red-500' : ''}`}
+                    />
+                    {vWidthErr && <p className="text-xs text-red-400 mt-1">Multiple of 32, 256–1280</p>}
+                  </div>
+                  <div>
+                    <label className="label">Height</label>
+                    <input
+                      type="number"
+                      value={videoP.height}
+                      min={256}
+                      max={1280}
+                      step={32}
+                      onChange={(e) => updateVideo('height', parseInt(e.target.value, 10))}
+                      className={`input-base ${vHeightErr ? 'border-red-500' : ''}`}
+                    />
+                    {vHeightErr && <p className="text-xs text-red-400 mt-1">Multiple of 32, 256–1280</p>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-zinc-800" />
+
+              <div className="px-4 pt-4 pb-5 space-y-4">
+                <p className="label">Generation</p>
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="label mb-0">Frames</label>
+                    <span className="text-xs text-zinc-400 tabular-nums font-mono">
+                      {videoP.frames} frames ({(videoP.frames / 16).toFixed(1)}s)
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={17}
+                    max={121}
+                    step={8}
+                    value={videoP.frames}
+                    onChange={(e) => updateVideo('frames', parseInt(e.target.value, 10))}
+                    className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-zinc-700"
+                  />
+                  {vFramesErr && <p className="text-xs text-red-400 mt-1">Must be 17, 25, 33, … 121</p>}
+                </div>
+                <div>
+                  <ParamSlider
+                    label="Steps"
+                    value={videoP.steps}
+                    min={4}
+                    max={40}
+                    step={2}
+                    onChange={(v) => updateVideo('steps', v)}
+                  />
+                  {vStepsErr && <p className="text-xs text-red-400 mt-1">Even number, 4–40</p>}
+                </div>
+                <div>
+                  <ParamSlider
+                    label="CFG"
+                    value={videoP.cfg}
+                    min={1}
+                    max={10}
+                    step={0.1}
+                    onChange={(v) => updateVideo('cfg', Math.round(v * 10) / 10)}
+                    format={(v) => v.toFixed(1)}
+                  />
+                  {vCfgErr && <p className="text-xs text-red-400 mt-1">1.0–10.0</p>}
+                </div>
+              </div>
+
+              <div className="border-t border-zinc-800" />
+
+              <div className="px-4 pt-4 pb-8">
+                <label className="label">Seed</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={p.seed}
+                    onChange={(e) => update('seed', parseInt(e.target.value, 10))}
+                    className="input-base flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => update('seed', -1)}
+                    disabled={p.seed === -1}
+                    title={p.seed === -1 ? 'Random mode active' : 'Reset to random'}
+                    className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all flex-shrink-0 border
+                      ${p.seed === -1
+                        ? 'bg-violet-600/20 text-violet-300 border-violet-700/50 cursor-default'
+                        : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+                  >
+                    {p.seed === -1 ? '🎲 Random' : '🎲 Randomize'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
 
         </div>
       </div>

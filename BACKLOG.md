@@ -33,5 +33,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Projects schema and Projects tab (Phase 2.1) — `batch/wan22-projects-schema-and-tab` (PR #24)
 - [~] Project generation flow + prompt threading + play-through (Phase 2.2) — `batch/wan22-project-generation-flow` (PR #25)
 - [~] Per-checkpoint defaults — `batch/checkpoint-defaults` (PR #26)
-- [ ] Video settings popout (Studio UX consistency) — see prompts/wan22-studio-video-settings-popout.md
+- [~] Video settings popout (Studio UX consistency) — `batch/wan22-studio-video-settings-popout` (PR #27)
 - [ ] Project stitching (Phase 3) — see prompts/wan22-project-stitching.md
