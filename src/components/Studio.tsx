@@ -1424,8 +1424,8 @@ export default function Studio({
             </div>
           )}
 
-          {/* I2V toggle + gallery picker — for non-project use or when no project picker selection */}
-          {!selectedStartingClipId && (
+          {/* I2V toggle + gallery picker — only shown when no project context is active */}
+          {!selectedStartingClipId && !projectContext?.latestClipId && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <label className="label mb-0">Starting frame (I2V)</label>
