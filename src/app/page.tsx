@@ -9,7 +9,7 @@ import ServerBay from '@/components/ServerBay';
 import TabNav from '@/components/TabNav';
 import ToastContainer from '@/components/Toast';
 import { QueueProvider } from '@/contexts/QueueContext';
-import type { GenerationParams, GenerationRecord, LoraEntry, VideoRemixData } from '@/types';
+import type { GenerationParams, GenerationRecord, LoraEntry, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip } from '@/types';
 
 export type Tab = 'studio' | 'projects' | 'gallery' | 'models' | 'admin';
 
@@ -46,6 +46,7 @@ export default function Home() {
   const [videoRemixParams, setVideoRemixParams] = useState<VideoRemixData | null>(null);
   const [modelConfigVersion, setModelConfigVersion] = useState(0);
   const [projectsKey, setProjectsKey] = useState(0);
+  const [projectContextTrigger, setProjectContextTrigger] = useState<ProjectContext | null>(null);
 
   const handleRemix = useCallback((record: GenerationRecord) => {
     if (record.mediaType === 'video') {
@@ -72,6 +73,24 @@ export default function Home() {
     setProjectsKey((k) => k + 1);
     setTab('projects');
   }, []);
+  const handleProjectContextTriggerConsumed = useCallback(() => setProjectContextTrigger(null), []);
+  const handleGenerateInProject = useCallback((project: ProjectDetail, latestClip: ProjectClip | null) => {
+    const context: ProjectContext = {
+      projectId: project.id,
+      projectName: project.name,
+      latestClipId: latestClip?.id ?? null,
+      latestClipPrompt: latestClip?.prompt ?? null,
+      defaults: {
+        frames: project.defaultFrames,
+        steps: project.defaultSteps,
+        cfg: project.defaultCfg,
+        width: project.defaultWidth,
+        height: project.defaultHeight,
+      },
+    };
+    setProjectContextTrigger(context);
+    setTab('studio');
+  }, []);
 
   return (
     <QueueProvider>
@@ -89,10 +108,16 @@ export default function Home() {
               onRemix={handleRemix}
               modelConfigVersion={modelConfigVersion}
               onNavigateToGallery={handleNavigateToGallery}
+              projectContextTrigger={projectContextTrigger}
+              onProjectContextTriggerConsumed={handleProjectContextTriggerConsumed}
             />
           </div>
           <div className={tab === 'projects' ? '' : 'hidden'}>
-            <Projects key={projectsKey} onNavigateToGallery={handleNavigateToGallery} />
+            <Projects
+              key={projectsKey}
+              onNavigateToGallery={handleNavigateToGallery}
+              onGenerateInProject={handleGenerateInProject}
+            />
           </div>
           <div className={tab === 'gallery' ? '' : 'hidden'}>
             <Gallery refreshToken={refreshGallery} onRemix={handleRemix} onNavigateToProject={handleNavigateToProjects} />

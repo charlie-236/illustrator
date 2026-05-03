@@ -22,6 +22,8 @@ export interface VideoJobParams {
   seed: number;
   mode: 't2v' | 'i2v';
   outputDir: string;
+  /** Optional project to associate this clip with. Position is auto-computed at save time. */
+  projectId?: string;
 }
 
 interface BaseJob {
@@ -521,6 +523,16 @@ class ComfyWSManager {
       await writeFile(path.join(videoParams.outputDir, localFilename), videoBuffer);
       const filePath = `/api/images/${localFilename}`;
 
+      // Compute position for project clips
+      let position: number | undefined;
+      if (videoParams.projectId) {
+        const maxResult = await prisma.generation.aggregate({
+          where: { projectId: videoParams.projectId },
+          _max: { position: true },
+        });
+        position = (maxResult._max.position ?? 0) + 1;
+      }
+
       // Create DB row
       const record = await prisma.generation.create({
         data: {
@@ -540,6 +552,7 @@ class ComfyWSManager {
           mediaType: 'video',
           frames: videoParams.frames,
           fps: 16,
+          ...(videoParams.projectId ? { projectId: videoParams.projectId, position } : {}),
         },
       });
 

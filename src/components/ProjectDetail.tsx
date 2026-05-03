@@ -18,16 +18,16 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { ProjectClip, ProjectDetail } from '@/types';
+import type { ProjectClip, ProjectDetail, GenerationRecord } from '@/types';
 import ImageModal from './ImageModal';
 import { imgSrc } from '@/lib/imageSrc';
-import type { GenerationRecord } from '@/types';
 
 interface Props {
   projectId: string;
   onBack: () => void;
   onDeleted: () => void;
   onNavigateToGallery: () => void;
+  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null) => void;
 }
 
 const VIDEO_RESOLUTIONS = [
@@ -310,7 +310,7 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
 // Main ProjectDetail view
 // ─────────────────────────────────────────────
 
-export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavigateToGallery }: Props) {
+export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavigateToGallery, onGenerateInProject }: Props) {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [clips, setClips] = useState<ProjectClip[]>([]);
   const [loading, setLoading] = useState(true);
@@ -330,6 +330,19 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [editingDesc, setEditingDesc] = useState(false);
   const [descValue, setDescValue] = useState('');
   const [descSaving, setDescSaving] = useState(false);
+
+  // Play-through state
+  const [playThrough, setPlayThrough] = useState(false);
+  const [playingIdx, setPlayingIdx] = useState(0);
+  const [playDone, setPlayDone] = useState(false);
+  const playerRef = useRef<HTMLVideoElement>(null);
+
+  // When the active clip index changes in play-through mode, reload and play
+  useEffect(() => {
+    if (!playThrough || !playerRef.current) return;
+    playerRef.current.load();
+    void playerRef.current.play().catch(() => { /* autoplay blocked — user can tap play */ });
+  }, [playingIdx, playThrough]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -593,30 +606,49 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         )}
       </div>
 
-      {/* ── Generate new clip (disabled placeholder) ── */}
+      {/* ── Generate new clip ── */}
       <div className="px-4 pt-4 pb-2">
         <button
-          disabled
-          title="Generation from projects lands in Phase 2.2"
-          className="w-full min-h-12 rounded-xl border border-zinc-700 border-dashed text-zinc-600 text-sm font-medium flex items-center justify-center gap-2 cursor-not-allowed select-none"
+          onClick={() => onGenerateInProject(project, clips[clips.length - 1] ?? null)}
+          className="w-full min-h-12 rounded-xl border border-violet-600/40 bg-violet-600/10 hover:bg-violet-600/20 hover:border-violet-600/60 text-violet-300 hover:text-violet-200 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           Generate new clip in this project
-          <span className="text-xs text-zinc-700 font-normal ml-1">(coming in 2.2)</span>
         </button>
       </div>
 
-      {/* ── Clip strip ── */}
+      {/* ── Clip strip / play-through ── */}
       <div className="px-4 pt-2">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium">
             {clips.length === 0 ? 'No clips' : `${clips.length} ${clips.length === 1 ? 'clip' : 'clips'}`}
           </p>
-          {clips.length > 1 && (
-            <p className="text-xs text-zinc-600">Drag to reorder</p>
-          )}
+          <div className="flex items-center gap-2">
+            {clips.length > 1 && (
+              <button
+                onClick={() => {
+                  setPlayThrough((v) => {
+                    if (!v) { setPlayingIdx(0); setPlayDone(false); }
+                    return !v;
+                  });
+                }}
+                className={`min-h-10 px-3 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5
+                  ${playThrough
+                    ? 'bg-violet-600/20 border-violet-600/30 text-violet-300'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                </svg>
+                {playThrough ? 'Strip view' : 'Play all'}
+              </button>
+            )}
+            {clips.length > 1 && !playThrough && (
+              <p className="text-xs text-zinc-600">Drag to reorder</p>
+            )}
+          </div>
         </div>
 
         {reorderError && (
@@ -625,9 +657,61 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
         {clips.length === 0 ? (
           <div className="flex items-center justify-center h-32 rounded-xl border border-dashed border-zinc-700 text-zinc-600 text-sm">
-            No clips yet. Generate the first one in Phase 2.2.
+            No clips yet. Tap &quot;Generate new clip&quot; above to get started.
+          </div>
+        ) : playThrough ? (
+          /* ── Play-through player ── */
+          <div className="space-y-3">
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              ref={playerRef}
+              src={imgSrc(clips[playingIdx]?.filePath ?? '')}
+              controls
+              autoPlay
+              playsInline
+              onEnded={() => {
+                if (playingIdx < clips.length - 1) {
+                  setPlayingIdx((i) => i + 1);
+                  setPlayDone(false);
+                } else {
+                  setPlayDone(true);
+                }
+              }}
+              className="w-full rounded-xl bg-zinc-800"
+            />
+
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-zinc-400 tabular-nums">
+                Clip {playingIdx + 1} of {clips.length}
+              </p>
+              {playDone && (
+                <button
+                  onClick={() => { setPlayingIdx(0); setPlayDone(false); }}
+                  className="min-h-10 px-3 text-xs rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-medium transition-colors"
+                >
+                  Play again
+                </button>
+              )}
+            </div>
+
+            {/* Clip chips */}
+            <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+              {clips.map((c, i) => (
+                <button
+                  key={c.id}
+                  onClick={() => { setPlayingIdx(i); setPlayDone(false); }}
+                  className={`flex-shrink-0 min-h-10 min-w-10 px-3 rounded-lg text-xs font-bold border transition-colors
+                    ${i === playingIdx
+                      ? 'bg-violet-600/20 border-violet-600/30 text-violet-300'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
+          /* ── Sortable strip ── */
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={clips.map((c) => c.id)} strategy={horizontalListSortingStrategy}>
               <div className="flex gap-3 overflow-x-auto pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>

@@ -7,7 +7,7 @@ import ParamSlider from './ParamSlider';
 import ImageModal from './ImageModal';
 import GalleryPicker from './GalleryPicker';
 import QueueTray from './QueueTray';
-import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData } from '@/types';
+import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
@@ -81,6 +81,9 @@ interface Props {
   onRemix: (record: GenerationRecord) => void;
   modelConfigVersion: number;
   onNavigateToGallery: () => void;
+  /** Set by Projects tab when "Generate new clip" is clicked. Triggers mode switch + pre-fill. */
+  projectContextTrigger: ProjectContext | null;
+  onProjectContextTriggerConsumed: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,6 +95,25 @@ function readSessionMode(): 'image' | 'video' {
   } catch {
     return 'image';
   }
+}
+
+function readSessionProjectContext(): ProjectContext | null {
+  try {
+    const s = sessionStorage.getItem('studio-project-context');
+    return s ? JSON.parse(s) as ProjectContext : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionProjectContext(ctx: ProjectContext | null) {
+  try {
+    if (ctx) {
+      sessionStorage.setItem('studio-project-context', JSON.stringify(ctx));
+    } else {
+      sessionStorage.removeItem('studio-project-context');
+    }
+  } catch { /* ignore */ }
 }
 
 async function encodeImageToBase64(url: string): Promise<string> {
@@ -119,6 +141,8 @@ export default function Studio({
   onRemix,
   modelConfigVersion,
   onNavigateToGallery,
+  projectContextTrigger,
+  onProjectContextTriggerConsumed,
 }: Props) {
   const {
     addJob,
@@ -141,6 +165,12 @@ export default function Studio({
   const [startingFrameRecord, setStartingFrameRecord] = useState<GenerationRecord | null>(null);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
   const [videoResult, setVideoResult] = useState<VideoResult | null>(null);
+
+  // Project context — set when navigating from Projects tab; persisted in sessionStorage
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
+  // "Use last frame of previous clip" checkbox — only relevant when projectContext has a latestClipId
+  const [useLastFrame, setUseLastFrame] = useState(false);
+  const [extractingLastFrame, setExtractingLastFrame] = useState(false);
 
   // Inline result display for the most recently completed image/video
   const [lastImageRecords, setLastImageRecords] = useState<GenerationRecord[]>([]);
@@ -167,6 +197,7 @@ export default function Studio({
   // Apply session mode on mount + recover in-flight jobs from server
   useEffect(() => {
     setMode(readSessionMode());
+    setProjectContext(readSessionProjectContext());
 
     // On mount, poll for any in-flight jobs on the server (post-refresh recovery)
     fetch('/api/jobs/active')
@@ -219,10 +250,14 @@ export default function Studio({
     };
   }, []);
 
-  // Apply image remix params from Gallery
+  // Apply image remix params from Gallery (remix is always project-less)
   useEffect(() => {
     if (!remixParams) return;
     setP({ ...remixParams, batchSize: remixParams.batchSize ?? 1 });
+    // Remix clears project context
+    setProjectContext(null);
+    saveSessionProjectContext(null);
+    setUseLastFrame(false);
     setMode('image');
     try { sessionStorage.setItem('studio-mode', 'image'); } catch { /* ignore */ }
     onRemixConsumed();
@@ -242,7 +277,7 @@ export default function Studio({
     }
   }, [remixParams, onRemixConsumed]);
 
-  // Apply video remix params from Gallery
+  // Apply video remix params from Gallery (remix is always project-less)
   useEffect(() => {
     if (!videoRemixParams) return;
     setVideoP({
@@ -255,10 +290,49 @@ export default function Studio({
     setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt }));
     setUseStartingFrame(false);
     setStartingFrameRecord(null);
+    setUseLastFrame(false);
+    // Remix clears project context — remix is a fresh generation, not a project continuation
+    setProjectContext(null);
+    saveSessionProjectContext(null);
     setMode('video');
     try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
     onVideoRemixConsumed();
   }, [videoRemixParams, onVideoRemixConsumed]);
+
+  // Apply project context trigger from Projects tab
+  useEffect(() => {
+    if (!projectContextTrigger) return;
+
+    setProjectContext(projectContextTrigger);
+    saveSessionProjectContext(projectContextTrigger);
+
+    // Switch to video mode
+    setMode('video');
+    setVideoResult(null);
+    setSubmitError(null);
+    try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
+
+    // Pre-fill video params from project defaults (fall back to VIDEO_DEFAULTS for unset fields)
+    setVideoP({
+      frames: projectContextTrigger.defaults.frames ?? VIDEO_DEFAULTS.frames,
+      steps: projectContextTrigger.defaults.steps ?? VIDEO_DEFAULTS.steps,
+      cfg: projectContextTrigger.defaults.cfg ?? VIDEO_DEFAULTS.cfg,
+      width: projectContextTrigger.defaults.width ?? VIDEO_DEFAULTS.width,
+      height: projectContextTrigger.defaults.height ?? VIDEO_DEFAULTS.height,
+    });
+
+    // Carry forward latest clip's prompt if present
+    if (projectContextTrigger.latestClipPrompt) {
+      setP((prev) => ({ ...prev, positivePrompt: projectContextTrigger.latestClipPrompt! }));
+    }
+
+    // Reset starting frame state
+    setUseStartingFrame(false);
+    setStartingFrameRecord(null);
+    setUseLastFrame(false);
+
+    onProjectContextTriggerConsumed();
+  }, [projectContextTrigger, onProjectContextTriggerConsumed]);
 
   // ── Param helpers ─────────────────────────────────────────────────────────
 
@@ -270,15 +344,23 @@ export default function Studio({
     setVideoP((prev) => ({ ...prev, [key]: val }));
   }
 
+  function clearProjectContext() {
+    setProjectContext(null);
+    saveSessionProjectContext(null);
+    setUseLastFrame(false);
+  }
+
   function switchMode(newMode: 'image' | 'video') {
     if (newMode === mode) return;
     setLastImageRecords([]);
     setVideoResult(null);
     setSubmitError(null);
     if (newMode === 'video') {
-      setVideoP(VIDEO_DEFAULTS);
+      // Don't reset videoP if a project context pre-filled it
+      if (!projectContext) setVideoP(VIDEO_DEFAULTS);
       setUseStartingFrame(false);
       setStartingFrameRecord(null);
+      setUseLastFrame(false);
     }
     setMode(newMode);
     try { sessionStorage.setItem('studio-mode', newMode); } catch { /* ignore */ }
@@ -400,10 +482,31 @@ export default function Studio({
     const promptSummary = p.positivePrompt.slice(0, 60).trim() || 'Video generation';
 
     try {
-      const videoMode: 't2v' | 'i2v' = (useStartingFrame && startingFrameRecord) ? 'i2v' : 't2v';
       let startImageB64: string | undefined;
 
-      if (videoMode === 'i2v' && startingFrameRecord) {
+      // Last-frame extraction (project carry-forward path)
+      if (useLastFrame && projectContext?.latestClipId) {
+        setExtractingLastFrame(true);
+        try {
+          const lfRes = await fetch('/api/extract-last-frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ generationId: projectContext.latestClipId }),
+          });
+          const lfData = await lfRes.json() as { frameB64?: string; error?: string };
+          if (!lfRes.ok || !lfData.frameB64) {
+            throw new Error(lfData.error ?? 'Failed to extract last frame');
+          }
+          // Strip data URI prefix — API expects raw base64
+          startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
+        } catch (err) {
+          setSubmitError(`Failed to extract last frame: ${String(err)}`);
+          return;
+        } finally {
+          setExtractingLastFrame(false);
+        }
+      } else if (useStartingFrame && startingFrameRecord) {
+        // Gallery picker path
         try {
           startImageB64 = await encodeImageToBase64(imgSrc(startingFrameRecord.filePath));
         } catch (err) {
@@ -411,6 +514,8 @@ export default function Studio({
           return;
         }
       }
+
+      const videoMode: 't2v' | 'i2v' = startImageB64 ? 'i2v' : 't2v';
 
       const res = await fetch('/api/generate-video', {
         method: 'POST',
@@ -425,6 +530,7 @@ export default function Studio({
           cfg: videoP.cfg,
           seed: p.seed >= 0 ? p.seed : undefined,
           ...(startImageB64 ? { startImageB64 } : {}),
+          ...(projectContext ? { projectId: projectContext.projectId } : {}),
         }),
       });
 
@@ -570,7 +676,9 @@ export default function Studio({
   const videoGenerateDisabled =
     !p.positivePrompt.trim()
     || vWidthErr || vHeightErr || vFramesErr || vStepsErr || vCfgErr
-    || (useStartingFrame && !startingFrameRecord);
+    // Gallery picker: requires a record unless using last-frame path
+    || (useStartingFrame && !startingFrameRecord && !useLastFrame)
+    || extractingLastFrame;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -596,6 +704,28 @@ export default function Studio({
         </div>
         <QueueTray onNavigateToGallery={onNavigateToGallery} />
       </div>
+
+      {/* ── Project context badge ── */}
+      {projectContext && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-600/10 border border-violet-600/20">
+          <svg className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <span className="text-xs font-medium text-violet-300 flex-1 truncate">
+            Project: {projectContext.projectName}
+          </span>
+          <button
+            type="button"
+            onClick={clearProjectContext}
+            aria-label="Clear project context"
+            className="min-h-8 min-w-8 flex items-center justify-center rounded-lg text-violet-400 hover:text-violet-200 hover:bg-violet-500/20 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* ── After image generation: thumbnail grid ── */}
       {mode === 'image' && lastImageRecords.length > 0 && (
@@ -824,7 +954,14 @@ export default function Studio({
               <label className="label mb-0">Starting frame (I2V)</label>
               <button
                 type="button"
-                onClick={() => setUseStartingFrame((v) => !v)}
+                onClick={() => {
+                  const next = !useStartingFrame;
+                  setUseStartingFrame(next);
+                  if (!next) {
+                    setStartingFrameRecord(null);
+                    setUseLastFrame(false);
+                  }
+                }}
                 className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all border
                   ${useStartingFrame
                     ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
@@ -834,46 +971,88 @@ export default function Studio({
               </button>
             </div>
 
+            {/* "Use last frame" checkbox — only when project has a previous clip */}
+            {projectContext?.latestClipId && (
+              <label className="flex items-center gap-3 mb-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useLastFrame}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setUseLastFrame(checked);
+                    if (checked) {
+                      setUseStartingFrame(true);
+                      setStartingFrameRecord(null);
+                    }
+                  }}
+                  className="w-5 h-5 rounded accent-violet-500"
+                />
+                <span className="text-sm text-zinc-300">Use last frame of previous clip</span>
+              </label>
+            )}
+
             {useStartingFrame && (
-              startingFrameRecord ? (
-                <div className="flex items-center gap-3">
-                  <div className="relative flex-shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={imgSrc(startingFrameRecord.filePath)}
-                      alt="Starting frame"
-                      className="w-20 h-20 rounded-lg object-cover border border-zinc-700"
-                    />
+              useLastFrame && projectContext?.latestClipId ? (
+                // Last-frame path: source is fixed, show info pill
+                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/60 border border-zinc-700">
+                  {extractingLastFrame ? (
+                    <svg className="w-4 h-4 text-violet-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
+                    </svg>
+                  )}
+                  <p className="text-sm text-zinc-300">
+                    {extractingLastFrame
+                      ? 'Extracting last frame…'
+                      : 'Last frame of previous clip (extracted on submit)'}
+                  </p>
+                </div>
+              ) : (
+                // Gallery picker path
+                startingFrameRecord ? (
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex-shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={imgSrc(startingFrameRecord.filePath)}
+                        alt="Starting frame"
+                        className="w-20 h-20 rounded-lg object-cover border border-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setStartingFrameRecord(null)}
+                        aria-label="Clear starting frame"
+                        className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-zinc-800 border border-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:bg-red-600 hover:text-white transition-colors"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setStartingFrameRecord(null)}
-                      aria-label="Clear starting frame"
-                      className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-zinc-800 border border-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:bg-red-600 hover:text-white transition-colors"
+                      onClick={() => setGalleryPickerOpen(true)}
+                      className="min-h-12 px-4 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all"
                     >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                      Change
                     </button>
                   </div>
+                ) : (
                   <button
                     type="button"
                     onClick={() => setGalleryPickerOpen(true)}
-                    className="min-h-12 px-4 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all"
+                    className="w-full min-h-14 rounded-xl border-2 border-dashed border-zinc-700 hover:border-violet-600/60 hover:bg-violet-600/5 transition-colors flex items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 text-sm"
                   >
-                    Change
+                    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                    </svg>
+                    Pick from gallery
                   </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setGalleryPickerOpen(true)}
-                  className="w-full min-h-14 rounded-xl border-2 border-dashed border-zinc-700 hover:border-violet-600/60 hover:bg-violet-600/5 transition-colors flex items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 text-sm"
-                >
-                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                  </svg>
-                  Pick from gallery
-                </button>
+                )
               )
             )}
           </div>

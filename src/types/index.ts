@@ -140,6 +140,23 @@ export interface ModelInfo {
   embeddings: string[];
 }
 
+/** Project context passed from Projects tab to Studio when generating a new clip. */
+export interface ProjectContext {
+  projectId: string;
+  projectName: string;
+  /** ID of the most-recently-positioned clip (for last-frame extraction). Null if project has no clips. */
+  latestClipId: string | null;
+  /** Positive prompt of the latest clip (for carry-forward). Null if project has no clips. */
+  latestClipPrompt: string | null;
+  defaults: {
+    frames: number | null;
+    steps: number | null;
+    cfg: number | null;
+    width: number | null;
+    height: number | null;
+  };
+}
+
 /** Params passed from Gallery to Studio when remixing a video generation. */
 export interface VideoRemixData {
   positivePrompt: string;
