@@ -17,7 +17,7 @@ import type { ActiveJobInfo } from '@/lib/comfyws';
 export interface ActiveJob {
   promptId: string;
   generationId: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
   startedAt: number;
   progress: { current: number; total: number } | null;
@@ -27,7 +27,7 @@ export interface ActiveJob {
 
 export interface ToastEntry {
   id: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
   generationId: string;
 }
@@ -179,7 +179,10 @@ export function QueueProvider({ children }: { children: ReactNode }) {
         if (!state.muted) playChime();
         sendBrowserNotification({
           title: 'Generation complete',
-          body: job.promptSummary || (job.mediaType === 'video' ? 'Video generation' : 'Image generation'),
+          body: job.promptSummary || (
+            job.mediaType === 'stitch' ? 'Project stitch' :
+            job.mediaType === 'video' ? 'Video generation' : 'Image generation'
+          ),
           tag: job.promptId,
         });
       }

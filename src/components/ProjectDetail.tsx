@@ -18,9 +18,10 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { ProjectClip, ProjectDetail, GenerationRecord } from '@/types';
+import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport } from '@/types';
 import ImageModal from './ImageModal';
 import { imgSrc } from '@/lib/imageSrc';
+import { useQueue } from '@/contexts/QueueContext';
 
 interface Props {
   projectId: string;
@@ -61,8 +62,235 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     fps: clip.fps,
     projectId,
     projectName,
+    isStitched: false,
+    parentProjectId: null,
+    parentProjectName: null,
+    stitchedClipIds: null,
     createdAt: clip.createdAt,
   };
+}
+
+// ─────────────────────────────────────────────
+// Stitch modal
+// ─────────────────────────────────────────────
+
+interface StitchModalProps {
+  projectId: string;
+  projectName: string;
+  clipCount: number;
+  onClose: () => void;
+  onStitched: (export_: ProjectStitchedExport) => void;
+}
+
+function StitchModal({ projectId, projectName, clipCount, onClose, onStitched }: StitchModalProps) {
+  const [transition, setTransition] = useState<'hard-cut' | 'crossfade'>('hard-cut');
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const { addJob, setCompleting, completeJob, failJob } = useQueue();
+
+  async function handleStitch() {
+    setStatus('running');
+    setProgress(null);
+    setErrorMsg(null);
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/stitch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transition }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        setStatus('error');
+        setErrorMsg('Failed to start stitch');
+        return;
+      }
+
+      let promptId: string | null = null;
+      let generationId: string | null = null;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        let eventName = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) { eventName = line.slice(6).trim(); continue; }
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (eventName === 'init') {
+            const parsed = JSON.parse(data) as { promptId: string; generationId: string };
+            promptId = parsed.promptId;
+            generationId = parsed.generationId;
+            addJob({
+              promptId,
+              generationId,
+              mediaType: 'stitch',
+              promptSummary: `Stitched: ${projectName}`.slice(0, 60),
+              startedAt: Date.now(),
+              progress: null,
+              status: 'running',
+            });
+          } else if (eventName === 'progress') {
+            const parsed = JSON.parse(data) as { value: number; max: number };
+            setProgress({ current: parsed.value, total: parsed.max });
+            if (promptId) {
+              // progress update via queue happens via polling; just update local state
+            }
+          } else if (eventName === 'completing') {
+            if (promptId) setCompleting(promptId);
+          } else if (eventName === 'complete') {
+            const result = JSON.parse(data) as { id: string; filePath: string; frames: number; fps: number; createdAt: string };
+            if (promptId && generationId) completeJob(promptId, generationId);
+            setStatus('done');
+            onStitched({
+              id: result.id,
+              filePath: result.filePath,
+              frames: result.frames,
+              fps: result.fps,
+              createdAt: result.createdAt,
+              promptPos: `Stitched: ${projectName}`,
+            });
+          } else if (eventName === 'error') {
+            const parsed = JSON.parse(data) as { message: string };
+            if (promptId) failJob(promptId, parsed.message);
+            setStatus('error');
+            setErrorMsg(parsed.message);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      setStatus('error');
+      setErrorMsg(String(err));
+    }
+  }
+
+  function handleAbort() {
+    abortRef.current?.abort();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={status === 'idle' ? onClose : undefined}>
+      <div
+        className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800">
+          <h2 className="text-base font-semibold text-zinc-100">Stitch project</h2>
+          {status !== 'running' && (
+            <button onClick={onClose} className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {status === 'idle' && (
+            <>
+              <p className="text-sm text-zinc-400">
+                Combine {clipCount} clips into a single mp4 file. The stitched video will appear in your Gallery.
+              </p>
+
+              <div>
+                <label className="label block mb-2">Transition</label>
+                <div className="flex gap-2">
+                  {(['hard-cut', 'crossfade'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTransition(t)}
+                      className={`flex-1 min-h-12 rounded-xl text-sm font-medium border transition-colors
+                        ${transition === t
+                          ? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
+                          : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-500'}`}
+                    >
+                      {t === 'hard-cut' ? 'Hard cut' : 'Crossfade (0.5s)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={() => void handleStitch()}
+                className="w-full min-h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors"
+              >
+                Stitch {clipCount} clips
+              </button>
+            </>
+          )}
+
+          {status === 'running' && (
+            <div className="space-y-3 py-1">
+              <p className="text-sm text-zinc-300">
+                {progress ? `Processing frame ${progress.current} / ${progress.total}…` : 'Starting ffmpeg…'}
+              </p>
+              {progress && (
+                <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, (progress.current / progress.total) * 100)}%` }}
+                  />
+                </div>
+              )}
+              <button
+                onClick={handleAbort}
+                className="w-full min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+              >
+                Abort
+              </button>
+            </div>
+          )}
+
+          {status === 'done' && (
+            <div className="py-1 space-y-3">
+              <p className="text-sm text-emerald-400 font-medium">Stitch complete! The video is now in your Gallery.</p>
+              <button
+                onClick={onClose}
+                className="w-full min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div className="py-1 space-y-3">
+              <p className="text-sm text-red-400 break-words">{errorMsg ?? 'Stitch failed'}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setStatus('idle'); setErrorMsg(null); }}
+                  className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+                >
+                  Try again
+                </button>
+                <button
+                  onClick={onClose}
+                  className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -313,6 +541,8 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
 export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavigateToGallery, onGenerateInProject }: Props) {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [clips, setClips] = useState<ProjectClip[]>([]);
+  const [stitchedExports, setStitchedExports] = useState<ProjectStitchedExport[]>([]);
+  const [showStitch, setShowStitch] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -357,6 +587,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       const data = await res.json();
       setProject(data.project);
       setClips(data.clips ?? []);
+      setStitchedExports(data.stitchedExports ?? []);
       setNameValue(data.project.name);
       setDescValue(data.project.description ?? '');
     } finally {
@@ -606,16 +837,27 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         )}
       </div>
 
-      {/* ── Generate new clip ── */}
-      <div className="px-4 pt-4 pb-2">
+      {/* ── Generate new clip + Stitch ── */}
+      <div className="px-4 pt-4 pb-2 flex gap-2">
         <button
           onClick={() => onGenerateInProject(project, clips[clips.length - 1] ?? null)}
-          className="w-full min-h-12 rounded-xl border border-violet-600/40 bg-violet-600/10 hover:bg-violet-600/20 hover:border-violet-600/60 text-violet-300 hover:text-violet-200 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+          className="flex-1 min-h-12 rounded-xl border border-violet-600/40 bg-violet-600/10 hover:bg-violet-600/20 hover:border-violet-600/60 text-violet-300 hover:text-violet-200 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
-          Generate new clip in this project
+          Generate new clip
+        </button>
+        <button
+          onClick={() => setShowStitch(true)}
+          disabled={clips.length < 2}
+          title={clips.length < 2 ? 'Need at least 2 clips to stitch' : `Stitch ${clips.length} clips`}
+          className="min-h-12 px-4 rounded-xl border border-emerald-600/40 bg-emerald-600/10 hover:bg-emerald-600/20 hover:border-emerald-600/60 text-emerald-300 hover:text-emerald-200 text-sm font-medium flex items-center gap-2 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          Stitch
         </button>
       </div>
 
@@ -754,12 +996,74 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         />
       )}
 
+      {/* ── Stitched exports ── */}
+      {stitchedExports.length > 0 && (
+        <div className="px-4 pt-4">
+          <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium mb-2">
+            Stitched exports ({stitchedExports.length})
+          </p>
+          <div className="space-y-2">
+            {stitchedExports.map((e) => {
+              const durSec = e.frames != null && e.fps != null && e.fps > 0
+                ? (e.frames / e.fps).toFixed(1)
+                : null;
+              return (
+                <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <video
+                    src={imgSrc(e.filePath)}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    className="flex-shrink-0 w-20 aspect-video rounded-lg object-cover bg-zinc-800"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-zinc-300 truncate">{e.promptPos}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      {durSec ? `${durSec}s` : ''}
+                      {durSec && e.frames ? ' · ' : ''}
+                      {e.frames != null ? `${e.frames} frames` : ''}
+                      {' · '}
+                      {new Date(e.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <a
+                    href={imgSrc(e.filePath)}
+                    download
+                    className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                    title="Download"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  </a>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Settings modal ── */}
       {showSettings && (
         <SettingsModal
           project={project}
           onClose={() => setShowSettings(false)}
           onSaved={(updated) => { setProject(updated); setShowSettings(false); }}
+        />
+      )}
+
+      {/* ── Stitch modal ── */}
+      {showStitch && (
+        <StitchModal
+          projectId={projectId}
+          projectName={project.name}
+          clipCount={clips.length}
+          onClose={() => setShowStitch(false)}
+          onStitched={(export_) => {
+            setStitchedExports((prev) => [export_, ...prev]);
+            setShowStitch(false);
+          }}
         />
       )}
     </div>

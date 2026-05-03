@@ -1,0 +1,185 @@
+import { NextRequest } from 'next/server';
+import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import { unlink } from 'fs/promises';
+import { prisma } from '@/lib/prisma';
+import { getComfyWSManager } from '@/lib/comfyws';
+import { stitchProject } from '@/lib/stitch';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache, no-transform',
+  Connection: 'keep-alive',
+  'X-Accel-Buffering': 'no',
+};
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 30)
+    .replace(/_+$/, '') || 'stitched';
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const outputDir = process.env.IMAGE_OUTPUT_DIR;
+  if (!outputDir) {
+    return new Response(
+      JSON.stringify({ error: 'IMAGE_OUTPUT_DIR not configured' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  const { id: projectId } = await params;
+
+  let body: { transition?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
+  }
+
+  const transition: 'hard-cut' | 'crossfade' =
+    body.transition === 'crossfade' ? 'crossfade' : 'hard-cut';
+
+  // ─── load project + source clips ──────────────────────────────────────────
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, name: true },
+  });
+  if (!project) {
+    return new Response(JSON.stringify({ error: 'Project not found' }), { status: 404 });
+  }
+
+  const clips = await prisma.generation.findMany({
+    where: { projectId, mediaType: 'video' },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, filePath: true },
+  });
+
+  if (clips.length < 2) {
+    return new Response(
+      JSON.stringify({ error: 'Need at least 2 clips to stitch' }),
+      { status: 400 },
+    );
+  }
+
+  // ─── build local paths ────────────────────────────────────────────────────
+
+  const clipPaths = clips.map((c) => {
+    const filename = c.filePath.replace('/api/images/', '').replace('/generations/', '');
+    return path.join(outputDir, filename);
+  });
+
+  // ─── generate IDs and output path ─────────────────────────────────────────
+
+  const generationId = uuidv4();
+  const promptId = uuidv4();
+  const slug = slugify(`stitched ${project.name}`);
+  const filename = `${slug}_${Date.now()}.mp4`;
+  const outputPath = path.join(outputDir, filename);
+  const filePath = `/api/images/${filename}`;
+  const promptSummary = `Stitched: ${project.name}`.slice(0, 60);
+
+  // ─── create pending Generation row ───────────────────────────────────────
+
+  await prisma.generation.create({
+    data: {
+      id: generationId,
+      filePath,
+      promptPos: `Stitched: ${project.name}`,
+      promptNeg: '',
+      model: 'stitch',
+      seed: BigInt(0),
+      cfg: 0,
+      steps: 0,
+      width: 0,
+      height: 0,
+      sampler: 'none',
+      scheduler: 'none',
+      highResFix: false,
+      mediaType: 'video',
+      isStitched: true,
+      parentProjectId: projectId,
+      stitchedClipIds: JSON.stringify(clips.map((c) => c.id)),
+    },
+  });
+
+  // ─── SSE stream ───────────────────────────────────────────────────────────
+
+  const manager = getComfyWSManager();
+  const sseEncoder = new TextEncoder();
+  let capturedController: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      capturedController = controller;
+
+      controller.enqueue(
+        sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, generationId })}\n\n`),
+      );
+
+      manager.registerStitchJob(promptId, generationId, outputPath, controller, promptSummary);
+
+      // Client disconnect — detach controller; ffmpeg keeps running (refresh survivability)
+      req.signal.addEventListener('abort', () => {
+        manager.removeSubscriber(promptId, controller);
+        try { controller.close(); } catch { /* already closed */ }
+      });
+
+      // Run stitch asynchronously; all events pushed through manager
+      void (async () => {
+        try {
+          const result = await stitchProject({
+            clipPaths,
+            outputPath,
+            transition,
+            onProgress: (frame, total) =>
+              manager.updateStitchProgress(promptId, { current: frame, total }),
+            onChildProcess: (cp) => manager.setStitchProcess(promptId, cp),
+          });
+
+          await prisma.generation.update({
+            where: { id: generationId },
+            data: {
+              width: result.width,
+              height: result.height,
+              frames: result.frameCount,
+              fps: 16,
+            },
+          });
+
+          manager.finalizeStitchSuccess(promptId, generationId, {
+            id: generationId,
+            filePath,
+            frames: result.frameCount,
+            fps: 16,
+            seed: '0',
+            createdAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          // Delete partial output file (abort path may have already done this — idempotent)
+          await unlink(outputPath).catch(() => {});
+          // Remove the orphan DB row (stitch never completed)
+          await prisma.generation.delete({ where: { id: generationId } }).catch(() => {});
+          // no-op if job was already handled by abortJob()
+          manager.finalizeStitchError(promptId, String(err));
+        }
+      })();
+    },
+    cancel() {
+      if (capturedController) manager.removeSubscriber(promptId, capturedController);
+    },
+  });
+
+  return new Response(stream, { headers: SSE_HEADERS });
+}

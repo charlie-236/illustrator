@@ -271,7 +271,7 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           )}
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
-        {record.mediaType === 'video' && (
+        {record.mediaType === 'video' && !record.isStitched && (
           <p className="text-xs text-zinc-500">
             {'Project: '}
             {record.projectId && record.projectName ? (
@@ -285,6 +285,28 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
               <span className="text-zinc-600">None</span>
             )}
           </p>
+        )}
+        {record.isStitched && (
+          <>
+            <p className="text-xs text-zinc-500">
+              {'Stitched from project: '}
+              {record.parentProjectId && record.parentProjectName ? (
+                <button
+                  onClick={() => { onNavigateToProject?.(record.parentProjectId!); onClose(); }}
+                  className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+                >
+                  {record.parentProjectName}
+                </button>
+              ) : (
+                <span className="text-zinc-600">Project deleted</span>
+              )}
+            </p>
+            {record.stitchedClipIds && (
+              <p className="text-xs text-zinc-500">
+                Source clips: {(JSON.parse(record.stitchedClipIds) as string[]).length}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>

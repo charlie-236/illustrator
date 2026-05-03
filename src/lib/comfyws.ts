@@ -1,8 +1,9 @@
 import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, unlink } from 'fs/promises';
 import path from 'path';
 import type { Prisma } from '@prisma/client';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
 import type { GenerationParams } from '@/types';
 import { NodeSSH } from 'node-ssh';
 import { prisma } from './prisma';
@@ -59,14 +60,21 @@ interface VideoJob extends BaseJob {
   videoResult?: { filename: string; subfolder: string };
 }
 
-type Job = ImageJob | VideoJob;
+interface StitchJob extends BaseJob {
+  mediaType: 'stitch';
+  generationId: string;
+  outputPath: string;
+  childProcess: ChildProcessWithoutNullStreams | null;
+}
+
+type Job = ImageJob | VideoJob | StitchJob;
 
 // ─── recently-completed cache ─────────────────────────────────────────────────
 
 interface RecentlyCompletedEntry {
   promptId: string;
   generationId: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
   status: 'done' | 'error';
   errorMessage?: string;
@@ -78,7 +86,7 @@ interface RecentlyCompletedEntry {
 export interface ActiveJobInfo {
   promptId: string;
   generationId: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
   startedAt: number;
   progress: { current: number; total: number } | null;
@@ -400,9 +408,10 @@ class ComfyWSManager {
     pushSSE(job.controller, 'completing', {});
     if (job.mediaType === 'video') {
       void this.finalizeVideoJob(job);
-    } else {
+    } else if (job.mediaType === 'image') {
       void this.finalizeImageJob(job);
     }
+    // stitch jobs finalize via finalizeStitchSuccess/Error — not through this path
   }
 
   private async finalizeImageJob(job: ImageJob) {
@@ -602,7 +611,7 @@ class ComfyWSManager {
     job.finalized = true;
     job.timeoutId = null;
     if (this.activePromptId === promptId) this.activePromptId = null;
-    const mins = job.mediaType === 'video' ? 15 : 10;
+    const mins = job.mediaType === 'video' ? 15 : job.mediaType === 'stitch' ? 5 : 10;
     const message = `Generation timed out after ${mins} minutes`;
     this.addToRecentlyCompleted(job, 'error', message);
     pushSSE(job.controller, 'error', { message });
@@ -610,6 +619,9 @@ class ComfyWSManager {
     this.jobs.delete(promptId);
     if (job.mediaType === 'video') {
       void this.sshCleanupVideo(job.videoParams.filenamePrefix);
+    } else if (job.mediaType === 'stitch') {
+      if (job.childProcess && !job.childProcess.killed) job.childProcess.kill('SIGTERM');
+      void unlink(job.outputPath).catch(() => {});
     }
   }
 
@@ -619,9 +631,12 @@ class ComfyWSManager {
     errorMessage?: string,
     generationId?: string,
   ) {
+    const defaultId =
+      job.mediaType === 'video' ? job.videoParams.generationId :
+      job.mediaType === 'stitch' ? job.generationId : '';
     const entry: RecentlyCompletedEntry = {
       promptId: job.promptId,
-      generationId: generationId ?? (job.mediaType === 'video' ? job.videoParams.generationId : ''),
+      generationId: generationId ?? defaultId,
       mediaType: job.mediaType,
       promptSummary: job.promptSummary,
       status,
@@ -720,21 +735,30 @@ class ComfyWSManager {
     if (!job) return false;
     if (job.timeoutId != null) clearTimeout(job.timeoutId);
 
-    // Tell ComfyUI to stop the currently-executing workflow immediately.
-    // /interrupt is workflow-global — it cancels whatever is at the head of
-    // ComfyUI's queue, which in our single-user setup is always the job being
-    // aborted. Fire-and-forget; abort proceeds regardless of response.
-    fetch(`${COMFYUI_HTTP}/interrupt`, { method: 'POST' }).catch((err) => {
-      console.error(`[comfyws] /interrupt failed for ${promptId}:`, err);
-    });
-
-    // If this is a video job that hasn't been finalized, the file may have been
-    // (or be about to be) written to the VM. Fire-and-forget SSH cleanup; the
-    // glob is idempotent and will no-op if no file exists yet.
-    if (job.mediaType === 'video' && !job.finalized) {
-      this.sshCleanupVideo(job.videoParams.filenamePrefix).catch((err) => {
-        console.error(`[ComfyWS] SSH cleanup failed for aborted job ${promptId}:`, err);
+    if (job.mediaType === 'stitch') {
+      // Kill the ffmpeg child process; delete the partial output file.
+      // The route's catch block will also attempt cleanup (idempotent).
+      if (job.childProcess && !job.childProcess.killed) {
+        job.childProcess.kill('SIGTERM');
+      }
+      void unlink(job.outputPath).catch(() => {});
+    } else {
+      // Tell ComfyUI to stop the currently-executing workflow immediately.
+      // /interrupt is workflow-global — it cancels whatever is at the head of
+      // ComfyUI's queue, which in our single-user setup is always the job being
+      // aborted. Fire-and-forget; abort proceeds regardless of response.
+      fetch(`${COMFYUI_HTTP}/interrupt`, { method: 'POST' }).catch((err) => {
+        console.error(`[comfyws] /interrupt failed for ${promptId}:`, err);
       });
+
+      // If this is a video job that hasn't been finalized, the file may have been
+      // (or be about to be) written to the VM. Fire-and-forget SSH cleanup; the
+      // glob is idempotent and will no-op if no file exists yet.
+      if (job.mediaType === 'video' && !job.finalized) {
+        this.sshCleanupVideo(job.videoParams.filenamePrefix).catch((err) => {
+          console.error(`[ComfyWS] SSH cleanup failed for aborted job ${promptId}:`, err);
+        });
+      }
     }
 
     // Notify any live SSE subscriber, then close that stream.
@@ -777,9 +801,12 @@ class ComfyWSManager {
     // Active running jobs
     for (const job of this.jobs.values()) {
       if (!job.finalized) {
+        const generationId =
+          job.mediaType === 'video' ? job.videoParams.generationId :
+          job.mediaType === 'stitch' ? job.generationId : '';
         result.push({
           promptId: job.promptId,
-          generationId: job.mediaType === 'video' ? job.videoParams.generationId : '',
+          generationId,
           mediaType: job.mediaType,
           promptSummary: job.promptSummary,
           startedAt: job.startedAt,
@@ -810,6 +837,74 @@ class ComfyWSManager {
     for (const key of expiredKeys) this.recentlyCompleted.delete(key);
 
     return result;
+  }
+
+  // ─── stitch job management ────────────────────────────────────────────────
+
+  registerStitchJob(
+    promptId: string,
+    generationId: string,
+    outputPath: string,
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    promptSummary: string,
+    timeoutMs = 5 * 60 * 1000,
+  ) {
+    const timeoutId = setTimeout(() => this.expireJob(promptId), timeoutMs);
+    this.jobs.set(promptId, {
+      promptId,
+      mediaType: 'stitch',
+      generationId,
+      outputPath,
+      childProcess: null,
+      controller,
+      imageBuffers: [],
+      activeNode: null,
+      finalized: false,
+      timeoutId,
+      promptSummary,
+      startedAt: Date.now(),
+      progress: null,
+    });
+  }
+
+  setStitchProcess(promptId: string, cp: ChildProcessWithoutNullStreams) {
+    const job = this.jobs.get(promptId);
+    if (job && job.mediaType === 'stitch') job.childProcess = cp;
+  }
+
+  updateStitchProgress(promptId: string, progress: { current: number; total: number }) {
+    const job = this.jobs.get(promptId);
+    if (job && job.mediaType === 'stitch') {
+      job.progress = progress;
+      pushSSE(job.controller, 'progress', { value: progress.current, max: progress.total });
+    }
+  }
+
+  finalizeStitchSuccess(
+    promptId: string,
+    generationId: string,
+    data: { id: string; filePath: string; frames: number | null; fps: number | null; seed: string; createdAt: string },
+  ) {
+    const job = this.jobs.get(promptId);
+    if (!job || job.mediaType !== 'stitch' || job.finalized) return;
+    job.finalized = true;
+    if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+    this.jobs.delete(promptId);
+    this.addToRecentlyCompleted(job, 'done', undefined, generationId);
+    pushSSE(job.controller, 'completing', {});
+    pushSSE(job.controller, 'complete', data);
+    closeSSE(job.controller);
+  }
+
+  finalizeStitchError(promptId: string, message: string) {
+    const job = this.jobs.get(promptId);
+    if (!job || job.mediaType !== 'stitch' || job.finalized) return; // no-op if already aborted
+    job.finalized = true;
+    if (job.timeoutId !== null) clearTimeout(job.timeoutId);
+    this.jobs.delete(promptId);
+    this.addToRecentlyCompleted(job, 'error', message);
+    pushSSE(job.controller, 'error', { message });
+    closeSSE(job.controller);
   }
 
   getClientId() {
