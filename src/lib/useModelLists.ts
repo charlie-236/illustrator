@@ -12,6 +12,8 @@ export interface ModelLists {
   loraNames: Record<string, string>;
   loraTriggerWords: Record<string, string>;
   loraBaseModels: Record<string, string>;
+  loraAppliesToHigh: Record<string, boolean>;
+  loraAppliesToLow: Record<string, boolean>;
   embeddingNames: Record<string, string>;
   embeddingTriggerWords: Record<string, string>;
   embeddingBaseModels: Record<string, string>;
@@ -27,6 +29,8 @@ const EMPTY: ModelLists = {
   loraNames: {},
   loraTriggerWords: {},
   loraBaseModels: {},
+  loraAppliesToHigh: {},
+  loraAppliesToLow: {},
   embeddingNames: {},
   embeddingTriggerWords: {},
   embeddingBaseModels: {},
@@ -62,10 +66,14 @@ export function useModelLists(refreshToken?: number): {
         const loraNames: Record<string, string> = {};
         const loraTriggerWords: Record<string, string> = {};
         const loraBaseModels: Record<string, string> = {};
+        const loraAppliesToHigh: Record<string, boolean> = {};
+        const loraAppliesToLow: Record<string, boolean> = {};
         for (const l of loraConfigs) {
           if (l.friendlyName) loraNames[l.loraName] = l.friendlyName;
           if (l.triggerWords?.trim()) loraTriggerWords[l.loraName] = l.triggerWords;
           if (l.baseModel?.trim()) loraBaseModels[l.loraName] = l.baseModel;
+          loraAppliesToHigh[l.loraName] = l.appliesToHigh ?? true;
+          loraAppliesToLow[l.loraName] = l.appliesToLow ?? true;
         }
         const embeddingNames: Record<string, string> = {};
         const embeddingTriggerWords: Record<string, string> = {};
@@ -88,6 +96,8 @@ export function useModelLists(refreshToken?: number): {
           loraNames,
           loraTriggerWords,
           loraBaseModels,
+          loraAppliesToHigh,
+          loraAppliesToLow,
           embeddingNames,
           embeddingTriggerWords,
           embeddingBaseModels,

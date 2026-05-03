@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { buildT2VWorkflow, buildI2VWorkflow, WAN22_DEFAULT_NEGATIVE_PROMPT } from '@/lib/wan22-workflow';
 import { getComfyWSManager } from '@/lib/comfyws';
 import type { ComfyWorkflow } from '@/lib/wan22-workflow';
+import type { WanLoraSpec } from '@/types';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,7 @@ interface VideoRequest {
   startImageB64?: string;
   projectId?: string;
   lightning?: boolean;
+  loras?: WanLoraSpec[];
 }
 
 const SSE_HEADERS = {
@@ -64,6 +66,7 @@ export async function POST(req: NextRequest) {
 
   const { mode, prompt, negativePrompt, width, height, frames, steps, cfg, startImageB64 } = body;
   const lightning = body.lightning === true;
+  const loras: WanLoraSpec[] = Array.isArray(body.loras) ? body.loras : [];
 
   if (mode !== 't2v' && mode !== 'i2v') {
     return new Response(JSON.stringify({ error: "mode must be 't2v' or 'i2v'" }), { status: 400 });
@@ -140,6 +143,7 @@ export async function POST(req: NextRequest) {
     mode,
     outputDir,
     lightning,
+    loras,
     ...(body.projectId ? { projectId: body.projectId } : {}),
   };
 

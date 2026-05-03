@@ -1,5 +1,6 @@
 import t2vTemplate from './wan22-templates/wan22-t2v.json';
 import i2vTemplate from './wan22-templates/wan22-i2v.json';
+import type { WanLoraSpec } from '@/types';
 
 export type ComfyWorkflow = Record<string, {
   class_type: string;
@@ -25,6 +26,8 @@ export interface VideoParams {
   seed: number;
   /** When true, injects lightx2v Lightning LoRAs, forces steps=4, CFG=1, sampler=lcm. */
   lightning?: boolean;
+  /** User-supplied Wan LoRAs to stack after Lightning (if any) and before ModelSamplingSD3. */
+  loras?: WanLoraSpec[];
 }
 
 function deepClone(obj: unknown): ComfyWorkflow {
@@ -53,11 +56,14 @@ function applyCfg(wf: ComfyWorkflow, cfg: number): void {
   wf['58'].inputs.cfg = cfg;
 }
 
-// Inject lightx2v Lightning LoRAs and rewire ModelSamplingSD3 nodes.
-// nodes 37 (high-noise UNETLoader) and 56 (low-noise UNETLoader) are the
-// existing UNET loaders. Lightning LoRAs wrap each one as nodes 100/101,
-// then ModelSamplingSD3 nodes 54/55 are rewired to consume the LoRA outputs.
-function applyLightning(wf: ComfyWorkflow, variant: 'wan22-lightning-t2v' | 'wan22-lightning-i2v'): void {
+// Inject lightx2v Lightning LoRAs as nodes 100/101.
+// Returns the updated high/low model refs so the caller can chain user LoRAs after.
+// ModelSamplingSD3 (54/55) is NOT rewired here — the caller does it after injecting
+// any user LoRAs so the final chain is: UNETLoader → Lightning LoRA → user LoRAs → SD3.
+function applyLightning(
+  wf: ComfyWorkflow,
+  variant: 'wan22-lightning-t2v' | 'wan22-lightning-i2v',
+): { highModelRef: [string, number]; lowModelRef: [string, number] } {
   wf['100'] = {
     class_type: 'LoraLoaderModelOnly',
     inputs: {
@@ -77,13 +83,60 @@ function applyLightning(wf: ComfyWorkflow, variant: 'wan22-lightning-t2v' | 'wan
     _meta: { title: 'Lightning LoRA (low noise)' },
   };
 
-  // Rewire ModelSamplingSD3 nodes to consume LoRA outputs instead of UNETLoaders
-  wf['54'].inputs.model = ['100', 0];
-  wf['55'].inputs.model = ['101', 0];
-
   // LCM sampler required for Lightning distillation
   wf['57'].inputs.sampler_name = 'lcm';
   wf['58'].inputs.sampler_name = 'lcm';
+
+  return { highModelRef: ['100', 0], lowModelRef: ['101', 0] };
+}
+
+// Inject user Wan LoRAs starting at the given node ID offset.
+// Chains after highModelRef/lowModelRef and returns the final refs.
+// ModelSamplingSD3 (54/55) is rewired to the final refs.
+// User LoRA nodes start at ID 200 (Lightning reserves 100/101).
+function applyUserLoras(
+  wf: ComfyWorkflow,
+  loras: WanLoraSpec[],
+  initialHighRef: [string, number],
+  initialLowRef: [string, number],
+): void {
+  let highModelRef = initialHighRef;
+  let lowModelRef = initialLowRef;
+  let nextNodeId = 200;
+
+  for (const lora of loras) {
+    if (lora.appliesToHigh) {
+      const id = String(nextNodeId++);
+      wf[id] = {
+        class_type: 'LoraLoaderModelOnly',
+        inputs: {
+          lora_name: lora.loraName,   // obfuscated filename — ComfyUI resolves on-disk file
+          strength_model: lora.weight,
+          model: highModelRef,
+        },
+        _meta: { title: `LoRA (high): ${lora.friendlyName}` },
+      };
+      highModelRef = [id, 0];
+    }
+    if (lora.appliesToLow) {
+      const id = String(nextNodeId++);
+      wf[id] = {
+        class_type: 'LoraLoaderModelOnly',
+        inputs: {
+          lora_name: lora.loraName,
+          strength_model: lora.weight,
+          model: lowModelRef,
+        },
+        _meta: { title: `LoRA (low): ${lora.friendlyName}` },
+      };
+      lowModelRef = [id, 0];
+    }
+  }
+
+  // Always rewire ModelSamplingSD3 to the final model refs.
+  // For no-user-LoRA cases this just re-applies the same ref already in the template.
+  wf['54'].inputs.model = highModelRef;
+  wf['55'].inputs.model = lowModelRef;
 }
 
 export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
@@ -101,14 +154,23 @@ export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
   // Seed
   wf['57'].inputs.noise_seed = params.seed;
 
+  // Base model refs: UNETLoader nodes 37 (high) and 56 (low)
+  let highModelRef: [string, number] = ['37', 0];
+  let lowModelRef: [string, number] = ['56', 0];
+
   if (params.lightning) {
-    applyLightning(wf, 'wan22-lightning-t2v');
+    const refs = applyLightning(wf, 'wan22-lightning-t2v');
+    highModelRef = refs.highModelRef;
+    lowModelRef = refs.lowModelRef;
     applySteps(wf, 4);
     applyCfg(wf, 1);
   } else {
     applySteps(wf, params.steps);
     applyCfg(wf, params.cfg);
   }
+
+  // Inject user LoRAs (chains after Lightning if active) and rewire ModelSamplingSD3
+  applyUserLoras(wf, params.loras ?? [], highModelRef, lowModelRef);
 
   // SaveWEBM filename prefix — random hex string, set by the route
   wf['47'].inputs.filename_prefix = params.filenamePrefix;
@@ -134,14 +196,23 @@ export function buildI2VWorkflow(params: VideoParams & { startImageB64: string }
   // Seed
   wf['57'].inputs.noise_seed = params.seed;
 
+  // Base model refs: UNETLoader nodes 37 (high) and 56 (low)
+  let highModelRef: [string, number] = ['37', 0];
+  let lowModelRef: [string, number] = ['56', 0];
+
   if (params.lightning) {
-    applyLightning(wf, 'wan22-lightning-i2v');
+    const refs = applyLightning(wf, 'wan22-lightning-i2v');
+    highModelRef = refs.highModelRef;
+    lowModelRef = refs.lowModelRef;
     applySteps(wf, 4);
     applyCfg(wf, 1);
   } else {
     applySteps(wf, params.steps);
     applyCfg(wf, params.cfg);
   }
+
+  // Inject user LoRAs (chains after Lightning if active) and rewire ModelSamplingSD3
+  applyUserLoras(wf, params.loras ?? [], highModelRef, lowModelRef);
 
   // SaveWEBM filename prefix — random hex string, set by the route
   wf['47'].inputs.filename_prefix = params.filenamePrefix;

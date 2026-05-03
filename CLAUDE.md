@@ -24,7 +24,11 @@ Runtime enforcement: the `/api/generate` route includes a structural assertion t
 ### 3. Tablet-first application
 This is a tablet-first application. Every interactive element MUST have a minimum touch target of 48x48 pixels. Use Tailwind classes like min-h-12, min-w-12, p-3, or p-4 to ensure they are easily tappable.
 
-### 4. Network & API Routing Rules
+### 4. Model filename obfuscation
+
+Model filenames (LoRAs, checkpoints, embeddings) are obfuscated at ingest time. `civitaiIngest.ts` generates a 6-byte hex stem via `randomBytes(6).toString('hex')`; the file lands on disk as `<hex>.safetensors`; `LoraConfig.loraName` (and equivalents for checkpoints/embeddings) stores that obfuscated string. The user-visible identifier everywhere — UI rows, picker labels, workflow `_meta.title`, logs, error messages — is `friendlyName`. The **only** place the obfuscated `loraName` appears observably is the `lora_name` field of `LoraLoader` / `LoraLoaderModelOnly` nodes in workflow JSON sent to ComfyUI, where it's required for ComfyUI to resolve the on-disk file.
+
+### 5. Network & API Routing Rules
 All communication between the Next.js frontend/backend and the A100 Core VM MUST route through the established local SSH tunnels. The Next.js API should NEVER attempt to contact `100.96.99.94` directly. 
 
 Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
@@ -549,9 +553,22 @@ Reference workflows from lightx2v are stashed in `loras/_reference/`. If lightx2
 
 When `lightning: true` is sent to `/api/generate-video`, the route silently overrides whatever `steps` and `cfg` the caller sent (debug-logged). The Studio UI already locks those fields visually when the toggle is on. The DB record stores `model: 'wan2.2-t2v-lightning'` (or `-i2v-lightning`) and `sampler: 'lcm'` for lightning generations; full-quality generations remain `euler`.
 
+### Wan LoRA support
+
+Wan 2.2 LoRAs from CivitAI use the same ingest pipeline (with the same 6-byte hex filename obfuscation) as SD LoRAs but require two booleans (`appliesToHigh`, `appliesToLow`) on `LoraConfig`, indicating which UNet expert(s) they affect. Most Wan LoRAs apply to both (both default to `true`). Single-expert LoRAs can be adjusted via the Models tab after ingest.
+
+The video form's LoRA stack injects `LoraLoaderModelOnly` nodes per LoRA per applicable expert, chained between UNETLoader (or Lightning's loader at nodes 100/101) and ModelSamplingSD3 (nodes 54/55). User LoRA nodes start at ID 200; Lightning reserves 100/101. When Lightning is active, user LoRAs chain after Lightning LoRAs: the full sequence is UNETLoader → Lightning LoRA (100/101) → user LoRAs (200+) → ModelSamplingSD3. Lightning + user LoRA combinations are flagged "experimental" in the UI since Lightning was distilled against the bare base model, not against arbitrary LoRA stacks.
+
+Base model canonical string: `'Wan 2.2'` (normalised from CivitAI's various spellings such as `"Wan Video 2.2"` by `normalizeBaseModel()` in `registerModel.ts`).
+
+The LoRA picker filters by base model: video mode shows only LoRAs with `baseModel === 'Wan 2.2'`; image mode shows all LoRAs (matches sorted to top). The Models tab shows all LoRAs unfiltered.
+
+Project `defaultVideoLoras` stores a JSON-encoded `WanLoraSpec[]` in the `Project` DB row. New clips generated in a project pre-fill the Studio video LoRA stack from this default. The stored `WanLoraSpec` includes both `loraName` (obfuscated) and `friendlyName` (human-readable); the `friendlyName` can become stale if the LoRA is renamed in the Models tab, but the `loraName` remains correct for ComfyUI resolution.
+
 ### `/api/generate-video` endpoint
 
-**Request:** POST with JSON body `{ mode, prompt, negativePrompt?, width, height, frames, steps, cfg, seed?, startImageB64?, lightning? }`.
+**Request:** POST with JSON body `{ mode, prompt, negativePrompt?, width, height, frames, steps, cfg, seed?, startImageB64?, lightning?, loras? }`.
+`loras` is an optional `WanLoraSpec[]` — omit or pass `[]` for no user LoRAs.
 
 **Response:** SSE stream. Events:
 | event | data shape |

@@ -33,6 +33,8 @@ export async function PUT(req: NextRequest) {
     triggerWords: string;
     baseModel: string;
     description?: string;
+    appliesToHigh?: boolean;
+    appliesToLow?: boolean;
   };
   try {
     body = await req.json();
@@ -43,17 +45,20 @@ export async function PUT(req: NextRequest) {
   const { loraName, friendlyName, triggerWords, baseModel, description } = body;
   if (!loraName) return NextResponse.json({ error: 'loraName required' }, { status: 400 });
 
-  const data = {
+  const shared = {
     friendlyName: friendlyName ?? '',
     triggerWords: triggerWords ?? '',
     baseModel: baseModel ?? '',
     description: description?.trim() || null,
+    ...(body.appliesToHigh !== undefined && { appliesToHigh: Boolean(body.appliesToHigh) }),
+    ...(body.appliesToLow !== undefined && { appliesToLow: Boolean(body.appliesToLow) }),
   };
+
   try {
     const config = await prisma.loraConfig.upsert({
       where: { loraName },
-      create: { loraName, ...data },
-      update: data,
+      create: { loraName, ...shared },
+      update: shared,
     });
     return NextResponse.json(config);
   } catch (err) {
