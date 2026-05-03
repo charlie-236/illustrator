@@ -9,10 +9,22 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const g = await prisma.generation.findUnique({ where: { id }, include: { project: { select: { name: true } } } });
+    const g = await prisma.generation.findUnique({
+      where: { id },
+      include: {
+        project: { select: { name: true } },
+        parentProject: { select: { name: true } },
+      },
+    });
     if (!g) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    const { project, ...rest } = g;
-    return NextResponse.json({ ...rest, seed: rest.seed.toString(), createdAt: rest.createdAt.toISOString(), projectName: project?.name ?? null });
+    const { project, parentProject, ...rest } = g;
+    return NextResponse.json({
+      ...rest,
+      seed: rest.seed.toString(),
+      createdAt: rest.createdAt.toISOString(),
+      projectName: project?.name ?? null,
+      parentProjectName: parentProject?.name ?? null,
+    });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

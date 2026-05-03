@@ -59,6 +59,10 @@ export interface GenerationRecord {
   fps: number | null;
   projectId: string | null;
   projectName: string | null;
+  isStitched: boolean;
+  parentProjectId: string | null;
+  parentProjectName: string | null;
+  stitchedClipIds: string | null;
   createdAt: string;
 }
 
@@ -71,6 +75,15 @@ export interface ProjectSummary {
   coverFrame: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectStitchedExport {
+  id: string;
+  filePath: string;
+  frames: number | null;
+  fps: number | null;
+  createdAt: string;
+  promptPos: string;
 }
 
 export interface ProjectClip {

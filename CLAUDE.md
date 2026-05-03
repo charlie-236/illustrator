@@ -333,8 +333,10 @@ src/
       jobs/active/route.ts         GET  — returns running + recently-completed jobs from comfyws singleton
       jobs/[promptId]/route.ts     DELETE — aborts a job (abortJob → error SSE + SSH cleanup)
       jobs/[promptId]/abort/route.ts  POST — same as DELETE; preferred explicit-abort endpoint
+      projects/[id]/stitch/route.ts   POST — SSE video stitching; runs ffmpeg on mint-pc; emits init/progress/completing/complete/error
   lib/
-    comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert; tracks promptSummary/startedAt/progress per job; recentlyCompleted cache (5 min); getActiveJobs()
+    comfyws.ts          WS singleton, binary parsing, SSE fan-out, file save, DB insert; tracks promptSummary/startedAt/progress per job; recentlyCompleted cache (5 min); getActiveJobs(); StitchJob + registerStitchJob/finalizeStitchSuccess/finalizeStitchError
+    stitch.ts           stitchProject() — ffmpeg-based video concatenation with hard-cut or crossfade (0.5s); four code paths based on transition type and resolution homogeneity
     notification.ts     playChime() Web Audio API bell tone; requestNotificationPermission(); sendBrowserNotification()
     workflow.ts         buildWorkflow() — image path
     wan22-workflow.ts   buildT2VWorkflow(), buildI2VWorkflow() — Wan 2.2 video path; exports VideoParams, ComfyWorkflow
@@ -347,8 +349,8 @@ src/
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
     useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config + /api/embedding-config; consumed by ModelSelect and ModelConfig
   types/
-    index.ts            GenerationParams, GenerationRecord (now includes projectId/projectName), ModelInfo (now includes embeddings[]), EmbeddingConfig,
-                        ProjectSummary, ProjectDetail, ProjectClip, SSEEvent, SAMPLERS, SCHEDULERS, RESOLUTIONS constants
+    index.ts            GenerationParams, GenerationRecord (now includes projectId/projectName/isStitched/parentProjectId/parentProjectName/stitchedClipIds), ModelInfo (now includes embeddings[]), EmbeddingConfig,
+                        ProjectSummary, ProjectDetail, ProjectClip, ProjectStitchedExport, SSEEvent, SAMPLERS, SCHEDULERS, RESOLUTIONS constants
   components/
     TabNav.tsx          sticky header with Studio / Projects / Gallery / Models / Admin tabs
     Studio.tsx          full generation form; form never locks; integrates useQueue for job tracking; on mount calls /api/jobs/active for post-refresh recovery
@@ -360,9 +362,9 @@ src/
     ParamSlider.tsx     range slider + number input pair
     GenerationProgress.tsx  progress bar (during gen) or result image (on complete)
     Gallery.tsx         3-col image grid, cursor-based infinite-scroll via IntersectionObserver, opens ImageModal; accepts onNavigateToProject callback
-    ImageModal.tsx      bottom-sheet modal with full image + all metadata fields; shows Project link for video clips
+    ImageModal.tsx      bottom-sheet modal with full image + all metadata fields; shows Project link for video clips; shows Stitched-from-project + source clip count for stitched videos
     Projects.tsx        Projects tab — 2-col project card grid, New Project modal
-    ProjectDetail.tsx   Project detail view — inline-editable header, horizontal DnD clip strip (@dnd-kit), Settings modal
+    ProjectDetail.tsx   Project detail view — inline-editable header, horizontal DnD clip strip (@dnd-kit), Settings modal, Stitch button + StitchModal, stitched exports section
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
@@ -724,6 +726,82 @@ Single `<video ref={playerRef}>` element. `playingIdx` state tracks the current 
 - "Play again" button at end resets to index 0.
 - Wan 2.2 generates no audio; no click/gap handling needed at this stage. Video stitching (Phase 3) will solve seamless playback.
 - Toggle hidden when project has 0 or 1 clips.
+
+---
+
+## Video stitching (Phase 3)
+
+### Overview
+
+The **Stitch** button in `ProjectDetail` combines a project's video clips into a single mp4 file. ffmpeg runs locally on mint-pc — no VM involvement. The resulting file is saved to `IMAGE_OUTPUT_DIR` and appears in the unified Gallery with an emerald **Stitched** badge.
+
+### Schema additions (Phase 3)
+
+```prisma
+// New fields on Generation:
+isStitched       Boolean  @default(false)
+parentProjectId  String?
+parentProject    Project? @relation("StitchedFromProject", fields: [parentProjectId], references: [id], onDelete: SetNull)
+stitchedClipIds  String?   // JSON array of source clip IDs
+
+// Existing relation explicitly named (required when two relations exist between same models):
+project          Project? @relation("ProjectClips", fields: [projectId], references: [id], onDelete: SetNull)
+
+// New on Project model:
+generations     Generation[] @relation("ProjectClips")
+stitchedExports Generation[] @relation("StitchedFromProject")
+```
+
+Migration: `prisma/migrations/20260504000000_add_stitched_exports/migration.sql`
+
+### `src/lib/stitch.ts`
+
+Core ffmpeg helper. Exports:
+
+```ts
+export async function stitchProject(params: {
+  clipPaths: string[];
+  outputPath: string;
+  transition: 'hard-cut' | 'crossfade';
+  onProgress?: (frame: number, totalFrames: number) => void;
+  onChildProcess?: (cp: ChildProcessWithoutNullStreams) => void;
+}): Promise<{ width: number; height: number; durationSeconds: number; frameCount: number }>
+```
+
+Internal helpers: `parseFps()`, `probeClip()` (ffprobe JSON), `runFfmpeg()` (spawns ffmpeg, parses `-progress pipe:2 -nostats` lines for frame-by-frame progress). Four code paths: hard-cut+same-res (concat demuxer), hard-cut+mixed-res (concat filter with scale), crossfade+same-res (xfade chain), crossfade+mixed-res (pre-scale + xfade chain). xfade offset: `cumulOffset += prevDuration - crossfadeDuration`. Concat list temp file deleted in `finally`. ffmpeg is spawned with an array of args (never shell-interpolated).
+
+### `POST /api/projects/[id]/stitch`
+
+SSE route. Body: `{ transition?: 'hard-cut' | 'crossfade' }` (default hard-cut). Requires ≥ 2 video clips. Creates a pending `Generation` row (`isStitched: true`, `parentProjectId`, `stitchedClipIds`), emits an `init` SSE with `{ promptId, generationId }`, registers the job in `ComfyWSManager`, then fires `stitchProject()` fire-and-forget.
+
+SSE events:
+| event | data |
+|---|---|
+| `init` | `{ promptId, generationId }` |
+| `progress` | `{ value: number, max: number }` |
+| `completing` | `{}` |
+| `complete` | `{ id, filePath, frames, fps, seed, createdAt }` |
+| `error` | `{ message: string }` |
+
+On success: updates the `Generation` row with `width/height/frames/fps`, then calls `manager.finalizeStitchSuccess()`. On error: `unlink(outputPath)` + `prisma.generation.delete()` + `manager.finalizeStitchError()`. Client disconnect (req.signal abort) detaches the SSE subscriber but does NOT kill ffmpeg (refresh survivability). Explicit abort (`DELETE /api/jobs/[promptId]`) calls `abortJob()` → kills the ffmpeg child process via SIGTERM + deletes the partial output file.
+
+### `ComfyWSManager` additions (Phase 3)
+
+New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `registerStitchJob()`, `setStitchProcess()`, `updateStitchProgress()`, `finalizeStitchSuccess()` (no-op if already finalized), `finalizeStitchError()` (no-op if already aborted). `abortJob()` for stitch jobs kills the child process and deletes the partial output — no `/interrupt` call to ComfyUI.
+
+### UI
+
+**Stitch button** — sits alongside "Generate new clip" in `ProjectDetail`. Disabled (with tooltip) when clip count < 2.
+
+**`StitchModal`** — bottom sheet. Idle state: transition selector (hard-cut / crossfade 0.5s) + "Stitch N clips" button. Running state: ffmpeg progress bar + Abort button. Done state: success message + Close button. Error state: error text + Try again / Close buttons. Wires into `QueueContext` (`addJob`, `setCompleting`, `completeJob`, `failJob`) so the stitch appears in `QueueTray`.
+
+**Stitched exports section** — below the clip strip in `ProjectDetail`. Shows each stitched export with a video thumbnail, duration, frame count, date, and a download link. Prepended optimistically when a new stitch completes.
+
+**Gallery badge** — emerald **Stitched** pill in the top-left corner of Gallery tiles with `isStitched: true`.
+
+**`ImageModal` metadata** — stitched videos show "Stitched from project: [name]" (tappable link to project) or "Project deleted" if `parentProjectId` is null. Also shows "Source clips: N" from `stitchedClipIds`.
+
+**`QueueTray`** — stitch jobs show a chain/link SVG icon in `text-emerald-400`.
 
 ---
 

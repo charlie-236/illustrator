@@ -251,6 +251,13 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
               </div>
             )}
 
+            {/* Stitched badge — top-left corner, distinguishes assembled exports from raw clips */}
+            {item.isStitched && (
+              <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-emerald-700/90 text-white text-xs font-medium pointer-events-none select-none">
+                Stitched
+              </div>
+            )}
+
             {/* Heart — always visible when favorited, visible on hover otherwise */}
             <button
               onClick={(e) => { e.stopPropagation(); handleFavoriteToggle(item.id); }}

@@ -8,49 +8,54 @@ datasource db {
 }
 
 model Generation {
-  id           String   @id @default(cuid())
-  filePath     String
-  promptPos    String
-  promptNeg    String
-  model        String
-  lora         String?                  // human-readable summary, e.g. "name (1.00), name2 (0.80)"
-  lorasJson    Json?                    // structured: [{name: string, weight: number}, ...] or null
-  assembledPos String?                  // final positive prompt sent to ComfyUI (defaults + triggers + user); null for legacy records
-  assembledNeg String?                  // final negative prompt sent to ComfyUI; null for legacy records
-  seed         BigInt
-  cfg          Float
-  steps        Int
-  width        Int
-  height       Int
-  sampler      String   @default("euler")
-  scheduler    String   @default("normal")
-  highResFix   Boolean  @default(false)
-  isFavorite   Boolean  @default(false)
-  mediaType    String   @default("image")  // "image" | "video"
-  frames       Int?                         // null for images; frame count for videos
-  fps          Int?                         // null for images; frame rate for videos
-  projectId    String?
-  project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  position     Int?                         // null for non-project generations; sort order within a project
-  createdAt    DateTime @default(now())
+  id               String   @id @default(cuid())
+  filePath         String
+  promptPos        String
+  promptNeg        String
+  model            String
+  lora             String?                  // human-readable summary, e.g. "name (1.00), name2 (0.80)"
+  lorasJson        Json?                    // structured: [{name: string, weight: number}, ...] or null
+  assembledPos     String?                  // final positive prompt sent to ComfyUI (defaults + triggers + user); null for legacy records
+  assembledNeg     String?                  // final negative prompt sent to ComfyUI; null for legacy records
+  seed             BigInt
+  cfg              Float
+  steps            Int
+  width            Int
+  height           Int
+  sampler          String   @default("euler")
+  scheduler        String   @default("normal")
+  highResFix       Boolean  @default(false)
+  isFavorite       Boolean  @default(false)
+  mediaType        String   @default("image")  // "image" | "video"
+  frames           Int?                         // null for images; frame count for videos
+  fps              Int?                         // null for images; frame rate for videos
+  projectId        String?
+  project          Project? @relation("ProjectClips", fields: [projectId], references: [id], onDelete: SetNull)
+  position         Int?                         // null for non-project generations; sort order within a project
+  isStitched       Boolean  @default(false)     // true for stitched-export gallery entries
+  parentProjectId  String?                      // source project for stitched outputs
+  parentProject    Project? @relation("StitchedFromProject", fields: [parentProjectId], references: [id], onDelete: SetNull)
+  stitchedClipIds  String?                      // JSON array of source generation IDs
+  createdAt        DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
   @@index([projectId])
 }
 
 model Project {
-  id             String       @id @default(cuid())
-  name           String
-  description    String?
-  styleNote      String?
-  defaultFrames  Int?
-  defaultSteps   Int?
-  defaultCfg     Float?
-  defaultWidth   Int?
-  defaultHeight  Int?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  generations    Generation[]
+  id              String       @id @default(cuid())
+  name            String
+  description     String?
+  styleNote       String?
+  defaultFrames   Int?
+  defaultSteps    Int?
+  defaultCfg      Float?
+  defaultWidth    Int?
+  defaultHeight   Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  generations     Generation[] @relation("ProjectClips")
+  stitchedExports Generation[] @relation("StitchedFromProject")
 }
 
 model CheckpointConfig {

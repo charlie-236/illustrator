@@ -143,7 +143,11 @@ function JobRow({
       {/* Row header: icon + prompt + actions */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0 pt-0.5">
-          {job.mediaType === 'video' ? (
+          {job.mediaType === 'stitch' ? (
+            <svg className="w-3.5 h-3.5 flex-shrink-0 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+          ) : job.mediaType === 'video' ? (
             <svg className="w-3.5 h-3.5 flex-shrink-0 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
             </svg>
@@ -153,7 +157,10 @@ function JobRow({
             </svg>
           )}
           <span className="text-sm text-zinc-200 truncate leading-snug">
-            {job.promptSummary || (job.mediaType === 'video' ? 'Video generation' : 'Image generation')}
+            {job.promptSummary || (
+              job.mediaType === 'stitch' ? 'Project stitch' :
+              job.mediaType === 'video' ? 'Video generation' : 'Image generation'
+            )}
           </span>
         </div>
 

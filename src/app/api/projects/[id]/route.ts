@@ -61,6 +61,17 @@ export async function GET(
             isFavorite: true,
           },
         },
+        stitchedExports: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            filePath: true,
+            frames: true,
+            fps: true,
+            createdAt: true,
+            promptPos: true,
+          },
+        },
       },
     });
 
@@ -93,6 +104,14 @@ export async function GET(
         position: g.position ?? 0,
         createdAt: g.createdAt.toISOString(),
         isFavorite: g.isFavorite,
+      })),
+      stitchedExports: project.stitchedExports.map((e) => ({
+        id: e.id,
+        filePath: e.filePath,
+        frames: e.frames,
+        fps: e.fps,
+        createdAt: e.createdAt.toISOString(),
+        promptPos: e.promptPos,
       })),
     });
   } catch (err) {
