@@ -43,7 +43,7 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     filePath: clip.filePath,
     promptPos: clip.prompt,
     promptNeg: '',
-    model: 'wan2.2',
+    model: clip.mediaType === 'image' ? 'unknown' : 'wan2.2',
     lora: null,
     lorasJson: null,
     assembledPos: null,
@@ -57,9 +57,9 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     scheduler: 'simple',
     highResFix: false,
     isFavorite: clip.isFavorite,
-    mediaType: 'video',
-    frames: clip.frames,
-    fps: clip.fps,
+    mediaType: clip.mediaType,
+    frames: clip.frames || null,
+    fps: clip.fps || null,
     projectId,
     projectName,
     isStitched: false,
@@ -313,7 +313,8 @@ function SortableClipTile({ clip, index, onClick }: SortableClipTileProps) {
     zIndex: isDragging ? 50 : undefined,
   };
 
-  const durationSec = clip.fps > 0 ? (clip.frames / clip.fps).toFixed(1) : '0.0';
+  const isVideo = clip.mediaType === 'video';
+  const durationSec = isVideo && clip.fps > 0 ? (clip.frames / clip.fps).toFixed(1) : null;
 
   return (
     <div
@@ -324,22 +325,33 @@ function SortableClipTile({ clip, index, onClick }: SortableClipTileProps) {
       {...listeners}
       onClick={onClick}
     >
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video
-        src={imgSrc(clip.filePath)}
-        preload="metadata"
-        muted
-        playsInline
-        className="w-full aspect-video object-cover bg-zinc-800"
-      />
+      {isVideo ? (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video
+          src={imgSrc(clip.filePath)}
+          preload="metadata"
+          muted
+          playsInline
+          className="w-full aspect-video object-cover bg-zinc-800"
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imgSrc(clip.filePath)}
+          alt={clip.prompt.slice(0, 40)}
+          className="w-full aspect-video object-cover bg-zinc-800"
+        />
+      )}
       {/* Position badge */}
       <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-bold select-none pointer-events-none">
         {index + 1}
       </div>
-      {/* Duration badge */}
-      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-medium select-none pointer-events-none">
-        {durationSec}s
-      </div>
+      {/* Duration badge — video only */}
+      {durationSec !== null && (
+        <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-medium select-none pointer-events-none">
+          {durationSec}s
+        </div>
+      )}
       {/* Drag handle hint on hover */}
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
     </div>
@@ -561,11 +573,24 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [descValue, setDescValue] = useState('');
   const [descSaving, setDescSaving] = useState(false);
 
+  // Strip media type filter
+  const [stripFilter, setStripFilter] = useState<'all' | 'images' | 'videos'>('all');
+
   // Play-through state
   const [playThrough, setPlayThrough] = useState(false);
   const [playingIdx, setPlayingIdx] = useState(0);
   const [playDone, setPlayDone] = useState(false);
   const playerRef = useRef<HTMLVideoElement>(null);
+
+  // Video clips only — used for play-through
+  const videoClips = clips.filter((c) => c.mediaType === 'video');
+
+  // Filtered clips for strip display
+  const filteredClips = stripFilter === 'images'
+    ? clips.filter((c) => c.mediaType === 'image')
+    : stripFilter === 'videos'
+      ? clips.filter((c) => c.mediaType === 'video')
+      : clips;
 
   // When the active clip index changes in play-through mode, reload and play
   useEffect(() => {
@@ -698,7 +723,15 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }
   }
 
+  // Modal records: all clips, unfiltered
   const modalRecords = clips.map((c) => clipToRecord(c, projectId, project?.name ?? ''));
+
+  // Index in `modalRecords` for a given filtered index (to keep modal navigation consistent with filtered view)
+  function filteredIndexToModalIndex(filteredIdx: number): number {
+    const clip = filteredClips[filteredIdx];
+    if (!clip) return 0;
+    return clips.findIndex((c) => c.id === clip.id);
+  }
 
   if (loading || !project) {
     return (
@@ -868,7 +901,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             {clips.length === 0 ? 'No clips' : `${clips.length} ${clips.length === 1 ? 'clip' : 'clips'}`}
           </p>
           <div className="flex items-center gap-2">
-            {clips.length > 1 && (
+            {/* Play-through toggle — only visible when ≥2 video clips */}
+            {videoClips.length > 1 && (
               <button
                 onClick={() => {
                   setPlayThrough((v) => {
@@ -887,11 +921,29 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                 {playThrough ? 'Strip view' : 'Play all'}
               </button>
             )}
-            {clips.length > 1 && !playThrough && (
+            {!playThrough && clips.length > 1 && (
               <p className="text-xs text-zinc-600">Drag to reorder</p>
             )}
           </div>
         </div>
+
+        {/* Media type filter — only when there are both image and video clips */}
+        {!playThrough && clips.length > 0 && videoClips.length > 0 && videoClips.length < clips.length && (
+          <div className="flex gap-1.5 mb-3">
+            {(['all', 'images', 'videos'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setStripFilter(f)}
+                className={`min-h-8 px-3 rounded-lg text-xs font-medium border transition-colors
+                  ${stripFilter === f
+                    ? 'border-violet-500 bg-violet-600/20 text-violet-300'
+                    : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
+              >
+                {f === 'all' ? 'All' : f === 'images' ? 'Images' : 'Videos'}
+              </button>
+            ))}
+          </div>
+        )}
 
         {reorderError && (
           <p className="text-xs text-red-400 mb-2">{reorderError}</p>
@@ -902,17 +954,17 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             No clips yet. Tap &quot;Generate new clip&quot; above to get started.
           </div>
         ) : playThrough ? (
-          /* ── Play-through player ── */
+          /* ── Play-through player (video clips only) ── */
           <div className="space-y-3">
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video
               ref={playerRef}
-              src={imgSrc(clips[playingIdx]?.filePath ?? '')}
+              src={imgSrc(videoClips[playingIdx]?.filePath ?? '')}
               controls
               autoPlay
               playsInline
               onEnded={() => {
-                if (playingIdx < clips.length - 1) {
+                if (playingIdx < videoClips.length - 1) {
                   setPlayingIdx((i) => i + 1);
                   setPlayDone(false);
                 } else {
@@ -924,7 +976,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
             <div className="flex items-center justify-between">
               <p className="text-xs text-zinc-400 tabular-nums">
-                Clip {playingIdx + 1} of {clips.length}
+                Clip {playingIdx + 1} of {videoClips.length}
               </p>
               {playDone && (
                 <button
@@ -938,7 +990,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
             {/* Clip chips */}
             <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
-              {clips.map((c, i) => (
+              {videoClips.map((c, i) => (
                 <button
                   key={c.id}
                   onClick={() => { setPlayingIdx(i); setPlayDone(false); }}
@@ -957,12 +1009,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={clips.map((c) => c.id)} strategy={horizontalListSortingStrategy}>
               <div className="flex gap-3 overflow-x-auto pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-                {clips.map((clip, i) => (
+                {filteredClips.map((clip, i) => (
                   <SortableClipTile
                     key={clip.id}
                     clip={clip}
-                    index={i}
-                    onClick={() => setModalIdx(i)}
+                    index={clips.indexOf(clip)}
+                    onClick={() => setModalIdx(filteredIndexToModalIndex(i))}
                   />
                 ))}
               </div>
@@ -992,6 +1044,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
               body: JSON.stringify({ isFavorite: !clip.isFavorite }),
             });
             setClips((prev) => prev.map((c) => c.id === id ? { ...c, isFavorite: !c.isFavorite } : c));
+          }}
+          onProjectAssign={(id, newProjectId) => {
+            if (newProjectId !== projectId) {
+              // Clip was moved away from this project — remove from strip
+              setClips((prev) => prev.filter((c) => c.id !== id));
+            }
           }}
         />
       )}

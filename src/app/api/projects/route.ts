@@ -46,10 +46,9 @@ export async function GET() {
       include: {
         _count: { select: { generations: true } },
         generations: {
-          where: { mediaType: 'video' },
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { filePath: true },
+          select: { filePath: true, mediaType: true },
         },
       },
     });
@@ -61,6 +60,7 @@ export async function GET() {
       styleNote: p.styleNote,
       clipCount: p._count.generations,
       coverFrame: p.generations[0]?.filePath ?? null,
+      coverMediaType: p.generations[0]?.mediaType ?? null,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     }));

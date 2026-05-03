@@ -665,10 +665,11 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 |---|---|
 | `GET /api/projects` | List all projects, most-recently-updated first. Response: `{ projects: ProjectSummary[] }`. |
 | `POST /api/projects` | Create a project. Validates default params against Wan 2.2 rules. Returns 201 with the created project. |
-| `GET /api/projects/[id]` | Full project + ordered clips. Response: `{ project: ProjectDetail, clips: ProjectClip[] }`. |
+| `GET /api/projects/[id]` | Full project + ordered clips (image and video). Response: `{ project: ProjectDetail, clips: ProjectClip[] }`. |
 | `PATCH /api/projects/[id]` | Partial update — name, description, styleNote, defaultFrames/Steps/Cfg/Width/Height. |
 | `DELETE /api/projects/[id]` | Delete project; clips set `projectId=null` via DB cascade. Returns `{ ok: true }`. |
 | `PATCH /api/projects/[id]/reorder` | Reorder clips: `{ clipOrder: string[] }`. Validates all IDs belong to this project; updates `position` in a Prisma transaction. |
+| `PATCH /api/generations/[id]/project` | Assign or unassign a clip to a project. Body: `{ projectId: string \| null }`. Sets `position` to `max+1` in the target project (or null when unassigning). Returns `{ ok: true }`, 404 if generation not found, 400 if projectId is invalid. |
 
 ### Projects tab and UI
 
@@ -682,15 +683,16 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 - Header: back button, inline-editable name and description, Settings gear, overflow menu (Delete, two-tap confirm).
 - Style note rendered in a muted box below description (read-only; editable via Settings modal).
 - **"Generate new clip in this project" button** — tapping navigates to Studio with the project's context pre-loaded (see Phase 2.2 below).
-- **Linear strip**: horizontal-scrollable `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`). Each tile is a `<video preload="metadata">` thumbnail with position badge (top-left) and duration badge (bottom-right). Click opens `ImageModal` scoped to project clips.
+- **Linear strip**: horizontal-scrollable `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`). Tiles render `<img>` for image clips and `<video preload="metadata">` for video clips. Position badge (top-left) on all tiles; duration badge (bottom-right) on video tiles only. Click opens `ImageModal` scoped to project clips.
+- **All/Images/Videos filter**: shown above the strip when the project contains both image and video clips. Filters the visible tiles; does not affect drag-to-reorder order.
 - Drag to reorder: optimistic update, then `PATCH /api/projects/[id]/reorder`. Reverts on error with a brief toast.
 - Empty strip: placeholder text.
 - **Settings modal**: description, style note, and default generation params (resolution presets + frames/steps/CFG inputs). PATCHes `/api/projects/[id]`.
-- **Play-through toggle** (hidden on 0–1 clips): replaces strip with a single `<video>` player that chains all clips end-to-end. `onEnded` advances to the next clip via `load()` + `play()`. Clip-index chips allow jumping to any clip. "Play again" button shown after the last clip finishes. See **Play-through preview** below.
+- **Play-through toggle** (hidden on fewer than 2 *video* clips): replaces strip with a single `<video>` player that chains video clips end-to-end. Image clips are excluded from play-through. `onEnded` advances to the next video clip via `load()` + `play()`. Clip-index chips allow jumping to any video clip. "Play again" button shown after the last clip finishes. See **Play-through preview** below.
 
 ### Gallery integration
 
-`GenerationRecord` now includes `projectId: string | null` and `projectName: string | null`. The gallery API (`/api/gallery`) includes the project relation. `ImageModal` shows a **Project** row in the metadata footer for video clips: a tappable link to the project, or "None". `Gallery` accepts `onNavigateToProject` callback to wire the link back to the Projects tab.
+`GenerationRecord` now includes `projectId: string | null` and `projectName: string | null`. The gallery API (`/api/gallery`) includes the project relation. `ImageModal` shows a **Project** row in the metadata footer for all non-stitched clips (image and video): a clickable picker to assign/reassign the clip to a project, or set it to "None". `Gallery` accepts `onNavigateToProject` callback to wire project-name links back to the Projects tab.
 
 ### Project-aware generation (Phase 2.2)
 
@@ -700,6 +702,8 @@ Clicking "Generate new clip in this project" calls `onGenerateInProject(project,
 - `projectId`, `projectName` — for the badge and the `/api/generate-video` `projectId` field.
 - `latestClipId` — for last-frame extraction.
 - `latestClipPrompt` — carried forward into the positive prompt textarea.
+- `latestClipMediaType` — `'image' | 'video' | null`; determines whether to run ffmpeg or use the image directly (Phase 2.3).
+- `latestClipFilePath` — filePath of the latest clip, used when `latestClipMediaType === 'image'` to load the image directly without an API call.
 - `defaults` — `frames/steps/cfg/width/height`, each nullable; Studio falls back to `VIDEO_DEFAULTS` for unset fields.
 
 **Project badge**: shown in Studio header when project context is active. Has a × button to clear it. Persisted via `sessionStorage` key `studio-project-context` so it survives refresh (same pattern as `studio-mode`).
@@ -710,22 +714,51 @@ Clicking "Generate new clip in this project" calls `onGenerateInProject(project,
 
 **Remix vs. project flow**: remix from gallery always clears project context. Remixing is a fresh starting point; re-generating within a project uses the "Generate new clip" button.
 
-### Prompt threading and last-frame extraction (Phase 2.2)
+### Prompt threading and last-frame extraction (Phase 2.2 / 2.3)
 
-When Studio has project context and a `latestClipId`, a **"Use last frame of previous clip"** checkbox appears in the Starting frame (I2V) section:
+When Studio has project context and a `latestClipId`, a checkbox appears in the Starting frame (I2V) section. The label adapts to the media type of the latest clip:
 
-- Checking it implicitly enables I2V mode (turns on the Starting frame toggle) and hides the gallery picker.
-- On submit, Studio calls `POST /api/extract-last-frame` with the `latestClipId`, gets a `data:image/png;base64,...` data URI, strips the prefix, and sends the raw base64 as `startImageB64` to `/api/generate-video`.
-- While extraction runs, a spinner appears and the Generate Video button is disabled.
+- **Latest clip is a video**: label is "Use last frame of previous clip". On submit, Studio calls `POST /api/extract-last-frame` with the `latestClipId`, gets a PNG base64 string, and sends it as `startImageB64`.
+- **Latest clip is an image**: label is "Use latest image as starting frame". On submit, Studio fetches the image directly via its `filePath` URL using `encodeImageToBase64()` — no ffmpeg call needed.
+
+In both cases, checking the checkbox implicitly enables I2V mode (turns on the Starting frame toggle) and hides the gallery picker. While loading/extracting runs, a spinner appears and the Generate Video button is disabled.
 
 ### Play-through preview (Phase 2.2)
 
 Single `<video ref={playerRef}>` element. `playingIdx` state tracks the current clip. `onEnded` increments it (or sets `playDone`). A `useEffect` on `[playingIdx, playThrough]` calls `playerRef.current.load()` then `.play()` when the index advances.
 
-- Clip chips (numbered buttons) jump directly to any clip.
+- Clip chips (numbered buttons) jump directly to any video clip.
 - "Play again" button at end resets to index 0.
 - Wan 2.2 generates no audio; no click/gap handling needed at this stage. Video stitching (Phase 3) will solve seamless playback.
-- Toggle hidden when project has 0 or 1 clips.
+- Toggle hidden when project has fewer than 2 video clips (image clips do not count).
+
+---
+
+## Project membership editing and image clips (Phase 2.3)
+
+Clips can be assigned to a project after creation via the gallery modal sidebar's project picker. Both image and video clips can be project members. The project detail view renders mixed-media linear strips with media-type-appropriate thumbnails (`<img>` for images, `<video>` for videos) and a per-strip All/Images/Videos filter (shown only when both types are present). Stitch (Phase 3) currently treats all clips uniformly; the upcoming Phase 3.1 batch adds explicit clip selection.
+
+### Project picker in ImageModal
+
+The "Project: …" row in `ImageModal`'s bottom metadata panel is now a clickable button for **all non-stitched clips** (image and video). Clicking it opens a bottom-sheet picker:
+
+- Lists all projects sorted by most-recently-updated, with name + clip count.
+- A checkmark indicates the currently-assigned project (or "None").
+- Search/filter input appears when there are more than 10 projects.
+- "+ Create new project" option at the bottom opens `NewProjectModal`; on success, the clip is auto-assigned to the new project.
+- Selecting a project calls `PATCH /api/generations/[id]/project` and optimistically updates the sidebar label.
+
+`NewProjectModal` is now extracted to `src/components/NewProjectModal.tsx` and imported by both `Projects.tsx` and `ImageModal.tsx`.
+
+### Mixed-media project detail strip
+
+`ProjectClip` now includes `mediaType: string`. `GET /api/projects/[id]` returns all clips regardless of media type. `SortableClipTile` renders `<img>` for image clips and `<video>` for video clips; the duration badge appears only on video tiles.
+
+The All/Images/Videos filter above the strip is visible only when the project contains both image and video clips.
+
+### `GET /api/projects` cover frame
+
+`ProjectSummary` now includes `coverMediaType: string | null`. `ProjectCard` in `Projects.tsx` renders `<img>` when `coverMediaType === 'image'` and `<video>` otherwise, preventing the broken-video-element bug when the most recent clip is an image.
 
 ---
 
