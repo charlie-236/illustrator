@@ -37,7 +37,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Project stitching (Phase 3 of video) — `batch/wan22-project-stitching` (PR #28)
 - [~] Assign-to-project + image clips as project members (Phase 2.3) — `batch/wan22-assign-to-project` (PR #29)
 - [~] Stitch clip selection (Phase 3.1) — `batch/wan22-stitch-clip-selection` (PR #30)
-- [ ] Phase 2/3 cleanup bundle (orphan position + Studio pill staleness + ckpt resolution UX) — see prompts/phase-2-3-cleanup-bundle.md
+- [~] Phase 2/3 cleanup bundle (orphan position + Studio pill staleness + ckpt resolution UX) — `batch/phase-2-3-cleanup-bundle` (PR #31)
 - [ ] Queue tray "Queued" status — see prompts/queue-tray-queued-status.md
 - [ ] Delete confirmation dialog (consistency across destructive actions) — see prompts/delete-confirm-dialog.md
 - [ ] Studio project switcher — see prompts/studio-project-switcher.md

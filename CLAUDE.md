@@ -254,7 +254,9 @@ Body: `{ filename, type, modelId?, parentUrlId?, civitaiMetadata? }`
 
 Upserts into `CheckpointConfig` or `LoraConfig` based on `type`. Returns `{ ok: true, record }` on success. After ingestion, tap the Refresh button (↺) in the ModelSelect picker or ModelConfig header to reload the model lists — `revalidatePath` has no effect on client-side fetches and is not used here. Checkpoint width/height default to 1024; update in ModelConfig after ingestion if needed. Core upsert logic lives in `src/lib/registerModel.ts`; this route is a thin HTTP wrapper.
 
-Each checkpoint config can store recommended generation defaults: steps, CFG, sampler, scheduler, width, height, and hi-res fix on/off. These are set via the collapsible **Default generation settings** section in ModelConfig's Checkpoints sub-tab. When the user explicitly selects a checkpoint in Studio's picker, any non-null defaults are soft-filled into the corresponding image-form fields. Width and height are always applied (existing behaviour). Null fields are left alone. Selection is soft-fill — choosing a second checkpoint applies only its own non-null defaults; it does not reset fields that had no default on the first checkpoint. The soft-fill fires only on an explicit user pick, not on the auto-selection that occurs at mount time (so a page refresh respects the user's last-session values). This applies to the image form only; the video form is unaffected.
+Each checkpoint config can store recommended generation defaults: steps, CFG, sampler, scheduler, width, height, and hi-res fix on/off. These are set via the collapsible **Default generation settings** section in ModelConfig's Checkpoints sub-tab. When the user explicitly selects a checkpoint in Studio's picker, any non-null defaults are soft-filled into the corresponding image-form fields. Null fields are left alone. Selection is soft-fill — choosing a second checkpoint applies only its own non-null defaults; it does not reset fields that had no default on the first checkpoint. The soft-fill fires only on an explicit user pick, not on the auto-selection that occurs at mount time (so a page refresh respects the user's last-session values). This applies to the image form only; the video form is unaffected.
+
+Default resolution is a single value drawn from the canonical `RESOLUTIONS` list shared with Studio's image form. Width and height are persisted as separate columns but are saved and validated as a pair. Selecting "— No default —" sets both to null; the Studio resolution dropdown is then left unchanged when this checkpoint is selected.
 
 ### `POST /api/models/ingest`
 SSE-streamed single-model ingestion. Body: `{ type: 'checkpoint' | 'lora', modelId: number, parentUrlId: number }`. Performs metadata fetch + download to A100 VM + size validation + DB upsert via SSH, emitting per-phase progress events. Used by the in-app ingestion UI; `add_model.sh` remains as a desktop fallback that posts to `/api/models/register` directly.
@@ -280,7 +282,9 @@ Returns `{ project: ProjectDetail, clips: ProjectClip[] }`. Clips ordered by `po
 Partial update. Same validation on default fields. Returns updated project or 404.
 
 ### `DELETE /api/projects/[id]`
-Deletes project. DB `onDelete: SetNull` drops clips to project-less. Returns `{ ok: true }`.
+Deletes project. Runs a Prisma transaction that clears `position` on all member clips first, then deletes the project row. DB `onDelete: SetNull` then drops `projectId` on those clips. Returns `{ ok: true }`.
+
+Project deletion clears both `projectId` and `position` on member clips, in a single transaction. Client-side state holding the deleted project's ID is broadcast-cleared via a `project-deleted` CustomEvent so the Studio pill and any persisted sessionStorage references update immediately.
 
 ### `PATCH /api/projects/[id]/reorder`
 Body `{ clipOrder: string[] }`. Validates all IDs belong to this project and count matches. Updates `position` fields in a Prisma transaction. Returns `{ ok: true }` or 400 on validation failure.

@@ -120,8 +120,8 @@ export interface CheckpointConfig {
   checkpointName: string;
   friendlyName: string;
   baseModel: string;
-  defaultWidth: number;
-  defaultHeight: number;
+  defaultWidth: number | null;
+  defaultHeight: number | null;
   defaultPositivePrompt: string;
   defaultNegativePrompt: string;
   description?: string | null;
