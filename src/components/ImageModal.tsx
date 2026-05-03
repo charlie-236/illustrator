@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { GenerationRecord } from '@/types';
+import type { GenerationRecord, ProjectSummary } from '@/types';
 import { imgSrc } from '@/lib/imageSrc';
+import NewProjectModal from './NewProjectModal';
 
 interface Props {
   items: GenerationRecord[];
@@ -14,6 +15,8 @@ interface Props {
   /** Parent updates its own items state; modal does an optimistic local update. */
   onFavoriteToggle?: (id: string) => Promise<void>;
   onNavigateToProject?: (projectId: string) => void;
+  /** Called after a successful project assignment. */
+  onProjectAssign?: (generationId: string, projectId: string | null) => void;
 }
 
 function HeartIcon({ filled }: { filled: boolean }) {
@@ -26,13 +29,21 @@ function HeartIcon({ filled }: { filled: boolean }) {
   );
 }
 
-export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject }: Props) {
+export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject, onProjectAssign }: Props) {
   const [items, setItems] = useState(initialItems);
   const [idx, setIdx] = useState(Math.min(startIndex, Math.max(0, initialItems.length - 1)));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Project picker state
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerProjects, setPickerProjects] = useState<Pick<ProjectSummary, 'id' | 'name' | 'clipCount'>[] | null>(null);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
 
   function clearConfirmTimer() {
     if (confirmTimerRef.current !== null) {
@@ -50,16 +61,25 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'Escape') {
+        if (showPicker) { setShowPicker(false); return; }
+        if (showNewProjectModal) return;
+        onClose();
+        return;
+      }
+      if (showPicker || showNewProjectModal) return;
       if (e.key === 'ArrowLeft') setIdx((i) => Math.max(0, i - 1));
       if (e.key === 'ArrowRight') setIdx((i) => Math.min(i + 1, itemsLenRef.current - 1));
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, showPicker, showNewProjectModal]);
 
   // Reset confirmation state whenever the user navigates to a different image
   useEffect(() => { clearConfirmTimer(); setConfirmDelete(false); }, [idx]);
+
+  // Close picker when navigating
+  useEffect(() => { setShowPicker(false); setPickerSearch(''); }, [idx]);
 
   const record = items[idx] ?? null;
 
@@ -120,11 +140,52 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
     else goTo(idx - 1);
   }
 
+  async function openPicker() {
+    setShowPicker(true);
+    setPickerSearch('');
+    if (!pickerProjects) {
+      setPickerLoading(true);
+      try {
+        const res = await fetch('/api/projects');
+        const data = await res.json() as { projects: Pick<ProjectSummary, 'id' | 'name' | 'clipCount'>[] };
+        setPickerProjects(data.projects ?? []);
+      } finally {
+        setPickerLoading(false);
+      }
+    }
+  }
+
+  async function assignProject(projectId: string | null, projectName: string | null) {
+    if (!record) return;
+    setAssigning(true);
+    try {
+      const res = await fetch(`/api/generations/${record.id}/project`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      });
+      if (!res.ok) return;
+      setItems((prev) => prev.map((item, i) =>
+        i === idx ? { ...item, projectId, projectName } : item,
+      ));
+      onProjectAssign?.(record.id, projectId);
+      setShowPicker(false);
+    } finally {
+      setAssigning(false);
+    }
+  }
+
   if (!record) return null;
 
   const isVideo = record.mediaType === 'video';
   const modelShort = record.model.split('/').pop()?.replace(/\.(safetensors|ckpt|pt)$/i, '') ?? record.model;
   const date = new Date(record.createdAt).toLocaleString();
+
+  const filteredProjects = pickerProjects
+    ? pickerProjects.filter((p) =>
+        !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase()),
+      )
+    : [];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
@@ -271,21 +332,125 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           )}
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
-        {record.mediaType === 'video' && !record.isStitched && (
-          <p className="text-xs text-zinc-500">
-            {'Project: '}
-            {record.projectId && record.projectName ? (
+
+        {/* Project row — shown for all non-stitched clips (image and video) */}
+        {!record.isStitched && (
+          <div className="relative">
+            <p className="text-xs text-zinc-500">
+              {'Project: '}
               <button
-                onClick={() => { onNavigateToProject?.(record.projectId!); onClose(); }}
-                className="text-violet-400 hover:text-violet-300 underline underline-offset-2"
+                onClick={() => void openPicker()}
+                disabled={assigning}
+                className="text-violet-400 hover:text-violet-300 underline underline-offset-2 disabled:opacity-50"
               >
-                {record.projectName}
+                {record.projectId && record.projectName ? record.projectName : 'None'}
               </button>
-            ) : (
-              <span className="text-zinc-600">None</span>
+            </p>
+
+            {/* Project picker bottom sheet */}
+            {showPicker && (
+              <div
+                className="fixed inset-0 flex items-end justify-center bg-black/60"
+                style={{ zIndex: 60 }}
+                onClick={() => setShowPicker(false)}
+              >
+                <div
+                  className="bg-zinc-900 border border-zinc-800 rounded-t-2xl w-full max-h-[70vh] flex flex-col"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800 flex-shrink-0">
+                    <h3 className="text-base font-semibold text-zinc-100">Assign to project</h3>
+                    <button
+                      onClick={() => setShowPicker(false)}
+                      className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Search — only if more than 10 projects */}
+                  {pickerProjects && pickerProjects.length > 10 && (
+                    <div className="px-4 pt-3 pb-2 flex-shrink-0">
+                      <input
+                        className="input-base"
+                        placeholder="Search projects…"
+                        value={pickerSearch}
+                        onChange={(e) => setPickerSearch(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  )}
+
+                  <div className="overflow-y-auto flex-1">
+                    {pickerLoading ? (
+                      <div className="px-5 py-4 text-sm text-zinc-500">Loading…</div>
+                    ) : (
+                      <>
+                        {/* None option */}
+                        <button
+                          onClick={() => void assignProject(null, null)}
+                          disabled={assigning}
+                          className={`w-full min-h-12 px-5 flex items-center justify-between text-sm transition-colors hover:bg-zinc-800
+                            ${!record.projectId ? 'text-violet-300 font-medium' : 'text-zinc-300'}`}
+                        >
+                          <span>None</span>
+                          {!record.projectId && (
+                            <svg className="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+
+                        {/* Project list */}
+                        {filteredProjects.map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => void assignProject(p.id, p.name)}
+                            disabled={assigning}
+                            className={`w-full min-h-12 px-5 flex items-center justify-between text-sm transition-colors hover:bg-zinc-800
+                              ${record.projectId === p.id ? 'text-violet-300 font-medium' : 'text-zinc-200'}`}
+                          >
+                            <span className="truncate mr-2">{p.name}</span>
+                            <span className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-xs text-zinc-500">{p.clipCount} clips</span>
+                              {record.projectId === p.id && (
+                                <svg className="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </span>
+                          </button>
+                        ))}
+
+                        {pickerProjects && pickerProjects.length === 0 && !pickerSearch && (
+                          <p className="px-5 py-3 text-sm text-zinc-500">No projects yet.</p>
+                        )}
+
+                        {pickerProjects && pickerSearch && filteredProjects.length === 0 && (
+                          <p className="px-5 py-3 text-sm text-zinc-500">No matches for &ldquo;{pickerSearch}&rdquo;</p>
+                        )}
+
+                        {/* Create new project */}
+                        <button
+                          onClick={() => { setShowPicker(false); setShowNewProjectModal(true); }}
+                          className="w-full min-h-12 px-5 flex items-center gap-2 text-sm text-violet-400 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                          </svg>
+                          Create new project
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
-          </p>
+          </div>
         )}
+
         {record.isStitched && (
           <>
             <p className="text-xs text-zinc-500">
@@ -309,6 +474,21 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           </>
         )}
       </div>
+
+      {/* New project modal — opens on top of everything */}
+      {showNewProjectModal && (
+        <NewProjectModal
+          onClose={() => { setShowNewProjectModal(false); setShowPicker(false); }}
+          onCreated={async (project) => {
+            // Add to picker list and auto-assign
+            setPickerProjects((prev) =>
+              prev ? [{ id: project.id, name: project.name, clipCount: 0 }, ...prev] : null,
+            );
+            setShowNewProjectModal(false);
+            await assignProject(project.id, project.name);
+          }}
+        />
+      )}
     </div>
   );
 }

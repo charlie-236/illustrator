@@ -523,17 +523,23 @@ export default function Studio({
       if (useLastFrame && projectContext?.latestClipId) {
         setExtractingLastFrame(true);
         try {
-          const lfRes = await fetch('/api/extract-last-frame', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ generationId: projectContext.latestClipId }),
-          });
-          const lfData = await lfRes.json() as { frameB64?: string; error?: string };
-          if (!lfRes.ok || !lfData.frameB64) {
-            throw new Error(lfData.error ?? 'Failed to extract last frame');
+          if (projectContext.latestClipMediaType === 'image' && projectContext.latestClipFilePath) {
+            // Latest clip is an image — use it directly without ffmpeg
+            startImageB64 = await encodeImageToBase64(imgSrc(projectContext.latestClipFilePath));
+          } else {
+            // Latest clip is a video — extract last frame via ffmpeg
+            const lfRes = await fetch('/api/extract-last-frame', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ generationId: projectContext.latestClipId }),
+            });
+            const lfData = await lfRes.json() as { frameB64?: string; error?: string };
+            if (!lfRes.ok || !lfData.frameB64) {
+              throw new Error(lfData.error ?? 'Failed to extract last frame');
+            }
+            // Strip data URI prefix — API expects raw base64
+            startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
           }
-          // Strip data URI prefix — API expects raw base64
-          startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
         } catch (err) {
           setSubmitError(`Failed to extract last frame: ${String(err)}`);
           return;
@@ -900,7 +906,11 @@ export default function Studio({
                   }}
                   className="w-5 h-5 rounded accent-violet-500"
                 />
-                <span className="text-sm text-zinc-300">Use last frame of previous clip</span>
+                <span className="text-sm text-zinc-300">
+                  {projectContext?.latestClipMediaType === 'image'
+                    ? 'Use latest image as starting frame'
+                    : 'Use last frame of previous clip'}
+                </span>
               </label>
             )}
 
@@ -920,8 +930,10 @@ export default function Studio({
                   )}
                   <p className="text-sm text-zinc-300">
                     {extractingLastFrame
-                      ? 'Extracting last frame…'
-                      : 'Last frame of previous clip (extracted on submit)'}
+                      ? (projectContext?.latestClipMediaType === 'image' ? 'Loading image…' : 'Extracting last frame…')
+                      : (projectContext?.latestClipMediaType === 'image'
+                          ? 'Latest image as starting frame (loaded on submit)'
+                          : 'Last frame of previous clip (extracted on submit)')}
                   </p>
                 </div>
               ) : (

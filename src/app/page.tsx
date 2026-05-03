@@ -80,6 +80,8 @@ export default function Home() {
       projectName: project.name,
       latestClipId: latestClip?.id ?? null,
       latestClipPrompt: latestClip?.prompt ?? null,
+      latestClipMediaType: latestClip?.mediaType ?? null,
+      latestClipFilePath: latestClip?.filePath ?? null,
       defaults: {
         frames: project.defaultFrames,
         steps: project.defaultSteps,
@@ -118,16 +120,6 @@ export default function Home() {
               onNavigateToGallery={handleNavigateToGallery}
               onGenerateInProject={handleGenerateInProject}
             />
-          </div>
-          <div className={tab === 'projects' ? '' : 'hidden'}>
-            <Projects
-              key={projectsKey}
-              onNavigateToGallery={handleNavigateToGallery}
-              onGenerateInProject={handleGenerateInProject}
-            />
-          </div>
-          <div className={tab === 'projects' ? '' : 'hidden'}>
-            <Projects key={projectsKey} onNavigateToGallery={handleNavigateToGallery} />
           </div>
           <div className={tab === 'gallery' ? '' : 'hidden'}>
             <Gallery refreshToken={refreshGallery} onRemix={handleRemix} onNavigateToProject={handleNavigateToProjects} />

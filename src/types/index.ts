@@ -73,6 +73,7 @@ export interface ProjectSummary {
   styleNote: string | null;
   clipCount: number;
   coverFrame: string | null;
+  coverMediaType: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +98,7 @@ export interface ProjectClip {
   position: number;
   createdAt: string;
   isFavorite: boolean;
+  mediaType: string;
 }
 
 export interface ProjectDetail {
@@ -167,6 +169,10 @@ export interface ProjectContext {
   latestClipId: string | null;
   /** Positive prompt of the latest clip (for carry-forward). Null if project has no clips. */
   latestClipPrompt: string | null;
+  /** Media type of the latest clip ('image' | 'video'). Null if project has no clips. */
+  latestClipMediaType: string | null;
+  /** filePath of the latest clip (used when latest is an image to use it directly). Null if project has no clips. */
+  latestClipFilePath: string | null;
   defaults: {
     frames: number | null;
     steps: number | null;

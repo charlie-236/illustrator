@@ -43,7 +43,6 @@ export async function GET(
       where: { id },
       include: {
         generations: {
-          where: { mediaType: 'video' },
           orderBy: [
             { position: 'asc' },
             { createdAt: 'asc' },
@@ -59,6 +58,7 @@ export async function GET(
             position: true,
             createdAt: true,
             isFavorite: true,
+            mediaType: true,
           },
         },
         stitchedExports: {
@@ -104,6 +104,7 @@ export async function GET(
         position: g.position ?? 0,
         createdAt: g.createdAt.toISOString(),
         isFavorite: g.isFavorite,
+        mediaType: g.mediaType,
       })),
       stitchedExports: project.stitchedExports.map((e) => ({
         id: e.id,
