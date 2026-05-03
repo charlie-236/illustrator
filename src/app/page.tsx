@@ -119,6 +119,9 @@ export default function Home() {
               onGenerateInProject={handleGenerateInProject}
             />
           </div>
+          <div className={tab === 'projects' ? '' : 'hidden'}>
+            <Projects key={projectsKey} onNavigateToGallery={handleNavigateToGallery} />
+          </div>
           <div className={tab === 'gallery' ? '' : 'hidden'}>
             <Gallery refreshToken={refreshGallery} onRemix={handleRemix} onNavigateToProject={handleNavigateToProjects} />
           </div>
