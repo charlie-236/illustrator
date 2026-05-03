@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckpointConfig, EmbeddingConfig, LoraConfig } from '@/types';
+import { SAMPLERS, SCHEDULERS } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
 import { useModelLists } from '@/lib/useModelLists';
 
@@ -16,6 +17,11 @@ const CKPT_BLANK = {
   defaultNegativePrompt: '',
   description: '',
   url: '' as string | null | undefined,
+  defaultSteps: null as number | null,
+  defaultCfg: null as number | null,
+  defaultSampler: null as string | null,
+  defaultScheduler: null as string | null,
+  defaultHrf: null as boolean | null,
 };
 
 const LORA_BLANK = {
@@ -163,6 +169,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [ckptForm, setCkptForm] = useState({ ...CKPT_BLANK });
   const [loadingCkptConfig, setLoadingCkptConfig] = useState(false);
   const [ckptStatus, setCkptStatus] = useState<SaveStatus>('idle');
+  const [defaultsOpen, setDefaultsOpen] = useState(false);
 
   // ── LoRA form state ────────────────────────────────────────────────
   const [selectedLora, setSelectedLora] = useState('');
@@ -234,6 +241,11 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               defaultNegativePrompt: config.defaultNegativePrompt,
               description: config.description ?? '',
               url: config.url,
+              defaultSteps: config.defaultSteps ?? null,
+              defaultCfg: config.defaultCfg ?? null,
+              defaultSampler: config.defaultSampler ?? null,
+              defaultScheduler: config.defaultScheduler ?? null,
+              defaultHrf: config.defaultHrf ?? null,
             }
           : { ...CKPT_BLANK });
       })
@@ -510,25 +522,6 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Default Width</label>
-                <input type="number" min={64} max={4096} step={8}
-                  value={ckptForm.defaultWidth}
-                  onChange={(e) => ckptField('defaultWidth', parseInt(e.target.value, 10))}
-                  className="input-base"
-                />
-              </div>
-              <div>
-                <label className="label">Default Height</label>
-                <input type="number" min={64} max={4096} step={8}
-                  value={ckptForm.defaultHeight}
-                  onChange={(e) => ckptField('defaultHeight', parseInt(e.target.value, 10))}
-                  className="input-base"
-                />
-              </div>
-            </div>
-
             <div>
               <label className="label">Default Positive Prompt</label>
               <p className="text-xs text-zinc-400 mb-1.5">
@@ -575,6 +568,128 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
                 </a>
               </div>
             )}
+
+            {/* Default settings collapsible */}
+            <div className="border-t border-zinc-800/60 pt-3">
+              <button
+                type="button"
+                onClick={() => setDefaultsOpen((o) => !o)}
+                className="w-full flex items-center justify-between min-h-12 px-0 text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+              >
+                <span>Default generation settings</span>
+                <svg
+                  className={`w-4 h-4 text-zinc-500 transition-transform duration-200 ${defaultsOpen ? 'rotate-180' : ''}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <p className="text-xs text-zinc-500 mb-2">
+                Soft-fill the Studio form when this checkpoint is selected. Leave blank to leave the form alone.
+              </p>
+
+              {defaultsOpen && (
+                <div className="space-y-4 pt-1">
+
+                  {/* Resolution */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Default Width</label>
+                      <input
+                        type="number" min={64} max={4096} step={64}
+                        value={ckptForm.defaultWidth}
+                        onChange={(e) => ckptField('defaultWidth', parseInt(e.target.value, 10))}
+                        className="input-base"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Default Height</label>
+                      <input
+                        type="number" min={64} max={4096} step={64}
+                        value={ckptForm.defaultHeight}
+                        onChange={(e) => ckptField('defaultHeight', parseInt(e.target.value, 10))}
+                        className="input-base"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Steps + CFG */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Default Steps</label>
+                      <input
+                        type="number" min={1} max={80} step={1}
+                        value={ckptForm.defaultSteps ?? ''}
+                        onChange={(e) => ckptField('defaultSteps', e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                        placeholder="Not set"
+                        className="input-base"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Default CFG</label>
+                      <input
+                        type="number" min={1} max={20} step={0.1}
+                        value={ckptForm.defaultCfg ?? ''}
+                        onChange={(e) => ckptField('defaultCfg', e.target.value === '' ? null : parseFloat(e.target.value))}
+                        placeholder="Not set"
+                        className="input-base"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Sampler */}
+                  <div>
+                    <label className="label">Default Sampler</label>
+                    <select
+                      value={ckptForm.defaultSampler ?? ''}
+                      onChange={(e) => ckptField('defaultSampler', e.target.value || null)}
+                      className="input-base"
+                    >
+                      <option value="">— No default —</option>
+                      {SAMPLERS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Scheduler */}
+                  <div>
+                    <label className="label">Default Scheduler</label>
+                    <select
+                      value={ckptForm.defaultScheduler ?? ''}
+                      onChange={(e) => ckptField('defaultScheduler', e.target.value || null)}
+                      className="input-base"
+                    >
+                      <option value="">— No default —</option>
+                      {SCHEDULERS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Hi-Res Fix — tri-state */}
+                  <div>
+                    <label className="label">Default Hi-Res Fix</label>
+                    <div className="flex rounded-lg overflow-hidden border border-zinc-700">
+                      {([false, null, true] as const).map((val) => {
+                        const label = val === false ? 'Off' : val === true ? 'On' : 'No default';
+                        const isActive = ckptForm.defaultHrf === val;
+                        return (
+                          <button
+                            key={String(val)}
+                            type="button"
+                            onClick={() => ckptField('defaultHrf', val)}
+                            className={`flex-1 min-h-12 text-sm font-medium transition-colors
+                              ${isActive
+                                ? 'bg-violet-600/30 text-violet-200'
+                                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'}`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
 
             <SaveRow status={ckptStatus} onSave={saveCheckpoint} disabled={!selectedCheckpoint} />
 

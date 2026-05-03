@@ -111,6 +111,12 @@ export interface CheckpointConfig {
   defaultNegativePrompt: string;
   description?: string | null;
   url?: string | null;
+  // Per-checkpoint generation defaults (null = not set, leave Studio form alone)
+  defaultSteps?: number | null;
+  defaultCfg?: number | null;
+  defaultSampler?: string | null;
+  defaultScheduler?: string | null;
+  defaultHrf?: boolean | null;
 }
 
 export interface LoraConfig {

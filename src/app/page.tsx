@@ -120,6 +120,13 @@ export default function Home() {
             />
           </div>
           <div className={tab === 'projects' ? '' : 'hidden'}>
+            <Projects
+              key={projectsKey}
+              onNavigateToGallery={handleNavigateToGallery}
+              onGenerateInProject={handleGenerateInProject}
+            />
+          </div>
+          <div className={tab === 'projects' ? '' : 'hidden'}>
             <Projects key={projectsKey} onNavigateToGallery={handleNavigateToGallery} />
           </div>
           <div className={tab === 'gallery' ? '' : 'hidden'}>

@@ -65,6 +65,12 @@ model CheckpointConfig {
   description           String?
   url                   String?
   updatedAt             DateTime @updatedAt
+  // Per-checkpoint generation defaults (all nullable; null = no default, leave form alone)
+  defaultSteps          Int?
+  defaultCfg            Float?
+  defaultSampler        String?
+  defaultScheduler      String?
+  defaultHrf            Boolean?
 }
 
 model LoraConfig {
