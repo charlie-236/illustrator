@@ -110,6 +110,7 @@ export async function GET(
         defaultCfg: project.defaultCfg,
         defaultWidth: project.defaultWidth,
         defaultHeight: project.defaultHeight,
+        defaultLightning: project.defaultLightning,
         createdAt: project.createdAt.toISOString(),
         updatedAt: project.updatedAt.toISOString(),
       },
@@ -171,6 +172,11 @@ export async function PATCH(
   if ('defaultCfg' in body) data.defaultCfg = body.defaultCfg ?? null;
   if ('defaultWidth' in body) data.defaultWidth = body.defaultWidth ?? null;
   if ('defaultHeight' in body) data.defaultHeight = body.defaultHeight ?? null;
+  if ('defaultLightning' in body) {
+    data.defaultLightning = body.defaultLightning === true ? true
+      : body.defaultLightning === false ? false
+      : null;
+  }
 
   try {
     const project = await prisma.project.update({
@@ -188,6 +194,7 @@ export async function PATCH(
       defaultCfg: project.defaultCfg,
       defaultWidth: project.defaultWidth,
       defaultHeight: project.defaultHeight,
+      defaultLightning: project.defaultLightning,
       createdAt: project.createdAt.toISOString(),
       updatedAt: project.updatedAt.toISOString(),
     });

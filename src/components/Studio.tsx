@@ -163,6 +163,10 @@ export default function Studio({
 
   // video params (separate state; only active in video mode)
   const [videoP, setVideoP] = useState<VideoParams>(VIDEO_DEFAULTS);
+  // Lightning mode — separate from videoP so steps/cfg are preserved when toggled off
+  const [lightning, setLightning] = useState(() => {
+    try { return sessionStorage.getItem('studio-video-lightning') === 'true'; } catch { return false; }
+  });
   const [useStartingFrame, setUseStartingFrame] = useState(false);
   const [startingFrameRecord, setStartingFrameRecord] = useState<GenerationRecord | null>(null);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
@@ -345,6 +349,11 @@ export default function Studio({
       height: projectContextTrigger.defaults.height ?? VIDEO_DEFAULTS.height,
     });
 
+    // Apply project lightning default if set
+    if (projectContextTrigger.defaults.lightning !== null && projectContextTrigger.defaults.lightning !== undefined) {
+      setLightningAndPersist(projectContextTrigger.defaults.lightning);
+    }
+
     // Carry forward latest clip's prompt if present
     if (projectContextTrigger.latestClipPrompt) {
       setP((prev) => ({ ...prev, positivePrompt: projectContextTrigger.latestClipPrompt! }));
@@ -366,6 +375,11 @@ export default function Studio({
 
   function updateVideo<K extends keyof VideoParams>(key: K, val: VideoParams[K]) {
     setVideoP((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function setLightningAndPersist(val: boolean) {
+    setLightning(val);
+    try { sessionStorage.setItem('studio-video-lightning', String(val)); } catch { /* ignore */ }
   }
 
   function clearProjectContext() {
@@ -406,6 +420,7 @@ export default function Studio({
           cfg: project.defaultCfg ?? null,
           width: project.defaultWidth ?? null,
           height: project.defaultHeight ?? null,
+          lightning: project.defaultLightning ?? null,
         },
       };
 
@@ -420,6 +435,11 @@ export default function Studio({
         width: newCtx.defaults.width ?? VIDEO_DEFAULTS.width,
         height: newCtx.defaults.height ?? VIDEO_DEFAULTS.height,
       });
+
+      // Apply lightning default if project has one
+      if (newCtx.defaults.lightning !== null) {
+        setLightningAndPersist(newCtx.defaults.lightning);
+      }
 
       // Pre-fill prompt from latest clip; clear if no clips
       setP((prev) => ({ ...prev, positivePrompt: newCtx.latestClipPrompt ?? '' }));
@@ -456,6 +476,7 @@ export default function Studio({
         cfg: project.defaultCfg ?? null,
         width: project.defaultWidth ?? null,
         height: project.defaultHeight ?? null,
+        lightning: project.defaultLightning ?? null,
       },
     };
     setProjectContext(newCtx);
@@ -468,6 +489,10 @@ export default function Studio({
       width: newCtx.defaults.width ?? VIDEO_DEFAULTS.width,
       height: newCtx.defaults.height ?? VIDEO_DEFAULTS.height,
     });
+
+    if (newCtx.defaults.lightning !== null) {
+      setLightningAndPersist(newCtx.defaults.lightning);
+    }
 
     // Clear prompt — new project has no clips
     setP((prev) => ({ ...prev, positivePrompt: '' }));
@@ -706,6 +731,7 @@ export default function Studio({
           steps: videoP.steps,
           cfg: videoP.cfg,
           seed: p.seed >= 0 ? p.seed : undefined,
+          lightning,
           ...(startImageB64 ? { startImageB64 } : {}),
           ...(projectContext ? { projectId: projectContext.projectId } : {}),
         }),
@@ -1382,6 +1408,35 @@ export default function Studio({
             </>
           ) : (
             <>
+              {/* ── Lightning toggle — top of video settings ── */}
+              <div className="px-4 pt-4 pb-4 border-b border-zinc-800">
+                <div className="flex items-start gap-3">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={lightning}
+                    onClick={() => setLightningAndPersist(!lightning)}
+                    className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors mt-0.5
+                      ${lightning ? 'bg-amber-500' : 'bg-zinc-700'}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform
+                        ${lightning ? 'translate-x-6' : 'translate-x-0'}`}
+                    />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-zinc-100 leading-tight">
+                      Lightning{lightning ? ' ⚡' : ''}
+                    </p>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      {lightning
+                        ? '4 steps · CFG 1 · ~3 min · Steps and CFG locked'
+                        : '4 steps, ~3 min. Steps and CFG locked.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="px-4 pt-4 pb-5 space-y-3">
                 <p className="label">Resolution</p>
                 <div className="flex gap-2">
@@ -1452,27 +1507,51 @@ export default function Studio({
                   {vFramesErr && <p className="text-xs text-red-400 mt-1">Must be 17, 25, 33, … 121</p>}
                 </div>
                 <div>
-                  <ParamSlider
-                    label="Steps"
-                    value={videoP.steps}
-                    min={4}
-                    max={40}
-                    step={2}
-                    onChange={(v) => updateVideo('steps', v)}
-                  />
-                  {vStepsErr && <p className="text-xs text-red-400 mt-1">Even number, 4–40</p>}
+                  {lightning ? (
+                    <div>
+                      <p className="label mb-1">Steps</p>
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700">
+                        <span className="text-sm text-amber-400 font-medium tabular-nums">4</span>
+                        <span className="text-xs text-zinc-500">(locked — Lightning)</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <ParamSlider
+                        label="Steps"
+                        value={videoP.steps}
+                        min={4}
+                        max={40}
+                        step={2}
+                        onChange={(v) => updateVideo('steps', v)}
+                      />
+                      {vStepsErr && <p className="text-xs text-red-400 mt-1">Even number, 4–40</p>}
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <ParamSlider
-                    label="CFG"
-                    value={videoP.cfg}
-                    min={1}
-                    max={10}
-                    step={0.1}
-                    onChange={(v) => updateVideo('cfg', Math.round(v * 10) / 10)}
-                    format={(v) => v.toFixed(1)}
-                  />
-                  {vCfgErr && <p className="text-xs text-red-400 mt-1">1.0–10.0</p>}
+                  {lightning ? (
+                    <div>
+                      <p className="label mb-1">CFG</p>
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700">
+                        <span className="text-sm text-amber-400 font-medium tabular-nums">1.0</span>
+                        <span className="text-xs text-zinc-500">(locked — Lightning)</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <ParamSlider
+                        label="CFG"
+                        value={videoP.cfg}
+                        min={1}
+                        max={10}
+                        step={0.1}
+                        onChange={(v) => updateVideo('cfg', Math.round(v * 10) / 10)}
+                        format={(v) => v.toFixed(1)}
+                      />
+                      {vCfgErr && <p className="text-xs text-red-400 mt-1">1.0–10.0</p>}
+                    </div>
+                  )}
                 </div>
               </div>
 

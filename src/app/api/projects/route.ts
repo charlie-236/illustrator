@@ -82,6 +82,7 @@ export async function POST(req: NextRequest) {
     defaultCfg?: unknown;
     defaultWidth?: unknown;
     defaultHeight?: unknown;
+    defaultLightning?: unknown;
   };
   try {
     body = await req.json();
@@ -98,6 +99,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: validationError }, { status: 400 });
   }
 
+  const defaultLightning = body.defaultLightning === true ? true
+    : body.defaultLightning === false ? false
+    : null;
+
   try {
     const project = await prisma.project.create({
       data: {
@@ -109,6 +114,7 @@ export async function POST(req: NextRequest) {
         defaultCfg: typeof body.defaultCfg === 'number' ? body.defaultCfg : null,
         defaultWidth: typeof body.defaultWidth === 'number' ? body.defaultWidth : null,
         defaultHeight: typeof body.defaultHeight === 'number' ? body.defaultHeight : null,
+        defaultLightning,
       },
     });
 
@@ -122,6 +128,7 @@ export async function POST(req: NextRequest) {
       defaultCfg: project.defaultCfg,
       defaultWidth: project.defaultWidth,
       defaultHeight: project.defaultHeight,
+      defaultLightning: project.defaultLightning,
       createdAt: project.createdAt.toISOString(),
       updatedAt: project.updatedAt.toISOString(),
     }, { status: 201 });

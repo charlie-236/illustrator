@@ -23,6 +23,8 @@ export interface VideoJobParams {
   seed: number;
   mode: 't2v' | 'i2v';
   outputDir: string;
+  /** When true, generation used Lightning distillation (4-step, CFG=1, LCM sampler). */
+  lightning?: boolean;
   /** Optional project to associate this clip with. Position is auto-computed at save time. */
   projectId?: string;
 }
@@ -558,13 +560,13 @@ class ComfyWSManager {
           filePath,
           promptPos: videoParams.prompt,
           promptNeg: videoParams.negativePrompt,
-          model: `wan2.2-${videoParams.mode}`,
+          model: videoParams.lightning ? `wan2.2-${videoParams.mode}-lightning` : `wan2.2-${videoParams.mode}`,
           seed: BigInt(videoParams.seed),
           cfg: videoParams.cfg,
           steps: videoParams.steps,
           width: videoParams.width,
           height: videoParams.height,
-          sampler: 'euler',
+          sampler: videoParams.lightning ? 'lcm' : 'euler',
           scheduler: 'simple',
           highResFix: false,
           mediaType: 'video',

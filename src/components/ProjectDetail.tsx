@@ -488,6 +488,10 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
     defaultWidth: project.defaultWidth != null ? String(project.defaultWidth) : '',
     defaultHeight: project.defaultHeight != null ? String(project.defaultHeight) : '',
   });
+  // tri-state: null = no default, true = always on, false = always off
+  const [defaultLightning, setDefaultLightning] = useState<boolean | null>(
+    project.defaultLightning ?? null,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -507,6 +511,7 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
       defaultCfg: form.defaultCfg ? parseFloat(form.defaultCfg) : null,
       defaultWidth: form.defaultWidth ? parseInt(form.defaultWidth, 10) : null,
       defaultHeight: form.defaultHeight ? parseInt(form.defaultHeight, 10) : null,
+      defaultLightning,
     };
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
@@ -629,6 +634,32 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
                 onChange={(e) => set('defaultCfg', e.target.value)}
                 placeholder="3.5 (inherit)"
               />
+            </div>
+
+            <div className="mt-3">
+              <label className="label block mb-1">Default Lightning</label>
+              <div className="flex gap-2">
+                {([true, false, null] as const).map((val) => (
+                  <button
+                    key={String(val)}
+                    type="button"
+                    onClick={() => setDefaultLightning(val)}
+                    className={`flex-1 min-h-12 rounded-lg text-sm border transition-colors
+                      ${defaultLightning === val
+                        ? 'border-amber-500 bg-amber-500/20 text-amber-300'
+                        : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-500'}`}
+                  >
+                    {val === true ? '⚡ On' : val === false ? 'Off' : 'No default'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-500 mt-1">
+                {defaultLightning === true
+                  ? 'New clips will default to Lightning mode (4 steps, ~3 min).'
+                  : defaultLightning === false
+                    ? 'New clips will default to Lightning off (full quality).'
+                    : 'No override — clips keep whatever Lightning state was last used.'}
+              </p>
             </div>
           </div>
 
