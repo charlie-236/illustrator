@@ -832,8 +832,10 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const filteredSourceClips = stripFilter === 'images'
     ? clips.filter((c) => c.mediaType === 'image')
     : stripFilter === 'clips'
-      ? clips.filter((c) => c.mediaType === 'video')
-      : clips; // 'all' shows all source clips
+      ? clips.filter((c) => c.mediaType === 'video' && !c.isStitched)
+      : stripFilter === 'videos'
+        ? [] // 'videos' = stitched exports only; source clips excluded
+        : clips; // 'all' shows all source clips
 
   // Stitched exports shown in strip: only when filter is 'all' or 'videos'
   const filteredStitchedForStrip = (stripFilter === 'all' || stripFilter === 'videos')
