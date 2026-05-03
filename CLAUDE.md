@@ -848,6 +848,14 @@ New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `
 
 ---
 
+## Delete confirmation pattern
+
+Destructive actions in the app share a single confirm-dialog pattern: `<DeleteConfirmDialog>` requires the user to type the resource's name to enable the Delete button. Applied to project deletes, gallery modal deletes (image and video clips), and model-tab deletes (checkpoints, LoRAs, embeddings). The gallery's tile-level two-tap delete pattern is intentionally NOT replaced — different intents (sweep cleanup vs. deliberate single-item deletion) get different friction levels.
+
+Component: `src/components/DeleteConfirmDialog.tsx`. Props: `open`, `resourceType` (`'project' | 'clip' | 'checkpoint' | 'lora' | 'embedding'`), `resourceName`, `onConfirm`, `onCancel`, `warningMessage?`. Match is exact and case-sensitive. Enter submits when matched; Escape and backdrop-click cancel.
+
+---
+
 ## Not yet implemented (planned features)
 
 **Live step previews.** The architecture spec calls for catching the intermediate base64 preview images ComfyUI streams during sampling and displaying them in the UI as a live preview (updating every N steps). Currently `GenerationProgress` only shows a progress bar during generation and the final image on completion.

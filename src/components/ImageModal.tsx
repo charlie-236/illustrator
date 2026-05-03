@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { GenerationRecord, ProjectSummary } from '@/types';
 import { imgSrc } from '@/lib/imageSrc';
 import NewProjectModal from './NewProjectModal';
+import DeleteConfirmDialog from './DeleteConfirmDialog';
 
 interface Props {
   items: GenerationRecord[];
@@ -32,10 +33,9 @@ function HeartIcon({ filled }: { filled: boolean }) {
 export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject, onProjectAssign }: Props) {
   const [items, setItems] = useState(initialItems);
   const [idx, setIdx] = useState(Math.min(startIndex, Math.max(0, initialItems.length - 1)));
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const touchStartX = useRef<number | null>(null);
-  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Project picker state
   const [showPicker, setShowPicker] = useState(false);
@@ -45,15 +45,6 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
   const [assigning, setAssigning] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
 
-  function clearConfirmTimer() {
-    if (confirmTimerRef.current !== null) {
-      clearTimeout(confirmTimerRef.current);
-      confirmTimerRef.current = null;
-    }
-  }
-
-  // Clear any armed delete timer on unmount
-  useEffect(() => clearConfirmTimer, []);
 
   // Keep a ref to items.length so the keyboard handler never captures a stale value
   const itemsLenRef = useRef(items.length);
@@ -62,21 +53,22 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        if (showDeleteDialog) { setShowDeleteDialog(false); return; }
         if (showPicker) { setShowPicker(false); return; }
         if (showNewProjectModal) return;
         onClose();
         return;
       }
-      if (showPicker || showNewProjectModal) return;
+      if (showDeleteDialog || showPicker || showNewProjectModal) return;
       if (e.key === 'ArrowLeft') setIdx((i) => Math.max(0, i - 1));
       if (e.key === 'ArrowRight') setIdx((i) => Math.min(i + 1, itemsLenRef.current - 1));
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose, showPicker, showNewProjectModal]);
+  }, [onClose, showDeleteDialog, showPicker, showNewProjectModal]);
 
-  // Reset confirmation state whenever the user navigates to a different image
-  useEffect(() => { clearConfirmTimer(); setConfirmDelete(false); }, [idx]);
+  // Close the delete dialog when navigating to a different item
+  useEffect(() => { setShowDeleteDialog(false); }, [idx]);
 
   // Close picker when navigating
   useEffect(() => { setShowPicker(false); setPickerSearch(''); }, [idx]);
@@ -87,18 +79,9 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
     if (newIdx >= 0 && newIdx < items.length) setIdx(newIdx);
   }
 
-  async function handleDelete() {
+  async function confirmDeleteRecord() {
     if (!record) return;
-    if (!confirmDelete) {
-      clearConfirmTimer();
-      setConfirmDelete(true);
-      confirmTimerRef.current = setTimeout(() => {
-        setConfirmDelete(false);
-        confirmTimerRef.current = null;
-      }, 3500);
-      return;
-    }
-    clearConfirmTimer();
+    setShowDeleteDialog(false);
     setDeleting(true);
     try {
       await onDelete(record.id);
@@ -106,7 +89,6 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
       if (next.length === 0) { onClose(); return; }
       setItems(next);
       setIdx((prev) => Math.min(prev, next.length - 1));
-      setConfirmDelete(false);
     } catch {
       // delete failed — stay put, user can retry
     } finally {
@@ -233,26 +215,17 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           Remix
         </button>
 
-        {/* Delete (two-tap confirm) */}
+        {/* Delete */}
         <button
-          onClick={handleDelete}
+          onClick={() => setShowDeleteDialog(true)}
           disabled={deleting}
-          className={`min-h-12 px-4 flex items-center gap-2 rounded-xl font-semibold text-sm transition-colors flex-shrink-0 disabled:opacity-50
-            ${confirmDelete
-              ? 'bg-red-600 hover:bg-red-500 text-white'
-              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}`}
-          aria-label={confirmDelete ? 'Confirm delete' : 'Delete'}
+          className="min-h-12 px-4 flex items-center gap-2 rounded-xl font-semibold text-sm transition-colors flex-shrink-0 disabled:opacity-50 bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+          aria-label="Delete"
         >
-          {confirmDelete ? (
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          )}
-          {confirmDelete ? 'Confirm' : 'Delete'}
+          <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          Delete
         </button>
       </div>
 
@@ -502,6 +475,17 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
             setShowNewProjectModal(false);
             await assignProject(project.id, project.name);
           }}
+        />
+      )}
+
+      {/* Delete confirm dialog */}
+      {record && (
+        <DeleteConfirmDialog
+          open={showDeleteDialog}
+          resourceType="clip"
+          resourceName={record.promptPos.slice(0, 60)}
+          onConfirm={() => { void confirmDeleteRecord(); }}
+          onCancel={() => setShowDeleteDialog(false)}
         />
       )}
     </div>

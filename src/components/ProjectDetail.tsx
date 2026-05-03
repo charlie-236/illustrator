@@ -20,6 +20,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport } from '@/types';
 import ImageModal from './ImageModal';
+import DeleteConfirmDialog from './DeleteConfirmDialog';
 import { imgSrc } from '@/lib/imageSrc';
 import { useQueue } from '@/contexts/QueueContext';
 
@@ -670,13 +671,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [nameSaving, setNameSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [modalIdx, setModalIdx] = useState<number | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
-  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descValue, setDescValue] = useState('');
@@ -743,9 +743,6 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     return () => document.removeEventListener('mousedown', handler);
   }, [showOverflow]);
 
-  useEffect(() => () => {
-    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
-  }, []);
 
   async function saveName() {
     if (!project || nameValue.trim() === '' || nameValue.trim() === project.name) {
@@ -787,13 +784,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }
   }
 
-  async function handleDelete() {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      deleteTimerRef.current = setTimeout(() => setConfirmDelete(false), 4000);
-      return;
-    }
-    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+  async function confirmDeleteProject() {
+    setShowDeleteDialog(false);
     setDeleting(true);
     try {
       await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
@@ -926,17 +918,14 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             {showOverflow && (
               <div className="absolute right-0 top-full mt-1 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl z-30 min-w-44 overflow-hidden">
                 <button
-                  onClick={() => { setShowOverflow(false); void handleDelete(); }}
+                  onClick={() => { setShowOverflow(false); setShowDeleteDialog(true); }}
                   disabled={deleting}
-                  className={`w-full min-h-12 px-4 flex items-center gap-3 text-sm font-medium transition-colors
-                    ${confirmDelete
-                      ? 'bg-red-600 text-white'
-                      : 'text-red-400 hover:bg-zinc-800'}`}
+                  className="w-full min-h-12 px-4 flex items-center gap-3 text-sm font-medium text-red-400 hover:bg-zinc-800 transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
-                  {confirmDelete ? 'Tap again to confirm' : 'Delete project'}
+                  Delete project
                 </button>
               </div>
             )}
@@ -1235,6 +1224,16 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           }}
         />
       )}
+
+      {/* ── Delete confirm dialog ── */}
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        resourceType="project"
+        resourceName={project.name}
+        warningMessage={`${clips.length} clip${clips.length === 1 ? '' : 's'} will be unassigned (not deleted).`}
+        onConfirm={() => { void confirmDeleteProject(); }}
+        onCancel={() => setShowDeleteDialog(false)}
+      />
     </div>
   );
 }

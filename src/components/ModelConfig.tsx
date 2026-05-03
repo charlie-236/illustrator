@@ -5,6 +5,7 @@ import type { CheckpointConfig, EmbeddingConfig, LoraConfig } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
 import { useModelLists } from '@/lib/useModelLists';
+import DeleteConfirmDialog, { type DeleteResourceType } from '@/components/DeleteConfirmDialog';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -191,6 +192,8 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
   const [deletingModel, setDeletingModel] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [pendingDeleteType, setPendingDeleteType] = useState<'checkpoint' | 'lora' | 'embedding' | null>(null);
 
   function clearDeleteError() {
     if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
@@ -358,22 +361,27 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
     }
   }
 
-  async function deleteCurrentModel(type: 'checkpoint' | 'lora' | 'embedding') {
+  function deleteCurrentModel(type: 'checkpoint' | 'lora' | 'embedding') {
     const filename =
       type === 'checkpoint' ? selectedCheckpoint :
       type === 'lora' ? selectedLora :
       selectedEmbedding;
     if (!filename) return;
+    setPendingDeleteType(type);
+    setShowDeleteDialog(true);
+  }
 
-    const friendlyName =
-      type === 'checkpoint' ? (ckptNames[filename] || filename) :
-      type === 'lora' ? (loraNames[filename] || filename) :
-      (embeddingNames[filename] || filename);
+  async function executeDelete() {
+    const type = pendingDeleteType;
+    if (!type) return;
+    setShowDeleteDialog(false);
+    setPendingDeleteType(null);
 
-    const confirmed = window.confirm(
-      `Are you sure you want to permanently delete "${friendlyName}"?\n\nThis will remove the file from the server and cannot be undone.`,
-    );
-    if (!confirmed) return;
+    const filename =
+      type === 'checkpoint' ? selectedCheckpoint :
+      type === 'lora' ? selectedLora :
+      selectedEmbedding;
+    if (!filename) return;
 
     clearDeleteError();
     setDeletingModel(true);
@@ -973,6 +981,29 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
           </div>
         </>
       )}
+
+      {/* ── Delete confirm dialog ── */}
+      {pendingDeleteType && (() => {
+        const filename =
+          pendingDeleteType === 'checkpoint' ? selectedCheckpoint :
+          pendingDeleteType === 'lora' ? selectedLora :
+          selectedEmbedding;
+        const nameMap =
+          pendingDeleteType === 'checkpoint' ? ckptNames :
+          pendingDeleteType === 'lora' ? loraNames :
+          embeddingNames;
+        const resourceName = nameMap[filename] || filename;
+        return (
+          <DeleteConfirmDialog
+            open={showDeleteDialog}
+            resourceType={pendingDeleteType as DeleteResourceType}
+            resourceName={resourceName}
+            warningMessage="The file will be deleted from the VM and the metadata row from the database. This cannot be undone."
+            onConfirm={() => { void executeDelete(); }}
+            onCancel={() => { setShowDeleteDialog(false); setPendingDeleteType(null); }}
+          />
+        );
+      })()}
     </div>
   );
 }
