@@ -13,6 +13,7 @@ interface Props {
   onDelete: (id: string) => Promise<void>;
   /** Parent updates its own items state; modal does an optimistic local update. */
   onFavoriteToggle?: (id: string) => Promise<void>;
+  onNavigateToProject?: (projectId: string) => void;
 }
 
 function HeartIcon({ filled }: { filled: boolean }) {
@@ -25,7 +26,7 @@ function HeartIcon({ filled }: { filled: boolean }) {
   );
 }
 
-export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle }: Props) {
+export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject }: Props) {
   const [items, setItems] = useState(initialItems);
   const [idx, setIdx] = useState(Math.min(startIndex, Math.max(0, initialItems.length - 1)));
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -270,6 +271,21 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           )}
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
+        {record.mediaType === 'video' && (
+          <p className="text-xs text-zinc-500">
+            {'Project: '}
+            {record.projectId && record.projectName ? (
+              <button
+                onClick={() => { onNavigateToProject?.(record.projectId!); onClose(); }}
+                className="text-violet-400 hover:text-violet-300 underline underline-offset-2"
+              >
+                {record.projectName}
+              </button>
+            ) : (
+              <span className="text-zinc-600">None</span>
+            )}
+          </p>
+        )}
       </div>
     </div>
   );

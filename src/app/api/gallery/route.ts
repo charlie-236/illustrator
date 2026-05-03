@@ -25,12 +25,15 @@ export async function GET(req: NextRequest) {
       where,
       orderBy: { createdAt: 'desc' },
       take: limit,
+      include: { project: { select: { name: true } } },
     });
 
     const serialized = records.map((g) => ({
       ...g,
       seed: g.seed.toString(),
       createdAt: g.createdAt.toISOString(),
+      project: undefined,
+      projectName: g.project?.name ?? null,
     }));
 
     const nextCursor = records.length === limit
