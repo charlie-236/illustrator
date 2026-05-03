@@ -30,7 +30,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Honest disk-avoidance grep guard (i2v template fix) — `batch/wan22-template-loadimage-fix` (PR #21)
 - [x] Refresh survivability fix (abort vs disconnect) — `batch/wan22-refresh-survivability-fix` (PR #22)
 - [x] Wire abortJob to ComfyUI /interrupt — `batch/wan22-abort-comfyui-interrupt` (PR #23)
-- [ ] Projects schema and Projects tab (Phase 2.1) — see prompts/wan22-projects-schema-and-tab.md
+- [~] Projects schema and Projects tab (Phase 2.1) — `batch/wan22-projects-schema-and-tab` (PR #24)
 - [ ] Project generation flow + prompt threading + play-through (Phase 2.2) — see prompts/wan22-project-generation-flow.md
 - [ ] Per-checkpoint defaults — see prompts/checkpoint-defaults.md
 - [ ] Video settings popout (Studio UX consistency) — see prompts/wan22-studio-video-settings-popout.md
