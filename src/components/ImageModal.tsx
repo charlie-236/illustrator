@@ -466,11 +466,26 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
                 <span className="text-zinc-600">Project deleted</span>
               )}
             </p>
-            {record.stitchedClipIds && (
-              <p className="text-xs text-zinc-500">
-                Source clips: {(JSON.parse(record.stitchedClipIds) as string[]).length}
-              </p>
-            )}
+            {record.stitchedClipIds && (() => {
+              try {
+                const raw = JSON.parse(record.stitchedClipIds);
+                if (Array.isArray(raw)) {
+                  // Phase 3 format: plain string[]
+                  return <p className="text-xs text-zinc-500">Source clips: {raw.length}</p>;
+                }
+                // Phase 3.1 format: { selected: string[], total: number }
+                const { selected, total } = raw as { selected: string[]; total: number };
+                const projectLabel = record.parentProjectName ?? null;
+                return (
+                  <p className="text-xs text-zinc-500">
+                    Source clips: {selected.length} of {total}
+                    {projectLabel ? ` from project ${projectLabel}` : ''}
+                  </p>
+                );
+              } catch {
+                return null;
+              }
+            })()}
           </>
         )}
       </div>

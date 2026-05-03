@@ -40,7 +40,7 @@ export async function POST(
 
   const { id: projectId } = await params;
 
-  let body: { transition?: string };
+  let body: { transition?: string; clipIds?: string[] };
   try {
     body = await req.json();
   } catch {
@@ -50,7 +50,7 @@ export async function POST(
   const transition: 'hard-cut' | 'crossfade' =
     body.transition === 'crossfade' ? 'crossfade' : 'hard-cut';
 
-  // ─── load project + source clips ──────────────────────────────────────────
+  // ─── load project + all video clips ──────────────────────────────────────
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -60,17 +60,58 @@ export async function POST(
     return new Response(JSON.stringify({ error: 'Project not found' }), { status: 404 });
   }
 
-  const clips = await prisma.generation.findMany({
+  const allVideoClips = await prisma.generation.findMany({
     where: { projectId, mediaType: 'video' },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, filePath: true },
   });
 
-  if (clips.length < 2) {
-    return new Response(
-      JSON.stringify({ error: 'Need at least 2 clips to stitch' }),
-      { status: 400 },
-    );
+  const totalVideoCount = allVideoClips.length;
+
+  // ─── resolve clip selection ────────────────────────────────────────────────
+
+  let clips: { id: string; filePath: string }[];
+
+  if (body.clipIds !== undefined) {
+    if (body.clipIds.length < 2) {
+      return new Response(
+        JSON.stringify({ error: 'Need at least 2 video clips to stitch' }),
+        { status: 400 },
+      );
+    }
+
+    const videoClipMap = new Map(allVideoClips.map((c) => [c.id, c]));
+
+    for (const clipId of body.clipIds) {
+      if (!videoClipMap.has(clipId)) {
+        // Distinguish between non-video clip and foreign clip
+        const anyClip = await prisma.generation.findFirst({
+          where: { id: clipId, projectId },
+          select: { mediaType: true },
+        });
+        if (anyClip) {
+          return new Response(
+            JSON.stringify({ error: `Clip ${clipId} is not a video clip — only video clips can be stitched` }),
+            { status: 400 },
+          );
+        }
+        return new Response(
+          JSON.stringify({ error: `Clip ${clipId} does not belong to this project` }),
+          { status: 400 },
+        );
+      }
+    }
+
+    clips = body.clipIds.map((id) => videoClipMap.get(id)!);
+  } else {
+    // Default: all video clips in position order
+    if (allVideoClips.length < 2) {
+      return new Response(
+        JSON.stringify({ error: 'Need at least 2 video clips to stitch' }),
+        { status: 400 },
+      );
+    }
+    clips = allVideoClips;
   }
 
   // ─── build local paths ────────────────────────────────────────────────────
@@ -110,7 +151,8 @@ export async function POST(
       mediaType: 'video',
       isStitched: true,
       parentProjectId: projectId,
-      stitchedClipIds: JSON.stringify(clips.map((c) => c.id)),
+      // Store selection + total so gallery can show "X of N from project Y"
+      stitchedClipIds: JSON.stringify({ selected: clips.map((c) => c.id), total: totalVideoCount }),
     },
   });
 

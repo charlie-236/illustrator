@@ -736,7 +736,7 @@ Single `<video ref={playerRef}>` element. `playingIdx` state tracks the current 
 
 ## Project membership editing and image clips (Phase 2.3)
 
-Clips can be assigned to a project after creation via the gallery modal sidebar's project picker. Both image and video clips can be project members. The project detail view renders mixed-media linear strips with media-type-appropriate thumbnails (`<img>` for images, `<video>` for videos) and a per-strip All/Images/Videos filter (shown only when both types are present). Stitch (Phase 3) currently treats all clips uniformly; the upcoming Phase 3.1 batch adds explicit clip selection.
+Clips can be assigned to a project after creation via the gallery modal sidebar's project picker. Both image and video clips can be project members. The project detail view renders mixed-media linear strips with media-type-appropriate thumbnails (`<img>` for images, `<video>` for videos) and a per-strip All/Images/Videos filter (shown only when both types are present). Stitch (Phase 3.1) exposes per-clip selection and is video-only — image clips are excluded from the selection list entirely.
 
 ### Project picker in ImageModal
 
@@ -775,7 +775,7 @@ The **Stitch** button in `ProjectDetail` combines a project's video clips into a
 isStitched       Boolean  @default(false)
 parentProjectId  String?
 parentProject    Project? @relation("StitchedFromProject", fields: [parentProjectId], references: [id], onDelete: SetNull)
-stitchedClipIds  String?   // JSON array of source clip IDs
+stitchedClipIds  String?   // JSON: Phase 3 = string[] (plain array); Phase 3.1+ = { selected: string[], total: number }
 
 // Existing relation explicitly named (required when two relations exist between same models):
 project          Project? @relation("ProjectClips", fields: [projectId], references: [id], onDelete: SetNull)
@@ -805,7 +805,9 @@ Internal helpers: `parseFps()`, `probeClip()` (ffprobe JSON), `runFfmpeg()` (spa
 
 ### `POST /api/projects/[id]/stitch`
 
-SSE route. Body: `{ transition?: 'hard-cut' | 'crossfade' }` (default hard-cut). Requires ≥ 2 video clips. Creates a pending `Generation` row (`isStitched: true`, `parentProjectId`, `stitchedClipIds`), emits an `init` SSE with `{ promptId, generationId }`, registers the job in `ComfyWSManager`, then fires `stitchProject()` fire-and-forget.
+SSE route. Body: `{ transition?: 'hard-cut' | 'crossfade', clipIds?: string[] }` (default hard-cut; clipIds optional). The `clipIds` array, when provided, specifies which video clips to stitch and in what order. Every entry must reference a video clip belonging to the project — non-video clip IDs return 400 to surface client-side bugs early. When omitted, defaults to all video clips in position order. Requires ≥ 2 video clips (either selected or total). Creates a pending `Generation` row (`isStitched: true`, `parentProjectId`, `stitchedClipIds`), emits an `init` SSE with `{ promptId, generationId }`, registers the job in `ComfyWSManager`, then fires `stitchProject()` fire-and-forget.
+
+`stitchedClipIds` is stored as `{ selected: string[], total: number }` where `selected` is the ordered list actually stitched and `total` is the project's video clip count at stitch time. This lets the gallery sidebar show "X of N from project Y". Pre-Phase-3.1 rows have the plain array format and are handled gracefully in `ImageModal`.
 
 SSE events:
 | event | data |
@@ -824,15 +826,15 @@ New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `
 
 ### UI
 
-**Stitch button** — sits alongside "Generate new clip" in `ProjectDetail`. Disabled (with tooltip) when clip count < 2.
+**Stitch button** — sits alongside "Generate new clip" in `ProjectDetail`. Disabled when the project has no clips at all; the modal itself handles the no-video-clips case with an empty state message.
 
-**`StitchModal`** — bottom sheet. Idle state: transition selector (hard-cut / crossfade 0.5s) + "Stitch N clips" button. Running state: ffmpeg progress bar + Abort button. Done state: success message + Close button. Error state: error text + Try again / Close buttons. Wires into `QueueContext` (`addJob`, `setCompleting`, `completeJob`, `failJob`) so the stitch appears in `QueueTray`.
+**`StitchModal`** — bottom sheet. Idle state (has video clips): per-clip selection list (checkboxes, all checked by default) + "Select all / Deselect all" links + live summary ("Stitching X of Y clips, Z.Zs total") + transition selector (hard-cut / crossfade 0.5s) + "Stitch N clips" button (disabled if < 2 selected) + Cancel button. Image clips are excluded from the list entirely. Idle state (no video clips): empty-state message. Running state: ffmpeg progress bar + Abort button. Done state: success message + Close button. Error state: error text + Try again / Close buttons. Wires into `QueueContext` (`addJob`, `setCompleting`, `completeJob`, `failJob`) so the stitch appears in `QueueTray`. Passes `clipIds` (selected, in displayed order) to `POST /api/projects/[id]/stitch`.
 
 **Stitched exports section** — below the clip strip in `ProjectDetail`. Shows each stitched export with a video thumbnail, duration, frame count, date, and a download link. Prepended optimistically when a new stitch completes.
 
 **Gallery badge** — emerald **Stitched** pill in the top-left corner of Gallery tiles with `isStitched: true`.
 
-**`ImageModal` metadata** — stitched videos show "Stitched from project: [name]" (tappable link to project) or "Project deleted" if `parentProjectId` is null. Also shows "Source clips: N" from `stitchedClipIds`.
+**`ImageModal` metadata** — stitched videos show "Stitched from project: [name]" (tappable link to project) or "Project deleted" if `parentProjectId` is null. Source clips line: Phase 3 rows (plain `string[]` format) show "Source clips: N"; Phase 3.1+ rows (`{ selected, total }` format) show "Source clips: X of N from project [name]" (project name omitted if project was deleted).
 
 **`QueueTray`** — stitch jobs show a chain/link SVG icon in `text-emerald-400`.
 
