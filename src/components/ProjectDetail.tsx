@@ -77,18 +77,43 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
 interface StitchModalProps {
   projectId: string;
   projectName: string;
-  clipCount: number;
+  /** All video clips in the project, in position order. */
+  videoClips: ProjectClip[];
+  /** All clips (video + image) — used to compute each video clip's project-wide position number. */
+  allClips: ProjectClip[];
   onClose: () => void;
   onStitched: (export_: ProjectStitchedExport) => void;
 }
 
-function StitchModal({ projectId, projectName, clipCount, onClose, onStitched }: StitchModalProps) {
+function StitchModal({ projectId, projectName, videoClips, allClips, onClose, onStitched }: StitchModalProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(videoClips.map((c) => c.id)),
+  );
   const [transition, setTransition] = useState<'hard-cut' | 'crossfade'>('hard-cut');
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const { addJob, setCompleting, completeJob, failJob } = useQueue();
+
+  const selectedClips = videoClips.filter((c) => selectedIds.has(c.id));
+  const totalDurationSec = selectedClips.reduce(
+    (s, c) => s + (c.fps > 0 ? c.frames / c.fps : 0),
+    0,
+  );
+  const canStitch = selectedClips.length >= 2;
+
+  function toggleClip(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll(select: boolean) {
+    setSelectedIds(select ? new Set(videoClips.map((c) => c.id)) : new Set());
+  }
 
   async function handleStitch() {
     setStatus('running');
@@ -97,11 +122,13 @@ function StitchModal({ projectId, projectName, clipCount, onClose, onStitched }:
     const ac = new AbortController();
     abortRef.current = ac;
 
+    const clipIds = videoClips.filter((c) => selectedIds.has(c.id)).map((c) => c.id);
+
     try {
       const res = await fetch(`/api/projects/${projectId}/stitch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transition }),
+        body: JSON.stringify({ transition, clipIds }),
         signal: ac.signal,
       });
 
@@ -145,9 +172,6 @@ function StitchModal({ projectId, projectName, clipCount, onClose, onStitched }:
           } else if (eventName === 'progress') {
             const parsed = JSON.parse(data) as { value: number; max: number };
             setProgress({ current: parsed.value, total: parsed.max });
-            if (promptId) {
-              // progress update via queue happens via polling; just update local state
-            }
           } else if (eventName === 'completing') {
             if (promptId) setCompleting(promptId);
           } else if (eventName === 'complete') {
@@ -185,7 +209,7 @@ function StitchModal({ projectId, projectName, clipCount, onClose, onStitched }:
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={status === 'idle' ? onClose : undefined}>
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-sm"
+        className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800">
@@ -202,35 +226,119 @@ function StitchModal({ projectId, projectName, clipCount, onClose, onStitched }:
         <div className="px-5 py-4 space-y-4">
           {status === 'idle' && (
             <>
-              <p className="text-sm text-zinc-400">
-                Combine {clipCount} clips into a single mp4 file. The stitched video will appear in your Gallery.
-              </p>
+              {videoClips.length === 0 ? (
+                <p className="text-sm text-zinc-400 py-2">
+                  This project has no videos to stitch. Add video clips first.
+                </p>
+              ) : (
+                <>
+                  {/* Select all / deselect all + live summary */}
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-300">
+                      Stitching {selectedClips.length} of {videoClips.length} clip{videoClips.length !== 1 ? 's' : ''}
+                      {selectedClips.length > 0 && `, ${totalDurationSec.toFixed(1)}s total`}
+                    </p>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleAll(true)}
+                        className="text-xs text-emerald-400 hover:text-emerald-300 min-h-8 px-1"
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleAll(false)}
+                        className="text-xs text-zinc-500 hover:text-zinc-300 min-h-8 px-1"
+                      >
+                        Deselect all
+                      </button>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="label block mb-2">Transition</label>
-                <div className="flex gap-2">
-                  {(['hard-cut', 'crossfade'] as const).map((t) => (
+                  {/* Per-clip selection list */}
+                  <div className="max-h-64 overflow-y-auto -mx-1 space-y-1">
+                    {videoClips.map((clip) => {
+                      const posNum = allClips.indexOf(clip) + 1;
+                      const durationSec = clip.fps > 0 ? (clip.frames / clip.fps).toFixed(1) : null;
+                      const checked = selectedIds.has(clip.id);
+                      return (
+                        <label
+                          key={clip.id}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-colors
+                            ${checked ? 'bg-emerald-600/10 border border-emerald-700/30' : 'border border-transparent hover:bg-zinc-800'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleClip(clip.id)}
+                            className="w-4 h-4 rounded accent-emerald-500 flex-shrink-0"
+                          />
+                          {/* Position badge */}
+                          <span className="flex-shrink-0 w-6 h-6 rounded bg-zinc-700 text-zinc-300 text-xs font-bold flex items-center justify-center">
+                            {posNum}
+                          </span>
+                          {/* Thumbnail */}
+                          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                          <video
+                            src={imgSrc(clip.filePath)}
+                            preload="metadata"
+                            muted
+                            playsInline
+                            className="flex-shrink-0 w-10 h-10 rounded object-cover bg-zinc-800"
+                          />
+                          {/* Prompt + duration */}
+                          <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                            <span className="text-xs text-zinc-300 truncate">
+                              {clip.prompt.slice(0, 60) || '(no prompt)'}
+                            </span>
+                            {durationSec && (
+                              <span className="text-xs text-zinc-500">{durationSec}s</span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Transition selector */}
+                  <div>
+                    <label className="label block mb-2">Transition</label>
+                    <div className="flex gap-2">
+                      {(['hard-cut', 'crossfade'] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setTransition(t)}
+                          className={`flex-1 min-h-12 rounded-xl text-sm font-medium border transition-colors
+                            ${transition === t
+                              ? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
+                              : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-500'}`}
+                        >
+                          {t === 'hard-cut' ? 'Hard cut' : 'Crossfade (0.5s)'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
                     <button
-                      key={t}
                       type="button"
-                      onClick={() => setTransition(t)}
-                      className={`flex-1 min-h-12 rounded-xl text-sm font-medium border transition-colors
-                        ${transition === t
-                          ? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
-                          : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-500'}`}
+                      onClick={onClose}
+                      className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
                     >
-                      {t === 'hard-cut' ? 'Hard cut' : 'Crossfade (0.5s)'}
+                      Cancel
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                onClick={() => void handleStitch()}
-                className="w-full min-h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors"
-              >
-                Stitch {clipCount} clips
-              </button>
+                    <button
+                      onClick={() => void handleStitch()}
+                      disabled={!canStitch}
+                      className="flex-1 min-h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      Stitch {selectedClips.length} clips
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -883,8 +991,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         </button>
         <button
           onClick={() => setShowStitch(true)}
-          disabled={clips.length < 2}
-          title={clips.length < 2 ? 'Need at least 2 clips to stitch' : `Stitch ${clips.length} clips`}
+          disabled={clips.length === 0}
+          title={clips.length === 0 ? 'No clips to stitch' : undefined}
           className="min-h-12 px-4 rounded-xl border border-emerald-600/40 bg-emerald-600/10 hover:bg-emerald-600/20 hover:border-emerald-600/60 text-emerald-300 hover:text-emerald-200 text-sm font-medium flex items-center gap-2 transition-colors disabled:opacity-40 disabled:pointer-events-none"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1116,7 +1224,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         <StitchModal
           projectId={projectId}
           projectName={project.name}
-          clipCount={clips.length}
+          videoClips={videoClips}
+          allClips={clips}
           onClose={() => setShowStitch(false)}
           onStitched={(export_) => {
             setStitchedExports((prev) => [export_, ...prev]);
