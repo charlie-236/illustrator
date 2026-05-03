@@ -30,8 +30,15 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Honest disk-avoidance grep guard (i2v template fix) — `batch/wan22-template-loadimage-fix` (PR #21)
 - [x] Refresh survivability fix (abort vs disconnect) — `batch/wan22-refresh-survivability-fix` (PR #22)
 - [x] Wire abortJob to ComfyUI /interrupt — `batch/wan22-abort-comfyui-interrupt` (PR #23)
-- [~] Projects schema and Projects tab (Phase 2.1) — `batch/wan22-projects-schema-and-tab` (PR #24)
-- [~] Project generation flow + prompt threading + play-through (Phase 2.2) — `batch/wan22-project-generation-flow` (PR #25)
-- [~] Per-checkpoint defaults — `batch/checkpoint-defaults` (PR #26)
-- [~] Video settings popout (Studio UX consistency) — `batch/wan22-studio-video-settings-popout` (PR #27)
-- [~] Project stitching (Phase 3 of video) — `batch/wan22-project-stitching` (PR #28)
+- [x] Projects schema and Projects tab (Phase 2.1) — `batch/wan22-projects-schema-and-tab` (PR #24)
+- [x] Project generation flow + prompt threading + play-through (Phase 2.2) — `batch/wan22-project-generation-flow` (PR #25)
+- [x] Per-checkpoint defaults — `batch/checkpoint-defaults` (PR #26)
+- [x] Video settings popout (Studio UX consistency) — `batch/wan22-studio-video-settings-popout` (PR #27)
+- [x] Project stitching (Phase 3 of video) — `batch/wan22-project-stitching` (PR #28)
+- [ ] Assign-to-project + image clips as project members (Phase 2.3) — see prompts/wan22-assign-to-project.md
+- [ ] Stitch clip selection (Phase 3.1) — see prompts/wan22-stitch-clip-selection.md
+- [ ] Phase 2/3 cleanup bundle (orphan position + Studio pill staleness + ckpt resolution UX) — see prompts/phase-2-3-cleanup-bundle.md
+- [ ] Queue tray "Queued" status — see prompts/queue-tray-queued-status.md
+- [ ] Delete confirmation dialog (consistency across destructive actions) — see prompts/delete-confirm-dialog.md
+- [ ] Studio project switcher — see prompts/studio-project-switcher.md
+- [ ] Cascade delete option on projects — see prompts/project-cascade-delete.md
