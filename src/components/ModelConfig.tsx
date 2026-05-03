@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckpointConfig, EmbeddingConfig, LoraConfig } from '@/types';
-import { SAMPLERS, SCHEDULERS } from '@/types';
+import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import IngestPanel from '@/components/IngestPanel';
 import { useModelLists } from '@/lib/useModelLists';
 
@@ -11,8 +11,8 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 const CKPT_BLANK = {
   friendlyName: '',
   baseModel: '',
-  defaultWidth: 1024,
-  defaultHeight: 1024,
+  defaultWidth: null as number | null,
+  defaultHeight: null as number | null,
   defaultPositivePrompt: '',
   defaultNegativePrompt: '',
   description: '',
@@ -592,25 +592,26 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
                 <div className="space-y-4 pt-1">
 
                   {/* Resolution */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">Default Width</label>
-                      <input
-                        type="number" min={64} max={4096} step={64}
-                        value={ckptForm.defaultWidth}
-                        onChange={(e) => ckptField('defaultWidth', parseInt(e.target.value, 10))}
-                        className="input-base"
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Default Height</label>
-                      <input
-                        type="number" min={64} max={4096} step={64}
-                        value={ckptForm.defaultHeight}
-                        onChange={(e) => ckptField('defaultHeight', parseInt(e.target.value, 10))}
-                        className="input-base"
-                      />
-                    </div>
+                  <div>
+                    <label className="label">Default Resolution</label>
+                    <select
+                      value={RESOLUTIONS.find((r) => r.w === ckptForm.defaultWidth && r.h === ckptForm.defaultHeight)?.label ?? ''}
+                      onChange={(e) => {
+                        const res = RESOLUTIONS.find((r) => r.label === e.target.value);
+                        if (res) {
+                          setCkptForm((prev) => ({ ...prev, defaultWidth: res.w, defaultHeight: res.h }));
+                        } else {
+                          setCkptForm((prev) => ({ ...prev, defaultWidth: null, defaultHeight: null }));
+                        }
+                        setCkptStatus('idle');
+                      }}
+                      className="input-base"
+                    >
+                      <option value="">— No default —</option>
+                      {RESOLUTIONS.map((r) => (
+                        <option key={r.label} value={r.label}>{r.label}</option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* Steps + CFG */}

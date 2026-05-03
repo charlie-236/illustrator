@@ -796,6 +796,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     setDeleting(true);
     try {
       await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      window.dispatchEvent(new CustomEvent('project-deleted', { detail: { id: projectId } }));
       onDeleted();
     } finally {
       setDeleting(false);

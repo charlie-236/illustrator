@@ -63,8 +63,8 @@ model CheckpointConfig {
   checkpointName        String   @unique
   friendlyName          String   @default("")
   baseModel             String   @default("")
-  defaultWidth          Int      @default(512)
-  defaultHeight         Int      @default(512)
+  defaultWidth          Int?
+  defaultHeight         Int?
   defaultPositivePrompt String   @default("")
   defaultNegativePrompt String   @default("")
   description           String?

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { SAMPLERS, SCHEDULERS } from '@/types';
+import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,13 +28,15 @@ export async function GET(req: NextRequest) {
   }
 }
 
+const VALID_RESOLUTION_PAIRS = new Set(RESOLUTIONS.map((r) => `${r.w}x${r.h}`));
+
 export async function PUT(req: NextRequest) {
   let body: {
     checkpointName: string;
     friendlyName: string;
     baseModel?: string;
-    defaultWidth: number;
-    defaultHeight: number;
+    defaultWidth: number | null;
+    defaultHeight: number | null;
     defaultPositivePrompt: string;
     defaultNegativePrompt: string;
     description?: string;
@@ -57,6 +59,18 @@ export async function PUT(req: NextRequest) {
   } = body;
 
   if (!checkpointName) return NextResponse.json({ error: 'checkpointName required' }, { status: 400 });
+
+  // Validate resolution: must be a known pair or both null
+  if (defaultWidth != null || defaultHeight != null) {
+    if (defaultWidth == null || defaultHeight == null) {
+      return NextResponse.json({ error: 'defaultWidth and defaultHeight must both be set or both null' }, { status: 400 });
+    }
+    if (!VALID_RESOLUTION_PAIRS.has(`${defaultWidth}x${defaultHeight}`)) {
+      return NextResponse.json({
+        error: `defaultWidth/defaultHeight must be a supported resolution pair (e.g. ${RESOLUTIONS.map((r) => r.label).join(', ')}) or both null`,
+      }, { status: 400 });
+    }
+  }
 
   // Validate generation defaults
   if (defaultSteps != null) {

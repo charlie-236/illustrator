@@ -185,7 +185,13 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    await prisma.project.delete({ where: { id } });
+    await prisma.$transaction([
+      prisma.generation.updateMany({
+        where: { projectId: id },
+        data: { position: null },
+      }),
+      prisma.project.delete({ where: { id } }),
+    ]);
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const code = (err as { code?: string }).code;
