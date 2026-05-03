@@ -529,14 +529,29 @@ The default negative prompt on node 7 is verbatim Alibaba-recommended Chinese te
 |---|---|
 | `width`, `height` | Integer, multiple of 32, 256–1280 inclusive |
 | `frames` | Integer, `(frames - 1) % 8 === 0`, 17–121 inclusive (e.g. 17, 25, 33, …, 121) |
-| `steps` | Even integer, 4–40 inclusive |
-| `cfg` | Number, 1.0–10.0 inclusive |
+| `steps` | Even integer, 4–40 inclusive (skipped when `lightning: true` — overridden to 4) |
+| `cfg` | Number, 1.0–10.0 inclusive (skipped when `lightning: true` — overridden to 1) |
 | `mode='i2v'` | `startImageB64` required |
 | `mode='t2v'` | `startImageB64` forbidden |
 
+### Lightning mode
+
+Wan 2.2 Lightning is a 4-step distilled mode using lightx2v's Seko LoRAs. When the Lightning toggle is on, the workflow builder injects two `LoraLoaderModelOnly` nodes (one per UNet expert), forces steps=4 and CFG=1, switches the sampler to `lcm`, and otherwise produces the same output structure. Generation time drops from ~14 min to ~3 min at the cost of some quality loss. The toggle lives at the top of the video settings popout, defaults off, and is overridable per project via the project's `defaultLightning` field.
+
+LoRA layout on the VM (preserves upstream filenames; subdirectory naming disambiguates variants):
+
+- `loras/wan22-lightning-t2v/high_noise_model.safetensors`
+- `loras/wan22-lightning-t2v/low_noise_model.safetensors`
+- `loras/wan22-lightning-i2v/high_noise_model.safetensors`
+- `loras/wan22-lightning-i2v/low_noise_model.safetensors`
+
+Reference workflows from lightx2v are stashed in `loras/_reference/`. If lightx2v ships v1.2+, the upgrade is to drop the new safetensors into the same subdirectories — no code changes needed.
+
+When `lightning: true` is sent to `/api/generate-video`, the route silently overrides whatever `steps` and `cfg` the caller sent (debug-logged). The Studio UI already locks those fields visually when the toggle is on. The DB record stores `model: 'wan2.2-t2v-lightning'` (or `-i2v-lightning`) and `sampler: 'lcm'` for lightning generations; full-quality generations remain `euler`.
+
 ### `/api/generate-video` endpoint
 
-**Request:** POST with JSON body `{ mode, prompt, negativePrompt?, width, height, frames, steps, cfg, seed?, startImageB64? }`.
+**Request:** POST with JSON body `{ mode, prompt, negativePrompt?, width, height, frames, steps, cfg, seed?, startImageB64?, lightning? }`.
 
 **Response:** SSE stream. Events:
 | event | data shape |
@@ -547,7 +562,7 @@ The default negative prompt on node 7 is verbatim Alibaba-recommended Chinese te
 
 **Watchdog timeout:** 15 minutes (image jobs use 10 minutes). Set via `registerVideoJob`'s `timeoutMs` parameter.
 
-**DB record:** `Generation` row with `mediaType: 'video'`, `frames`, `fps: 16`, `model: 'wan2.2-t2v'` or `'wan2.2-i2v'`. `sampler: 'euler'`, `scheduler: 'simple'` are hardcoded (Wan 2.2 defaults).
+**DB record:** `Generation` row with `mediaType: 'video'`, `frames`, `fps: 16`, `model: 'wan2.2-t2v'` or `'wan2.2-i2v'` (lightning variants append `-lightning`). `sampler: 'euler'` (or `'lcm'` for lightning), `scheduler: 'simple'`.
 
 ### Studio UI (Phase 1.2a)
 
@@ -653,14 +668,15 @@ model Project {
   name           String
   description    String?
   styleNote      String?
-  defaultFrames  Int?
-  defaultSteps   Int?
-  defaultCfg     Float?
-  defaultWidth   Int?
-  defaultHeight  Int?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  generations    Generation[]
+  defaultFrames    Int?
+  defaultSteps     Int?
+  defaultCfg       Float?
+  defaultWidth     Int?
+  defaultHeight    Int?
+  defaultLightning Boolean?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  generations      Generation[]
 }
 
 // New fields on Generation:

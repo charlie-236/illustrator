@@ -23,6 +23,7 @@ interface VideoRequest {
   seed?: number;
   startImageB64?: string;
   projectId?: string;
+  lightning?: boolean;
 }
 
 const SSE_HEADERS = {
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
   // ─── validation ───────────────────────────────────────────────────────────
 
   const { mode, prompt, negativePrompt, width, height, frames, steps, cfg, startImageB64 } = body;
+  const lightning = body.lightning === true;
 
   if (mode !== 't2v' && mode !== 'i2v') {
     return new Response(JSON.stringify({ error: "mode must be 't2v' or 'i2v'" }), { status: 400 });
@@ -78,11 +80,15 @@ export async function POST(req: NextRequest) {
   if (!Number.isInteger(frames) || frames < 17 || frames > 121 || (frames - 1) % 8 !== 0) {
     return new Response(JSON.stringify({ error: 'frames must be an integer satisfying (frames-1) % 8 === 0, range 17–121 (e.g. 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121)' }), { status: 400 });
   }
-  if (!Number.isInteger(steps) || steps < 4 || steps > 40 || steps % 2 !== 0) {
-    return new Response(JSON.stringify({ error: 'steps must be an even integer, 4–40 inclusive' }), { status: 400 });
-  }
-  if (typeof cfg !== 'number' || !Number.isFinite(cfg) || cfg < 1.0 || cfg > 10.0) {
-    return new Response(JSON.stringify({ error: 'cfg must be a number 1.0–10.0 inclusive' }), { status: 400 });
+  // When lightning=true, steps and cfg are silently overridden to 4 and 1 below.
+  // Skip strict validation for those fields so non-UI callers aren't rejected.
+  if (!lightning) {
+    if (!Number.isInteger(steps) || steps < 4 || steps > 40 || steps % 2 !== 0) {
+      return new Response(JSON.stringify({ error: 'steps must be an even integer, 4–40 inclusive' }), { status: 400 });
+    }
+    if (typeof cfg !== 'number' || !Number.isFinite(cfg) || cfg < 1.0 || cfg > 10.0) {
+      return new Response(JSON.stringify({ error: 'cfg must be a number 1.0–10.0 inclusive' }), { status: 400 });
+    }
   }
   if (mode === 'i2v' && !startImageB64) {
     return new Response(JSON.stringify({ error: "startImageB64 is required for mode='i2v'" }), { status: 400 });
@@ -111,6 +117,12 @@ export async function POST(req: NextRequest) {
   const generationId = uuidv4();
   const filenamePrefix = randomBytes(8).toString('hex'); // 16 hex chars, ~64 bits entropy
 
+  // Lightning mode overrides steps and CFG regardless of what the caller sent.
+  const effectiveSteps = lightning ? 4 : steps;
+  const effectiveCfg = lightning ? 1 : cfg;
+  if (lightning && steps !== 4) console.debug('[generate-video] lightning: overriding steps', steps, '→ 4');
+  if (lightning && cfg !== 1) console.debug('[generate-video] lightning: overriding cfg', cfg, '→ 1');
+
   const videoParams = {
     generationId,
     filenamePrefix,
@@ -122,11 +134,12 @@ export async function POST(req: NextRequest) {
     width,
     height,
     frames,
-    steps,
-    cfg,
+    steps: effectiveSteps,
+    cfg: effectiveCfg,
     seed,
     mode,
     outputDir,
+    lightning,
     ...(body.projectId ? { projectId: body.projectId } : {}),
   };
 

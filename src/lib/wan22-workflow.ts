@@ -23,6 +23,8 @@ export interface VideoParams {
   steps: number;
   cfg: number;
   seed: number;
+  /** When true, injects lightx2v Lightning LoRAs, forces steps=4, CFG=1, sampler=lcm. */
+  lightning?: boolean;
 }
 
 function deepClone(obj: unknown): ComfyWorkflow {
@@ -51,6 +53,39 @@ function applyCfg(wf: ComfyWorkflow, cfg: number): void {
   wf['58'].inputs.cfg = cfg;
 }
 
+// Inject lightx2v Lightning LoRAs and rewire ModelSamplingSD3 nodes.
+// nodes 37 (high-noise UNETLoader) and 56 (low-noise UNETLoader) are the
+// existing UNET loaders. Lightning LoRAs wrap each one as nodes 100/101,
+// then ModelSamplingSD3 nodes 54/55 are rewired to consume the LoRA outputs.
+function applyLightning(wf: ComfyWorkflow, variant: 'wan22-lightning-t2v' | 'wan22-lightning-i2v'): void {
+  wf['100'] = {
+    class_type: 'LoraLoaderModelOnly',
+    inputs: {
+      lora_name: `${variant}/high_noise_model.safetensors`,
+      strength_model: 1.0,
+      model: ['37', 0],
+    },
+    _meta: { title: 'Lightning LoRA (high noise)' },
+  };
+  wf['101'] = {
+    class_type: 'LoraLoaderModelOnly',
+    inputs: {
+      lora_name: `${variant}/low_noise_model.safetensors`,
+      strength_model: 1.0,
+      model: ['56', 0],
+    },
+    _meta: { title: 'Lightning LoRA (low noise)' },
+  };
+
+  // Rewire ModelSamplingSD3 nodes to consume LoRA outputs instead of UNETLoaders
+  wf['54'].inputs.model = ['100', 0];
+  wf['55'].inputs.model = ['101', 0];
+
+  // LCM sampler required for Lightning distillation
+  wf['57'].inputs.sampler_name = 'lcm';
+  wf['58'].inputs.sampler_name = 'lcm';
+}
+
 export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
   const wf = deepClone(t2vTemplate);
 
@@ -66,11 +101,14 @@ export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
   // Seed
   wf['57'].inputs.noise_seed = params.seed;
 
-  // MoE step coupling — four fields via helper
-  applySteps(wf, params.steps);
-
-  // CFG — both sampler nodes must stay in sync
-  applyCfg(wf, params.cfg);
+  if (params.lightning) {
+    applyLightning(wf, 'wan22-lightning-t2v');
+    applySteps(wf, 4);
+    applyCfg(wf, 1);
+  } else {
+    applySteps(wf, params.steps);
+    applyCfg(wf, params.cfg);
+  }
 
   // SaveWEBM filename prefix — random hex string, set by the route
   wf['47'].inputs.filename_prefix = params.filenamePrefix;
@@ -96,11 +134,14 @@ export function buildI2VWorkflow(params: VideoParams & { startImageB64: string }
   // Seed
   wf['57'].inputs.noise_seed = params.seed;
 
-  // MoE step coupling — four fields via helper
-  applySteps(wf, params.steps);
-
-  // CFG — both sampler nodes must stay in sync
-  applyCfg(wf, params.cfg);
+  if (params.lightning) {
+    applyLightning(wf, 'wan22-lightning-i2v');
+    applySteps(wf, 4);
+    applyCfg(wf, 1);
+  } else {
+    applySteps(wf, params.steps);
+    applyCfg(wf, params.cfg);
+  }
 
   // SaveWEBM filename prefix — random hex string, set by the route
   wf['47'].inputs.filename_prefix = params.filenamePrefix;

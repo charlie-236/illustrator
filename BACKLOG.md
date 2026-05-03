@@ -42,5 +42,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Delete confirmation dialog (consistency across destructive actions) — `batch/delete-confirm-dialog` (PR #33)
 - [~] Studio project switcher — `batch/studio-project-switcher` (PR #34)
 - [~] Cascade delete option on projects — `batch/project-cascade-delete` (PR #35)
-- [ ] Wan 2.2 Lightning toggle (Phase 1.4a) — see prompts/wan22-lightning-toggle.md
+- [~] Wan 2.2 Lightning toggle (Phase 1.4a) — `batch/wan22-lightning-toggle` (PR #36)
 - [ ] Wan 2.2 LoRA support (Phase 1.4b) — see prompts/wan22-lora-support.md

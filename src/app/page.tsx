@@ -88,6 +88,7 @@ export default function Home() {
         cfg: project.defaultCfg,
         width: project.defaultWidth,
         height: project.defaultHeight,
+        lightning: project.defaultLightning ?? null,
       },
     };
     setProjectContextTrigger(context);

@@ -111,6 +111,7 @@ export interface ProjectDetail {
   defaultCfg: number | null;
   defaultWidth: number | null;
   defaultHeight: number | null;
+  defaultLightning: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -179,6 +180,7 @@ export interface ProjectContext {
     cfg: number | null;
     width: number | null;
     height: number | null;
+    lightning: boolean | null;
   };
 }
 
