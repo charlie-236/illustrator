@@ -166,6 +166,7 @@ function StitchModal({ projectId, projectName, videoClips, allClips, onClose, on
               mediaType: 'stitch',
               promptSummary: `Stitched: ${projectName}`.slice(0, 60),
               startedAt: Date.now(),
+              runningSince: Date.now(),
               progress: null,
               status: 'running',
             });

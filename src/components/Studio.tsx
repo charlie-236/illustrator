@@ -210,10 +210,12 @@ export default function Studio({
             mediaType: sj.mediaType,
             promptSummary: sj.promptSummary,
             startedAt: sj.startedAt || Date.now(),
+            runningSince: sj.runningSince ?? null,
             progress: sj.progress,
             // Map server status to client status
             status: sj.status === 'done' ? 'done'
               : sj.status === 'error' ? 'error'
+              : sj.status === 'queued' ? 'queued'
               : 'running',
           };
           if (sj.status === 'error') job.errorMessage = sj.errorMessage;
@@ -484,8 +486,9 @@ export default function Studio({
       mediaType: 'image',
       promptSummary,
       startedAt: submitTime,
+      runningSince: null,
       progress: null,
-      status: 'running',
+      status: 'queued',
     });
 
     // Request notification permission on first submit
@@ -633,8 +636,9 @@ export default function Studio({
                   mediaType: 'video',
                   promptSummary,
                   startedAt: submitTime,
+                  runningSince: null,
                   progress: null,
-                  status: 'running',
+                  status: 'queued',
                 });
                 requestPermissionIfNeeded();
               }
