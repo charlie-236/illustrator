@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export type DeleteResourceType = 'project' | 'clip' | 'checkpoint' | 'lora' | 'embedding';
 
@@ -20,38 +20,61 @@ interface Props {
   cascadeInfo?: CascadeInfo;
 }
 
+const CASCADE_DELAY_SECS = 2;
+
 export default function DeleteConfirmDialog({ open, resourceType, resourceName, onConfirm, onCancel, warningMessage, cascadeInfo }: Props) {
-  const [inputValue, setInputValue] = useState('');
   const [cascade, setCascade] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [cascadeReady, setCascadeReady] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(CASCADE_DELAY_SECS);
 
-  const matched = inputValue === resourceName;
-
-  // Reset state when dialog opens/closes
+  // Reset state when dialog opens
   useEffect(() => {
     if (open) {
-      setInputValue('');
       setCascade(false);
-      // Focus input after the dialog animates in
-      const t = setTimeout(() => inputRef.current?.focus(), 50);
-      return () => clearTimeout(t);
+      setCascadeReady(false);
+      setSecondsLeft(CASCADE_DELAY_SECS);
     }
   }, [open]);
+
+  // 2-second delay when cascade mode is selected
+  useEffect(() => {
+    if (!open || !cascade) {
+      setCascadeReady(false);
+      setSecondsLeft(CASCADE_DELAY_SECS);
+      return;
+    }
+    setCascadeReady(false);
+    let remaining = CASCADE_DELAY_SECS;
+    setSecondsLeft(remaining);
+    const t = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(t);
+        setCascadeReady(true);
+        setSecondsLeft(0);
+      } else {
+        setSecondsLeft(remaining);
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [open, cascade]);
 
   // Keyboard handling
   useEffect(() => {
     if (!open) return;
+    const canDelete = !cascade || cascadeReady;
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
-      if (e.key === 'Enter' && matched) { e.preventDefault(); onConfirm(cascade); }
+      if (e.key === 'Enter' && canDelete) { e.preventDefault(); onConfirm(cascade); }
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, matched, cascade, onConfirm, onCancel]);
+  }, [open, cascade, cascadeReady, onConfirm, onCancel]);
 
   if (!open) return null;
 
   const label = resourceType.charAt(0).toUpperCase() + resourceType.slice(1);
+  const canDelete = !cascade || cascadeReady;
 
   return (
     <div
@@ -139,26 +162,12 @@ export default function DeleteConfirmDialog({ open, resourceType, resourceName, 
             </p>
           )}
 
-          <div>
-            <label className="label block mb-1.5">
-              Type the {resourceType} name to confirm
-            </label>
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={resourceName}
-              className="input-base text-sm"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
-
           {/* Actions */}
           <div className="flex gap-3 pt-1">
+            {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
             <button
               type="button"
+              autoFocus
               onClick={onCancel}
               className="flex-1 min-h-12 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 text-sm font-medium transition-colors"
             >
@@ -167,10 +176,10 @@ export default function DeleteConfirmDialog({ open, resourceType, resourceName, 
             <button
               type="button"
               onClick={() => onConfirm(cascade)}
-              disabled={!matched}
-              className="flex-1 min-h-12 rounded-xl bg-red-700 hover:bg-red-600 active:scale-[0.98] text-white text-sm font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100"
+              disabled={!canDelete}
+              className="flex-1 min-h-12 rounded-xl bg-red-700 hover:bg-red-600 active:scale-[0.98] text-white text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
             >
-              Delete
+              {cascade && !cascadeReady ? `Wait… ${secondsLeft}s` : 'Delete'}
             </button>
           </div>
         </div>
