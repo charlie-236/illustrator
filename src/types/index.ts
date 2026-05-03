@@ -1,6 +1,8 @@
 export interface LoraEntry {
   name: string;
   weight: number;
+  /** Human-readable label — used for _meta.title in workflow nodes. Never sent to ComfyUI as lora_name. */
+  friendlyName?: string;
 }
 
 /**
@@ -105,6 +107,8 @@ export interface ProjectStitchedExport {
   filePath: string;
   frames: number | null;
   fps: number | null;
+  width: number;
+  height: number;
   createdAt: string;
   promptPos: string;
 }
@@ -121,6 +125,7 @@ export interface ProjectClip {
   createdAt: string;
   isFavorite: boolean;
   mediaType: string;
+  isStitched: boolean;
 }
 
 export interface ProjectDetail {

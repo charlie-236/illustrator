@@ -910,7 +910,7 @@ class ComfyWSManager {
   finalizeStitchSuccess(
     promptId: string,
     generationId: string,
-    data: { id: string; filePath: string; frames: number | null; fps: number | null; seed: string; createdAt: string },
+    data: { id: string; filePath: string; frames: number | null; fps: number | null; width?: number; height?: number; seed: string; createdAt: string },
   ) {
     const job = this.jobs.get(promptId);
     if (!job || job.mediaType !== 'stitch' || job.finalized) return;

@@ -205,6 +205,8 @@ export async function POST(
             filePath,
             frames: result.frameCount,
             fps: 16,
+            width: result.width,
+            height: result.height,
             seed: '0',
             createdAt: new Date().toISOString(),
           });
