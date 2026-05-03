@@ -26,7 +26,7 @@ This is a tablet-first application. Every interactive element MUST have a minimu
 
 ### 4. Model filename obfuscation
 
-Model filenames (LoRAs, checkpoints, embeddings) are obfuscated at ingest time. `civitaiIngest.ts` generates a 6-byte hex stem via `randomBytes(6).toString('hex')`; the file lands on disk as `<hex>.safetensors`; `LoraConfig.loraName` (and equivalents for checkpoints/embeddings) stores that obfuscated string. The user-visible identifier everywhere — UI rows, picker labels, workflow `_meta.title`, logs, error messages — is `friendlyName`. The **only** place the obfuscated `loraName` appears observably is the `lora_name` field of `LoraLoader` / `LoraLoaderModelOnly` nodes in workflow JSON sent to ComfyUI, where it's required for ComfyUI to resolve the on-disk file.
+Model filenames (LoRAs, checkpoints, embeddings) are obfuscated at ingest time. `civitaiIngest.ts` generates a 6-byte hex stem via `randomBytes(6).toString('hex')`; the file lands on disk as `<hex>.safetensors`; `LoraConfig.loraName` (and equivalents for checkpoints/embeddings) stores that obfuscated string. The user-visible identifier everywhere — UI rows, picker labels, workflow `_meta.title`, logs, error messages — is `friendlyName`. The **only** place the obfuscated `loraName` appears observably is the `lora_name` field of `LoraLoader` / `LoraLoaderModelOnly` nodes in workflow JSON sent to ComfyUI, where it's required for ComfyUI to resolve the on-disk file. When `friendlyName` is unavailable (e.g., a LoraEntry assembled from a legacy record without metadata), the fallback display string is `'(unknown LoRA)'` — never the raw obfuscated `loraName`.
 
 ### 5. Network & API Routing Rules
 All communication between the Next.js frontend/backend and the A100 Core VM MUST route through the established local SSH tunnels. The Next.js API should NEVER attempt to contact `100.96.99.94` directly. 
@@ -378,7 +378,7 @@ src/
     Gallery.tsx         3-col image grid, cursor-based infinite-scroll via IntersectionObserver, opens ImageModal; accepts onNavigateToProject callback
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields; shows Project link for video clips; shows Stitched-from-project + source clip count for stitched videos
     Projects.tsx        Projects tab — 2-col project card grid, New Project modal
-    ProjectDetail.tsx   Project detail view — inline-editable header, horizontal DnD clip strip (@dnd-kit), Settings modal, Stitch button + StitchModal, stitched exports section
+    ProjectDetail.tsx   Project detail view — inline-editable header, flex-wrap DnD clip strip + stitched output tiles (@dnd-kit, rectSortingStrategy), 4-way filter, Settings modal, Stitch button + StitchModal
     ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
@@ -591,8 +591,8 @@ A pill toggle at the top of Studio switches between **Image** and **Video** mode
 |---|---|
 | Positive prompt | required |
 | Negative prompt | hidden — hint: "Default Wan 2.2 negative prompt applied." |
-| Starting frame toggle + picker | On → I2V mode; Off → T2V mode |
-| "Use last frame of previous clip" checkbox | Only shown when project context has a prior clip |
+| "Choose starting frame" button | Shown when project context is active; opens `ProjectFramePickerModal` to pick any project clip (image, video, or stitched) as I2V starting frame |
+| Starting frame toggle + picker | On → I2V mode; Off → T2V mode; shown when no project picker selection is active |
 | Settings button | Opens the same right-side drawer as image mode |
 | Generate Video button | — |
 
@@ -730,8 +730,8 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 - Header: back button, inline-editable name and description, Settings gear, overflow menu (Delete, two-tap confirm).
 - Style note rendered in a muted box below description (read-only; editable via Settings modal).
 - **"Generate new clip in this project" button** — tapping navigates to Studio with the project's context pre-loaded (see Phase 2.2 below).
-- **Linear strip**: horizontal-scrollable `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`). Tiles render `<img>` for image clips and `<video preload="metadata">` for video clips. Position badge (top-left) on all tiles; duration badge (bottom-right) on video tiles only. Click opens `ImageModal` scoped to project clips.
-- **All/Images/Videos filter**: shown above the strip when the project contains both image and video clips. Filters the visible tiles; does not affect drag-to-reorder order.
+- **Clip strip**: `flex flex-wrap` grid. `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`, `rectSortingStrategy`) wraps source clips only. Stitched output tiles are rendered after source clips as non-draggable `StitchedTile` elements with an emerald **Stitched** badge. Tiles render `<img>` for image clips and `<video preload="metadata">` for video clips. Position badge (top-left) on all source tiles; duration badge (bottom-right) on video tiles. Click opens `ImageModal` scoped to all project clips + stitched exports.
+- **All/Images/Clips/Videos filter**: 4-way filter shown above the strip when the project has mixed content. "All" shows everything; "Images" shows image source clips; "Clips" shows unstitched video source clips; "Videos" shows stitched outputs. Does not affect drag-to-reorder order.
 - Drag to reorder: optimistic update, then `PATCH /api/projects/[id]/reorder`. Reverts on error with a brief toast.
 - Empty strip: placeholder text.
 - **Settings modal**: description, style note, and default generation params (resolution presets + frames/steps/CFG inputs). PATCHes `/api/projects/[id]`.
@@ -763,12 +763,15 @@ Clicking "Generate new clip in this project" calls `onGenerateInProject(project,
 
 ### Prompt threading and last-frame extraction (Phase 2.2 / 2.3)
 
-When Studio has project context and a `latestClipId`, a checkbox appears in the Starting frame (I2V) section. The label adapts to the media type of the latest clip:
+When Studio has project context, a **"Choose starting frame"** button replaces the old checkbox in the Starting frame section. Clicking it opens `ProjectFramePickerModal`, a bottom-sheet that lists all project clips (source images, source videos, and stitched exports). Video thumbnails show the last frame, extracted lazily via `POST /api/extract-last-frame` on modal open and cached in `frameCache` (a `useRef<Map<string, string>>`) across open/close cycles. Selecting a clip stores its ID as `selectedStartingClipId`.
 
-- **Latest clip is a video**: label is "Use last frame of previous clip". On submit, Studio calls `POST /api/extract-last-frame` with the `latestClipId`, gets a PNG base64 string, and sends it as `startImageB64`.
-- **Latest clip is an image**: label is "Use latest image as starting frame". On submit, Studio fetches the image directly via its `filePath` URL using `encodeImageToBase64()` — no ffmpeg call needed.
+At submit time, if `selectedStartingClipId` is set:
+- **Image clip**: the image is fetched directly via its `filePath` URL using `encodeImageToBase64()` — no ffmpeg call needed.
+- **Video or stitched clip**: checks `frameCache` first; if a cached last-frame exists it's used directly, otherwise Studio calls `POST /api/extract-last-frame` at submit time and sends the result as `startImageB64`.
 
-In both cases, checking the checkbox implicitly enables I2V mode (turns on the Starting frame toggle) and hides the gallery picker. While loading/extracting runs, a spinner appears and the Generate Video button is disabled.
+While a submit-time extraction runs, a spinner appears and the Generate Video button is disabled.
+
+The existing On/Off I2V toggle + gallery picker remain available when no project context is active (or when `selectedStartingClipId` is null). The non-project gallery picker path is unchanged.
 
 ### Play-through preview (Phase 2.2)
 
@@ -877,7 +880,7 @@ New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `
 
 **`StitchModal`** — bottom sheet. Idle state (has video clips): per-clip selection list (checkboxes, all checked by default) + "Select all / Deselect all" links + live summary ("Stitching X of Y clips, Z.Zs total") + transition selector (hard-cut / crossfade 0.5s) + "Stitch N clips" button (disabled if < 2 selected) + Cancel button. Image clips are excluded from the list entirely. Idle state (no video clips): empty-state message. Running state: ffmpeg progress bar + Abort button. Done state: success message + Close button. Error state: error text + Try again / Close buttons. Wires into `QueueContext` (`addJob`, `setCompleting`, `completeJob`, `failJob`) so the stitch appears in `QueueTray`. Passes `clipIds` (selected, in displayed order) to `POST /api/projects/[id]/stitch`.
 
-**Stitched exports section** — below the clip strip in `ProjectDetail`. Shows each stitched export with a video thumbnail, duration, frame count, date, and a download link. Prepended optimistically when a new stitch completes.
+**Stitched exports** — rendered as non-draggable `StitchedTile` elements directly in the clip strip (no separate section). New stitches are prepended optimistically to `stitchedExports` state, which feeds into the strip alongside `clips`. Select "Videos" in the filter bar to see only stitched outputs.
 
 **Gallery badge** — emerald **Stitched** pill in the top-left corner of Gallery tiles with `isStitched: true`.
 

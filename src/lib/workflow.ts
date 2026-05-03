@@ -79,6 +79,7 @@ export function buildWorkflow(
     const id = String(100 + i);
     nodes[id] = {
       class_type: 'LoraLoader',
+      _meta: { title: `LoRA: ${entry.friendlyName ?? '(unknown LoRA)'}` },
       inputs: {
         model: modelRef,
         clip: clipRef,

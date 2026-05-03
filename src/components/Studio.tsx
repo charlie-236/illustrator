@@ -7,7 +7,7 @@ import ParamSlider from './ParamSlider';
 import ImageModal from './ImageModal';
 import GalleryPicker from './GalleryPicker';
 import QueueTray from './QueueTray';
-import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip, WanLoraEntry, WanLoraSpec } from '@/types';
+import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip, ProjectStitchedExport, WanLoraEntry, WanLoraSpec } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
@@ -133,6 +133,206 @@ async function encodeImageToBase64(url: string): Promise<string> {
   return btoa(binary);
 }
 
+// ── Project frame picker ──────────────────────────────────────────────────────
+
+/** A project clip or stitched export as presented in the starting-frame picker. */
+interface PickerItem {
+  id: string;
+  filePath: string;
+  mediaType: string;
+  isStitched: boolean;
+  position: number | null;
+  prompt: string;
+}
+
+interface ProjectFramePickerProps {
+  open: boolean;
+  items: PickerItem[];
+  loading: boolean;
+  initialSelectedId: string | null;
+  frameCache: React.MutableRefObject<Map<string, string>>;
+  onConfirm: (id: string | null) => void;
+  onClose: () => void;
+}
+
+function ProjectFramePickerModal({
+  open,
+  items,
+  loading,
+  initialSelectedId,
+  frameCache,
+  onConfirm,
+  onClose,
+}: ProjectFramePickerProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
+  const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedId(initialSelectedId);
+    setFailedIds(new Set());
+  }, [open, initialSelectedId]);
+
+  // Extract last frames for video items whenever the picker opens or items change
+  useEffect(() => {
+    if (!open || items.length === 0) return;
+
+    const videoItems = items.filter(
+      (i) => i.mediaType === 'video' && !frameCache.current.has(i.id),
+    );
+    if (videoItems.length === 0) return;
+
+    setExtractingIds((prev) => new Set([...prev, ...videoItems.map((i) => i.id)]));
+
+    let cancelled = false;
+
+    void Promise.all(
+      videoItems.map(async (item) => {
+        try {
+          const res = await fetch('/api/extract-last-frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ generationId: item.id }),
+          });
+          const data = await res.json() as { frameB64?: string; error?: string };
+          if (cancelled) return;
+          if (data.frameB64) {
+            frameCache.current.set(item.id, data.frameB64);
+          } else {
+            setFailedIds((prev) => new Set([...prev, item.id]));
+          }
+        } catch {
+          if (!cancelled) setFailedIds((prev) => new Set([...prev, item.id]));
+        } finally {
+          if (!cancelled) {
+            setExtractingIds((prev) => {
+              const s = new Set(prev);
+              s.delete(item.id);
+              return s;
+            });
+          }
+        }
+      }),
+    );
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, items]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800 flex-shrink-0">
+          <h2 className="text-base font-semibold text-zinc-100">Choose starting frame</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <svg className="w-6 h-6 text-violet-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+              </svg>
+            </div>
+          ) : items.length === 0 ? (
+            <p className="text-sm text-zinc-500 text-center py-8">No clips in this project yet.</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {items.map((item) => {
+                const isSelected = item.id === selectedId;
+                const isExtracting = extractingIds.has(item.id);
+                const isFailed = failedIds.has(item.id);
+                const cachedFrame = frameCache.current.get(item.id);
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => !isFailed && setSelectedId(item.id)}
+                    disabled={isFailed}
+                    className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all
+                      ${isSelected
+                        ? 'border-violet-500'
+                        : isFailed
+                          ? 'border-zinc-800 opacity-50 cursor-not-allowed'
+                          : 'border-zinc-700 hover:border-zinc-500'}`}
+                  >
+                    {item.mediaType === 'image' ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={imgSrc(item.filePath)} alt="" className="w-full h-full object-cover bg-zinc-800" />
+                    ) : cachedFrame ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={cachedFrame} alt="" className="w-full h-full object-cover bg-zinc-800" />
+                    ) : isExtracting ? (
+                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-violet-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                        </svg>
+                      </div>
+                    ) : isFailed ? (
+                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                        <span className="text-xs text-zinc-500 px-1 text-center">Preview failed</span>
+                      </div>
+                    ) : (
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <video
+                        src={imgSrc(item.filePath)}
+                        preload="metadata"
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover bg-zinc-800"
+                      />
+                    )}
+                    {/* Position / Stitched badge */}
+                    <div className={`absolute top-1 left-1 px-1 py-0.5 rounded text-xs font-bold select-none pointer-events-none
+                      ${item.isStitched ? 'bg-emerald-900/80 text-emerald-300' : 'bg-black/70 text-white'}`}>
+                      {item.isStitched ? 'Stitched' : (item.position ?? '')}
+                    </div>
+                    {isSelected && (
+                      <div className="absolute inset-0 ring-2 ring-violet-500 ring-inset rounded-lg pointer-events-none" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 pb-5 pt-3 border-t border-zinc-800 flex gap-3 flex-shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(selectedId)}
+            disabled={!selectedId}
+            className="flex-1 min-h-12 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Studio({
@@ -185,8 +385,14 @@ export default function Studio({
 
   // Project context — set when navigating from Projects tab; persisted in sessionStorage
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
-  // "Use last frame of previous clip" checkbox — only relevant when projectContext has a latestClipId
-  const [useLastFrame, setUseLastFrame] = useState(false);
+  // Project frame picker (replaces the "use last frame" checkbox)
+  const [selectedStartingClipId, setSelectedStartingClipId] = useState<string | null>(null);
+  const [framePickerOpen, setFramePickerOpen] = useState(false);
+  const [pickerItems, setPickerItems] = useState<PickerItem[]>([]);
+  const [pickerFetching, setPickerFetching] = useState(false);
+  // Persists last-frame extractions across picker open/close cycles
+  const frameCache = useRef<Map<string, string>>(new Map());
+  // Submit-time loading indicator (extracting frame before generation)
   const [extractingLastFrame, setExtractingLastFrame] = useState(false);
   // Project picker (clickable badge)
   const [showProjectPicker, setShowProjectPicker] = useState(false);
@@ -296,7 +502,8 @@ export default function Studio({
     // Remix clears project context
     setProjectContext(null);
     saveSessionProjectContext(null);
-    setUseLastFrame(false);
+    setSelectedStartingClipId(null);
+    setPickerItems([]);
     setMode('image');
     try { sessionStorage.setItem('studio-mode', 'image'); } catch { /* ignore */ }
     onRemixConsumed();
@@ -329,7 +536,8 @@ export default function Studio({
     setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt }));
     setUseStartingFrame(false);
     setStartingFrameRecord(null);
-    setUseLastFrame(false);
+    setSelectedStartingClipId(null);
+    setPickerItems([]);
     // Remix clears project context — remix is a fresh generation, not a project continuation
     setProjectContext(null);
     saveSessionProjectContext(null);
@@ -379,7 +587,8 @@ export default function Studio({
     // Reset starting frame state
     setUseStartingFrame(false);
     setStartingFrameRecord(null);
-    setUseLastFrame(false);
+    setSelectedStartingClipId(null);
+    setPickerItems([]);
 
     onProjectContextTriggerConsumed();
   }, [projectContextTrigger, onProjectContextTriggerConsumed]);
@@ -407,7 +616,45 @@ export default function Studio({
   function clearProjectContext() {
     setProjectContext(null);
     saveSessionProjectContext(null);
-    setUseLastFrame(false);
+    setSelectedStartingClipId(null);
+    setPickerItems([]);
+  }
+
+  async function openFramePicker() {
+    if (!projectContext) return;
+    setFramePickerOpen(true);
+    if (pickerItems.length > 0) return; // already loaded
+    setPickerFetching(true);
+    try {
+      const res = await fetch(`/api/projects/${projectContext.projectId}`);
+      if (!res.ok) return;
+      const data = await res.json() as {
+        clips: ProjectClip[];
+        stitchedExports: ProjectStitchedExport[];
+      };
+      setPickerItems([
+        ...data.clips.map((c) => ({
+          id: c.id,
+          filePath: c.filePath,
+          mediaType: c.mediaType,
+          isStitched: false,
+          position: c.position,
+          prompt: c.prompt,
+        })),
+        ...data.stitchedExports.map((e) => ({
+          id: e.id,
+          filePath: e.filePath,
+          mediaType: 'video' as const,
+          isStitched: true,
+          position: null,
+          prompt: e.promptPos,
+        })),
+      ]);
+    } catch {
+      // non-critical — picker will show empty state
+    } finally {
+      setPickerFetching(false);
+    }
   }
 
   async function handleProjectSwitch(projectId: string | null, projectName: string | null) {
@@ -476,7 +723,8 @@ export default function Studio({
       // Reset starting-frame state
       setUseStartingFrame(false);
       setStartingFrameRecord(null);
-      setUseLastFrame(false);
+      setSelectedStartingClipId(null);
+      setPickerItems([]);
 
       // Switch to video mode
       setMode('video');
@@ -535,7 +783,8 @@ export default function Studio({
 
     setUseStartingFrame(false);
     setStartingFrameRecord(null);
-    setUseLastFrame(false);
+    setSelectedStartingClipId(null);
+    setPickerItems([]);
 
     setMode('video');
     setVideoResult(null);
@@ -553,7 +802,7 @@ export default function Studio({
       if (!projectContext) setVideoP(VIDEO_DEFAULTS);
       setUseStartingFrame(false);
       setStartingFrameRecord(null);
-      setUseLastFrame(false);
+      setSelectedStartingClipId(null);
     }
     setMode(newMode);
     try { sessionStorage.setItem('studio-mode', newMode); } catch { /* ignore */ }
@@ -630,6 +879,11 @@ export default function Studio({
     try {
       const generateParams: GenerationParams = {
         ...p,
+        // Enrich loras with friendlyName so workflow.ts can use it for _meta.title
+        loras: p.loras.map((l) => ({
+          ...l,
+          friendlyName: modelLists.loraNames[l.name] ?? '(unknown LoRA)',
+        })),
         baseImage: baseImage ?? undefined,
         mask: mask ?? undefined,
         denoise: baseImage ? baseImageDenoise : undefined,
@@ -716,35 +970,41 @@ export default function Studio({
     try {
       let startImageB64: string | undefined;
 
-      // Last-frame extraction (project carry-forward path)
-      if (useLastFrame && projectContext?.latestClipId) {
-        setExtractingLastFrame(true);
-        try {
-          if (projectContext.latestClipMediaType === 'image' && projectContext.latestClipFilePath) {
-            // Latest clip is an image — use it directly without ffmpeg
-            startImageB64 = await encodeImageToBase64(imgSrc(projectContext.latestClipFilePath));
-          } else {
-            // Latest clip is a video — extract last frame via ffmpeg
-            const lfRes = await fetch('/api/extract-last-frame', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ generationId: projectContext.latestClipId }),
-            });
-            const lfData = await lfRes.json() as { frameB64?: string; error?: string };
-            if (!lfRes.ok || !lfData.frameB64) {
-              throw new Error(lfData.error ?? 'Failed to extract last frame');
+      if (selectedStartingClipId) {
+        // Project frame picker path
+        const item = pickerItems.find((pi) => pi.id === selectedStartingClipId);
+        if (item) {
+          setExtractingLastFrame(true);
+          try {
+            if (item.mediaType === 'image') {
+              startImageB64 = await encodeImageToBase64(imgSrc(item.filePath));
+            } else {
+              // Use cached last-frame if available, otherwise extract now
+              const cached = frameCache.current.get(item.id);
+              if (cached) {
+                startImageB64 = cached.replace(/^data:image\/[^;]+;base64,/, '');
+              } else {
+                const lfRes = await fetch('/api/extract-last-frame', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ generationId: item.id }),
+                });
+                const lfData = await lfRes.json() as { frameB64?: string; error?: string };
+                if (!lfRes.ok || !lfData.frameB64) {
+                  throw new Error(lfData.error ?? 'Failed to extract last frame');
+                }
+                startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
+              }
             }
-            // Strip data URI prefix — API expects raw base64
-            startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
+          } catch (err) {
+            setSubmitError(`Failed to prepare starting frame: ${String(err)}`);
+            return;
+          } finally {
+            setExtractingLastFrame(false);
           }
-        } catch (err) {
-          setSubmitError(`Failed to extract last frame: ${String(err)}`);
-          return;
-        } finally {
-          setExtractingLastFrame(false);
         }
       } else if (useStartingFrame && startingFrameRecord) {
-        // Gallery picker path
+        // Gallery picker path (non-project I2V)
         try {
           startImageB64 = await encodeImageToBase64(imgSrc(startingFrameRecord.filePath));
         } catch (err) {
@@ -758,7 +1018,7 @@ export default function Studio({
       // Build full WanLoraSpec[] from the minimal WanLoraEntry[] state + lists metadata
       const wanLoras: WanLoraSpec[] = videoLoras.map((e) => ({
         loraName: e.loraName,
-        friendlyName: modelLists.loraNames[e.loraName] ?? e.loraName,
+        friendlyName: modelLists.loraNames[e.loraName] ?? '(unknown LoRA)',
         weight: e.weight,
         appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
         appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
@@ -926,8 +1186,8 @@ export default function Studio({
   const videoGenerateDisabled =
     !p.positivePrompt.trim()
     || vWidthErr || vHeightErr || vFramesErr || vStepsErr || vCfgErr
-    // Gallery picker: requires a record unless using last-frame path
-    || (useStartingFrame && !startingFrameRecord && !useLastFrame)
+    // Gallery picker (non-project): starting frame toggle On but no record selected
+    || (!selectedStartingClipId && useStartingFrame && !startingFrameRecord)
     || extractingLastFrame;
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1093,81 +1353,99 @@ export default function Studio({
         />
       )}
 
-      {/* ── Video mode: Starting frame (I2V) — always visible ── */}
+      {/* ── Video mode: Starting frame (I2V) ── */}
       {mode === 'video' && (
         <div className="card space-y-3">
 
-          {/* Starting frame (I2V) */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="label mb-0">Starting frame (I2V)</label>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !useStartingFrame;
-                  setUseStartingFrame(next);
-                  if (!next) {
-                    setStartingFrameRecord(null);
-                    setUseLastFrame(false);
-                  }
-                }}
-                className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all border
-                  ${useStartingFrame
-                    ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
-                    : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
-              >
-                {useStartingFrame ? 'On' : 'Off'}
-              </button>
-            </div>
-
-            {/* "Use last frame" checkbox — only when project has a previous clip */}
-            {projectContext?.latestClipId && (
-              <label className="flex items-center gap-3 mb-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={useLastFrame}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setUseLastFrame(checked);
-                    if (checked) {
-                      setUseStartingFrame(true);
-                      setStartingFrameRecord(null);
-                    }
-                  }}
-                  className="w-5 h-5 rounded accent-violet-500"
-                />
-                <span className="text-sm text-zinc-300">
-                  {projectContext?.latestClipMediaType === 'image'
-                    ? 'Use latest image as starting frame'
-                    : 'Use last frame of previous clip'}
-                </span>
-              </label>
-            )}
-
-            {useStartingFrame && (
-              useLastFrame && projectContext?.latestClipId ? (
-                // Last-frame path: source is fixed, show info pill
-                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/60 border border-zinc-700">
-                  {extractingLastFrame ? (
-                    <svg className="w-4 h-4 text-violet-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          {/* Project frame picker — replaces the old "use last frame" checkbox */}
+          {projectContext?.latestClipId && (
+            <div>
+              <label className="label mb-2 block">Starting frame (I2V)</label>
+              {selectedStartingClipId && pickerItems.length > 0 ? (
+                // Selection active — show thumbnail + Change + ×
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-shrink-0">
+                    {(() => {
+                      const item = pickerItems.find((pi) => pi.id === selectedStartingClipId);
+                      if (!item) return <div className="w-24 h-24 rounded-lg bg-zinc-800 border border-zinc-700" />;
+                      const cachedFrame = item.mediaType === 'video' ? frameCache.current.get(item.id) : undefined;
+                      if (item.mediaType === 'image') {
+                        // eslint-disable-next-line @next/next/no-img-element
+                        return <img src={imgSrc(item.filePath)} alt="Starting frame" className="w-24 h-24 rounded-lg object-cover border border-zinc-700" />;
+                      } else if (cachedFrame) {
+                        // eslint-disable-next-line @next/next/no-img-element
+                        return <img src={cachedFrame} alt="Starting frame" className="w-24 h-24 rounded-lg object-cover border border-zinc-700" />;
+                      } else {
+                        // eslint-disable-next-line jsx-a11y/media-has-caption
+                        return <video src={imgSrc(item.filePath)} preload="metadata" muted playsInline className="w-24 h-24 rounded-lg object-cover border border-zinc-700" />;
+                      }
+                    })()}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedStartingClipId(null)}
+                      aria-label="Clear starting frame"
+                      className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-zinc-800 border border-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:bg-red-600 hover:text-white transition-colors"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void openFramePicker()}
+                    disabled={pickerFetching}
+                    className="min-h-12 px-4 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                // No selection — "Choose starting frame" button
+                <button
+                  type="button"
+                  onClick={() => void openFramePicker()}
+                  disabled={pickerFetching}
+                  className="w-full min-h-14 rounded-xl border-2 border-dashed border-zinc-700 hover:border-violet-600/60 hover:bg-violet-600/5 transition-colors flex items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 text-sm disabled:opacity-50"
+                >
+                  {pickerFetching ? (
+                    <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
                     </svg>
                   ) : (
-                    <svg className="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
                     </svg>
                   )}
-                  <p className="text-sm text-zinc-300">
-                    {extractingLastFrame
-                      ? (projectContext?.latestClipMediaType === 'image' ? 'Loading image…' : 'Extracting last frame…')
-                      : (projectContext?.latestClipMediaType === 'image'
-                          ? 'Latest image as starting frame (loaded on submit)'
-                          : 'Last frame of previous clip (extracted on submit)')}
-                  </p>
-                </div>
-              ) : (
-                // Gallery picker path
+                  {pickerFetching ? 'Loading clips…' : 'Choose starting frame'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* I2V toggle + gallery picker — for non-project use only */}
+          {!projectContext && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <label className="label mb-0">Starting frame (I2V)</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !useStartingFrame;
+                    setUseStartingFrame(next);
+                    if (!next) setStartingFrameRecord(null);
+                  }}
+                  className={`min-h-12 px-4 rounded-lg text-sm font-medium transition-all border
+                    ${useStartingFrame
+                      ? 'bg-violet-600/20 text-violet-300 border-violet-700/50'
+                      : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 active:scale-95'}`}
+                >
+                  {useStartingFrame ? 'On' : 'Off'}
+                </button>
+              </div>
+
+              {useStartingFrame && (
                 startingFrameRecord ? (
                   <div className="flex items-center gap-3">
                     <div className="relative flex-shrink-0">
@@ -1208,9 +1486,9 @@ export default function Studio({
                     Pick from gallery
                   </button>
                 )
-              )
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
         </div>
       )}
@@ -1662,6 +1940,17 @@ export default function Studio({
         open={galleryPickerOpen}
         onClose={() => setGalleryPickerOpen(false)}
         onSelect={(record) => setStartingFrameRecord(record)}
+      />
+
+      {/* ── Project frame picker modal ── */}
+      <ProjectFramePickerModal
+        open={framePickerOpen}
+        items={pickerItems}
+        loading={pickerFetching}
+        initialSelectedId={selectedStartingClipId ?? projectContext?.latestClipId ?? null}
+        frameCache={frameCache}
+        onConfirm={(id) => { setSelectedStartingClipId(id); setFramePickerOpen(false); }}
+        onClose={() => setFramePickerOpen(false)}
       />
 
       {/* ── Studio project picker ── */}

@@ -14,7 +14,7 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
-  horizontalListSortingStrategy,
+  rectSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -63,13 +63,46 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     mediaType: clip.mediaType,
     frames: clip.frames || null,
     fps: clip.fps || null,
-    projectId,
-    projectName,
-    isStitched: false,
-    parentProjectId: null,
-    parentProjectName: null,
+    projectId: clip.isStitched ? null : projectId,
+    projectName: clip.isStitched ? null : projectName,
+    isStitched: clip.isStitched,
+    parentProjectId: clip.isStitched ? projectId : null,
+    parentProjectName: clip.isStitched ? projectName : null,
     stitchedClipIds: null,
     createdAt: clip.createdAt,
+  };
+}
+
+function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, projectName: string): GenerationRecord {
+  return {
+    id: e.id,
+    filePath: e.filePath,
+    promptPos: e.promptPos,
+    promptNeg: '',
+    model: 'wan2.2',
+    lora: null,
+    lorasJson: null,
+    assembledPos: null,
+    assembledNeg: null,
+    seed: '0',
+    cfg: 3.5,
+    steps: 20,
+    width: e.width,
+    height: e.height,
+    sampler: 'euler',
+    scheduler: 'simple',
+    highResFix: false,
+    isFavorite: false,
+    mediaType: 'video',
+    frames: e.frames,
+    fps: e.fps,
+    projectId: null,
+    projectName: null,
+    isStitched: true,
+    parentProjectId: projectId,
+    parentProjectName: projectName,
+    stitchedClipIds: null,
+    createdAt: e.createdAt,
   };
 }
 
@@ -179,7 +212,7 @@ function StitchModal({ projectId, projectName, videoClips, allClips, onClose, on
           } else if (eventName === 'completing') {
             if (promptId) setCompleting(promptId);
           } else if (eventName === 'complete') {
-            const result = JSON.parse(data) as { id: string; filePath: string; frames: number; fps: number; createdAt: string };
+            const result = JSON.parse(data) as { id: string; filePath: string; frames: number; fps: number; width?: number; height?: number; createdAt: string };
             if (promptId && generationId) completeJob(promptId, generationId);
             setStatus('done');
             onStitched({
@@ -187,6 +220,8 @@ function StitchModal({ projectId, projectName, videoClips, allClips, onClose, on
               filePath: result.filePath,
               frames: result.frames,
               fps: result.fps,
+              width: result.width ?? 0,
+              height: result.height ?? 0,
               createdAt: result.createdAt,
               promptPos: `Stitched: ${projectName}`,
             });
@@ -232,7 +267,7 @@ function StitchModal({ projectId, projectName, videoClips, allClips, onClose, on
             <>
               {videoClips.length === 0 ? (
                 <p className="text-sm text-zinc-400 py-2">
-                  This project has no videos to stitch. Add video clips first.
+                  This project has no clips to stitch. Add video clips first.
                 </p>
               ) : (
                 <>
@@ -471,6 +506,46 @@ function SortableClipTile({ clip, index, onClick }: SortableClipTileProps) {
 }
 
 // ─────────────────────────────────────────────
+// Non-draggable stitched output tile
+// ─────────────────────────────────────────────
+
+interface StitchedTileProps {
+  clip: ProjectClip;
+  onClick: () => void;
+}
+
+function StitchedTile({ clip, onClick }: StitchedTileProps) {
+  const durationSec = clip.fps > 0 ? (clip.frames / clip.fps).toFixed(1) : null;
+
+  return (
+    <div
+      className="relative flex-shrink-0 w-36 rounded-lg overflow-hidden border border-emerald-800/50 hover:border-emerald-700 transition-colors cursor-pointer group"
+      onClick={onClick}
+    >
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <video
+        src={imgSrc(clip.filePath)}
+        preload="metadata"
+        muted
+        playsInline
+        className="w-full aspect-video object-cover bg-zinc-800"
+      />
+      {/* Stitched badge */}
+      <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-emerald-900/80 text-emerald-300 text-xs font-semibold select-none pointer-events-none">
+        Stitched
+      </div>
+      {/* Duration badge */}
+      {durationSec !== null && (
+        <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-medium select-none pointer-events-none">
+          {durationSec}s
+        </div>
+      )}
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Settings / defaults modal
 // ─────────────────────────────────────────────
 
@@ -514,7 +589,7 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
     const fullVideoLoras = defaultVideoLoras.length > 0
       ? defaultVideoLoras.map((e) => ({
           loraName: e.loraName,
-          friendlyName: modelLists.loraNames[e.loraName] ?? e.loraName,
+          friendlyName: modelLists.loraNames[e.loraName] ?? '(unknown LoRA)',
           weight: e.weight,
           appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
           appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
@@ -741,8 +816,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [descValue, setDescValue] = useState('');
   const [descSaving, setDescSaving] = useState(false);
 
-  // Strip media type filter
-  const [stripFilter, setStripFilter] = useState<'all' | 'images' | 'videos'>('all');
+  // Strip media type filter: 'clips' = unstitched videos, 'videos' = stitched outputs
+  const [stripFilter, setStripFilter] = useState<'all' | 'images' | 'clips' | 'videos'>('all');
 
   // Play-through state
   const [playThrough, setPlayThrough] = useState(false);
@@ -750,15 +825,28 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [playDone, setPlayDone] = useState(false);
   const playerRef = useRef<HTMLVideoElement>(null);
 
-  // Video clips only — used for play-through
-  const videoClips = clips.filter((c) => c.mediaType === 'video');
+  // Unstitched video clips — used for play-through and stitch modal
+  const videoClips = clips.filter((c) => c.mediaType === 'video' && !c.isStitched);
 
-  // Filtered clips for strip display
-  const filteredClips = stripFilter === 'images'
+  // Filtered source clips for strip (stitched exports are always appended after)
+  const filteredSourceClips = stripFilter === 'images'
     ? clips.filter((c) => c.mediaType === 'image')
-    : stripFilter === 'videos'
-      ? clips.filter((c) => c.mediaType === 'video')
-      : clips;
+    : stripFilter === 'clips'
+      ? clips.filter((c) => c.mediaType === 'video' && !c.isStitched)
+      : stripFilter === 'videos'
+        ? [] // 'videos' = stitched exports only; source clips excluded
+        : clips; // 'all' shows all source clips
+
+  // Stitched exports shown in strip: only when filter is 'all' or 'videos'
+  const filteredStitchedForStrip = (stripFilter === 'all' || stripFilter === 'videos')
+    ? stitchedExports
+    : [];
+
+  // Whether to show the 4-way filter bar
+  const hasImages = clips.some((c) => c.mediaType === 'image');
+  const hasVideoClips = clips.some((c) => c.mediaType === 'video');
+  const hasStitchedExports = stitchedExports.length > 0;
+  const showFilterBar = !playThrough && [hasImages, hasVideoClips, hasStitchedExports].filter(Boolean).length > 1;
 
   // When the active clip index changes in play-through mode, reload and play
   useEffect(() => {
@@ -887,14 +975,14 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }
   }
 
-  // Modal records: all clips, unfiltered
-  const modalRecords = clips.map((c) => clipToRecord(c, projectId, project?.name ?? ''));
+  // Modal records: all source clips + stitched exports
+  const modalRecords = [
+    ...clips.map((c) => clipToRecord(c, projectId, project?.name ?? '')),
+    ...stitchedExports.map((e) => stitchedExportToRecord(e, projectId, project?.name ?? '')),
+  ];
 
-  // Index in `modalRecords` for a given filtered index (to keep modal navigation consistent with filtered view)
-  function filteredIndexToModalIndex(filteredIdx: number): number {
-    const clip = filteredClips[filteredIdx];
-    if (!clip) return 0;
-    return clips.findIndex((c) => c.id === clip.id);
+  function getModalIndexById(id: string): number {
+    return modalRecords.findIndex((r) => r.id === id);
   }
 
   if (loading || !project) {
@@ -1059,7 +1147,9 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       <div className="px-4 pt-2">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium">
-            {clips.length === 0 ? 'No clips' : `${clips.length} ${clips.length === 1 ? 'clip' : 'clips'}`}
+            {clips.length === 0 && stitchedExports.length === 0
+              ? 'No items'
+              : `${clips.length + stitchedExports.length} ${clips.length + stitchedExports.length === 1 ? 'item' : 'items'}`}
           </p>
           <div className="flex items-center gap-2">
             {/* Play-through toggle — only visible when ≥2 video clips */}
@@ -1088,19 +1178,26 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           </div>
         </div>
 
-        {/* Media type filter — only when there are both image and video clips */}
-        {!playThrough && clips.length > 0 && videoClips.length > 0 && videoClips.length < clips.length && (
-          <div className="flex gap-1.5 mb-3">
-            {(['all', 'images', 'videos'] as const).map((f) => (
+        {/* 4-way filter: All / Images / Clips / Videos */}
+        {showFilterBar && (
+          <div className="flex gap-1.5 mb-3 flex-wrap">
+            {(
+              [
+                { key: 'all', label: 'All' },
+                ...(hasImages ? [{ key: 'images', label: 'Images' }] : []),
+                ...(hasVideoClips ? [{ key: 'clips', label: 'Clips' }] : []),
+                ...(hasStitchedExports ? [{ key: 'videos', label: 'Videos' }] : []),
+              ] as { key: 'all' | 'images' | 'clips' | 'videos'; label: string }[]
+            ).map((f) => (
               <button
-                key={f}
-                onClick={() => setStripFilter(f)}
+                key={f.key}
+                onClick={() => setStripFilter(f.key)}
                 className={`min-h-8 px-3 rounded-lg text-xs font-medium border transition-colors
-                  ${stripFilter === f
+                  ${stripFilter === f.key
                     ? 'border-violet-500 bg-violet-600/20 text-violet-300'
                     : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
               >
-                {f === 'all' ? 'All' : f === 'images' ? 'Images' : 'Videos'}
+                {f.label}
               </button>
             ))}
           </div>
@@ -1110,7 +1207,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           <p className="text-xs text-red-400 mb-2">{reorderError}</p>
         )}
 
-        {clips.length === 0 ? (
+        {clips.length === 0 && stitchedExports.length === 0 ? (
           <div className="flex items-center justify-center h-32 rounded-xl border border-dashed border-zinc-700 text-zinc-600 text-sm">
             No clips yet. Tap &quot;Generate new clip&quot; above to get started.
           </div>
@@ -1166,25 +1263,48 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             </div>
           </div>
         ) : (
-          /* ── Sortable strip ── */
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={clips.map((c) => c.id)} strategy={horizontalListSortingStrategy}>
-              <div className="flex gap-3 overflow-x-auto pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-                {filteredClips.map((clip, i) => (
+          /* ── Wrapping strip: sortable source clips + non-draggable stitched outputs ── */
+          <div className="flex flex-wrap gap-3">
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={clips.map((c) => c.id)} strategy={rectSortingStrategy}>
+                {filteredSourceClips.map((clip) => (
                   <SortableClipTile
                     key={clip.id}
                     clip={clip}
                     index={clips.indexOf(clip)}
-                    onClick={() => setModalIdx(filteredIndexToModalIndex(i))}
+                    onClick={() => setModalIdx(getModalIndexById(clip.id))}
                   />
                 ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+              </SortableContext>
+            </DndContext>
+            {filteredStitchedForStrip.map((e) => {
+              const asClip: ProjectClip = {
+                id: e.id,
+                filePath: e.filePath,
+                prompt: e.promptPos,
+                frames: e.frames ?? 0,
+                fps: e.fps ?? 16,
+                width: e.width,
+                height: e.height,
+                position: Number.MAX_SAFE_INTEGER,
+                createdAt: e.createdAt,
+                isFavorite: false,
+                mediaType: 'video',
+                isStitched: true,
+              };
+              return (
+                <StitchedTile
+                  key={e.id}
+                  clip={asClip}
+                  onClick={() => setModalIdx(getModalIndexById(e.id))}
+                />
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {/* ── Clip modal ── */}
+      {/* ── Clip / stitched modal ── */}
       {modalIdx !== null && (
         <ImageModal
           items={modalRecords}
@@ -1195,6 +1315,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error('Delete failed');
             setClips((prev) => prev.filter((c) => c.id !== id));
+            setStitchedExports((prev) => prev.filter((e) => e.id !== id));
           }}
           onFavoriteToggle={async (id) => {
             const clip = clips.find((c) => c.id === id);
@@ -1215,54 +1336,6 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         />
       )}
 
-      {/* ── Stitched exports ── */}
-      {stitchedExports.length > 0 && (
-        <div className="px-4 pt-4">
-          <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium mb-2">
-            Stitched exports ({stitchedExports.length})
-          </p>
-          <div className="space-y-2">
-            {stitchedExports.map((e) => {
-              const durSec = e.frames != null && e.fps != null && e.fps > 0
-                ? (e.frames / e.fps).toFixed(1)
-                : null;
-              return (
-                <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video
-                    src={imgSrc(e.filePath)}
-                    preload="metadata"
-                    muted
-                    playsInline
-                    className="flex-shrink-0 w-20 aspect-video rounded-lg object-cover bg-zinc-800"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-300 truncate">{e.promptPos}</p>
-                    <p className="text-xs text-zinc-500 mt-0.5">
-                      {durSec ? `${durSec}s` : ''}
-                      {durSec && e.frames ? ' · ' : ''}
-                      {e.frames != null ? `${e.frames} frames` : ''}
-                      {' · '}
-                      {new Date(e.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <a
-                    href={imgSrc(e.filePath)}
-                    download
-                    className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                    title="Download"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                  </a>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* ── Settings modal ── */}
       {showSettings && (
         <SettingsModal
@@ -1281,6 +1354,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           allClips={clips}
           onClose={() => setShowStitch(false)}
           onStitched={(export_) => {
+            // Prepend to stitchedExports — the new stitch becomes the most recent
             setStitchedExports((prev) => [export_, ...prev]);
             setShowStitch(false);
           }}
