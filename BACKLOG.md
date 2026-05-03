@@ -43,4 +43,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Studio project switcher — `batch/studio-project-switcher` (PR #34)
 - [~] Cascade delete option on projects — `batch/project-cascade-delete` (PR #35)
 - [~] Wan 2.2 Lightning toggle (Phase 1.4a) — `batch/wan22-lightning-toggle` (PR #36)
-- [ ] Wan 2.2 LoRA support (Phase 1.4b) — see prompts/wan22-lora-support.md
+- [~] Wan 2.2 LoRA support (Phase 1.4b) — `batch/wan22-lora-support` (PR #37)
