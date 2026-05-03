@@ -714,7 +714,7 @@ Clicking "Generate new clip in this project" calls `onGenerateInProject(project,
 - `latestClipFilePath` — filePath of the latest clip, used when `latestClipMediaType === 'image'` to load the image directly without an API call.
 - `defaults` — `frames/steps/cfg/width/height`, each nullable; Studio falls back to `VIDEO_DEFAULTS` for unset fields.
 
-**Project badge**: shown in Studio header when project context is active. Has a × button to clear it. Persisted via `sessionStorage` key `studio-project-context` so it survives refresh (same pattern as `studio-mode`).
+**Project badge**: always visible in the Studio header. The badge is a clickable project picker. Selecting a different project hard-resets the video form to that project's defaults and pre-fills the prompt with the new project's latest clip prompt. Selecting "None" or clicking × clears the project association without resetting form values. The picker is the same `<ProjectPicker>` component used by Phase 2.3's gallery modal sidebar. Persisted via `sessionStorage` key `studio-project-context` so it survives refresh (same pattern as `studio-mode`).
 
 **Form pre-fill**: on context load, Studio switches to Video mode, sets `videoP` from project defaults (with `VIDEO_DEFAULTS` fallback), and sets `positivePrompt` from the latest clip's prompt.
 
