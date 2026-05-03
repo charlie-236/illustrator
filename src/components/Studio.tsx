@@ -7,7 +7,7 @@ import ParamSlider from './ParamSlider';
 import ImageModal from './ImageModal';
 import GalleryPicker from './GalleryPicker';
 import QueueTray from './QueueTray';
-import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip } from '@/types';
+import type { CheckpointConfig, GenerationParams, GenerationRecord, LoraConfig, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip, WanLoraEntry, WanLoraSpec } from '@/types';
 import { SAMPLERS, SCHEDULERS, RESOLUTIONS } from '@/types';
 import type { Tab } from '@/app/page';
 import { imgSrc } from '@/lib/imageSrc';
@@ -16,6 +16,8 @@ import ProjectPicker from './ProjectPicker';
 import NewProjectModal from './NewProjectModal';
 import { useQueue, type ActiveJob } from '@/contexts/QueueContext';
 import type { ActiveJobInfo } from '@/lib/comfyws';
+import { useModelLists } from '@/lib/useModelLists';
+import VideoLoraStack from './VideoLoraStack';
 
 interface CheckpointDefaults {
   positivePrompt: string;
@@ -155,6 +157,8 @@ export default function Studio({
     requestPermissionIfNeeded,
   } = useQueue();
 
+  const { data: modelLists } = useModelLists(modelConfigVersion);
+
   // mode — starts 'image'; actual session value applied on mount to avoid SSR mismatch
   const [mode, setMode] = useState<'image' | 'video'>('image');
 
@@ -166,6 +170,13 @@ export default function Studio({
   // Lightning mode — separate from videoP so steps/cfg are preserved when toggled off
   const [lightning, setLightning] = useState(() => {
     try { return sessionStorage.getItem('studio-video-lightning') === 'true'; } catch { return false; }
+  });
+  // Video LoRA stack — Wan 2.2 LoRAs only; persisted in sessionStorage
+  const [videoLoras, setVideoLoras] = useState<WanLoraEntry[]>(() => {
+    try {
+      const s = sessionStorage.getItem('studio-video-loras');
+      return s ? JSON.parse(s) as WanLoraEntry[] : [];
+    } catch { return []; }
   });
   const [useStartingFrame, setUseStartingFrame] = useState(false);
   const [startingFrameRecord, setStartingFrameRecord] = useState<GenerationRecord | null>(null);
@@ -354,6 +365,12 @@ export default function Studio({
       setLightningAndPersist(projectContextTrigger.defaults.lightning);
     }
 
+    // Pre-fill video LoRA stack from project defaults if provided
+    if (projectContextTrigger.defaults.videoLoras) {
+      const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+      setVideoLorasAndPersist(entries);
+    }
+
     // Carry forward latest clip's prompt if present
     if (projectContextTrigger.latestClipPrompt) {
       setP((prev) => ({ ...prev, positivePrompt: projectContextTrigger.latestClipPrompt! }));
@@ -380,6 +397,11 @@ export default function Studio({
   function setLightningAndPersist(val: boolean) {
     setLightning(val);
     try { sessionStorage.setItem('studio-video-lightning', String(val)); } catch { /* ignore */ }
+  }
+
+  function setVideoLorasAndPersist(loras: WanLoraEntry[]) {
+    setVideoLoras(loras);
+    try { sessionStorage.setItem('studio-video-loras', JSON.stringify(loras)); } catch { /* ignore */ }
   }
 
   function clearProjectContext() {
@@ -421,6 +443,7 @@ export default function Studio({
           width: project.defaultWidth ?? null,
           height: project.defaultHeight ?? null,
           lightning: project.defaultLightning ?? null,
+          videoLoras: project.defaultVideoLoras ?? null,
         },
       };
 
@@ -439,6 +462,12 @@ export default function Studio({
       // Apply lightning default if project has one
       if (newCtx.defaults.lightning !== null) {
         setLightningAndPersist(newCtx.defaults.lightning);
+      }
+
+      // Pre-fill video LoRA stack from project defaults if provided
+      if (newCtx.defaults.videoLoras) {
+        const entries = newCtx.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+        setVideoLorasAndPersist(entries);
       }
 
       // Pre-fill prompt from latest clip; clear if no clips
@@ -477,6 +506,7 @@ export default function Studio({
         width: project.defaultWidth ?? null,
         height: project.defaultHeight ?? null,
         lightning: project.defaultLightning ?? null,
+        videoLoras: project.defaultVideoLoras ?? null,
       },
     };
     setProjectContext(newCtx);
@@ -492,6 +522,12 @@ export default function Studio({
 
     if (newCtx.defaults.lightning !== null) {
       setLightningAndPersist(newCtx.defaults.lightning);
+    }
+
+    // Pre-fill video LoRA stack from project defaults if provided
+    if (newCtx.defaults.videoLoras) {
+      const entries = newCtx.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+      setVideoLorasAndPersist(entries);
     }
 
     // Clear prompt — new project has no clips
@@ -719,6 +755,15 @@ export default function Studio({
 
       const videoMode: 't2v' | 'i2v' = startImageB64 ? 'i2v' : 't2v';
 
+      // Build full WanLoraSpec[] from the minimal WanLoraEntry[] state + lists metadata
+      const wanLoras: WanLoraSpec[] = videoLoras.map((e) => ({
+        loraName: e.loraName,
+        friendlyName: modelLists.loraNames[e.loraName] ?? e.loraName,
+        weight: e.weight,
+        appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
+        appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
+      }));
+
       const res = await fetch('/api/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -732,6 +777,7 @@ export default function Studio({
           cfg: videoP.cfg,
           seed: p.seed >= 0 ? p.seed : undefined,
           lightning,
+          loras: wanLoras.length > 0 ? wanLoras : undefined,
           ...(startImageB64 ? { startImageB64 } : {}),
           ...(projectContext ? { projectId: projectContext.projectId } : {}),
         }),
@@ -1435,6 +1481,20 @@ export default function Studio({
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* ── Video LoRA stack ── */}
+              <div className="px-4 pt-4 pb-4 border-b border-zinc-800">
+                <VideoLoraStack
+                  loras={videoLoras}
+                  lists={modelLists}
+                  onChange={setVideoLorasAndPersist}
+                />
+                {lightning && videoLoras.length > 0 && (
+                  <p className="text-xs text-amber-400/80 mt-2">
+                    Lightning + LoRA stack: experimental — Lightning was distilled against the bare base model.
+                  </p>
+                )}
               </div>
 
               <div className="px-4 pt-4 pb-5 space-y-3">

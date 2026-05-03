@@ -89,6 +89,7 @@ export default function Home() {
         width: project.defaultWidth,
         height: project.defaultHeight,
         lightning: project.defaultLightning ?? null,
+        videoLoras: project.defaultVideoLoras ?? null,
       },
     };
     setProjectContextTrigger(context);

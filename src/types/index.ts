@@ -3,6 +3,28 @@ export interface LoraEntry {
   weight: number;
 }
 
+/**
+ * Wan 2.2 LoRA entry in Studio form state (minimal — friendlyName and expert
+ * flags are looked up from ModelLists at render / submit time).
+ */
+export interface WanLoraEntry {
+  loraName: string;
+  weight: number;
+}
+
+/**
+ * Full Wan 2.2 LoRA spec sent to the workflow builder and stored in project
+ * defaults. loraName is the obfuscated on-disk filename; friendlyName is the
+ * human-readable label used everywhere except the lora_name workflow field.
+ */
+export interface WanLoraSpec {
+  loraName: string;
+  friendlyName: string;
+  weight: number;
+  appliesToHigh: boolean;
+  appliesToLow: boolean;
+}
+
 export interface ReferenceImageSet {
   /** Base64-encoded image data, NO data URL prefix. 1-3 entries. */
   images: string[];
@@ -112,6 +134,7 @@ export interface ProjectDetail {
   defaultWidth: number | null;
   defaultHeight: number | null;
   defaultLightning: boolean | null;
+  defaultVideoLoras: WanLoraSpec[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -143,6 +166,8 @@ export interface LoraConfig {
   baseModel: string;
   description?: string | null;
   url?: string | null;
+  appliesToHigh: boolean;
+  appliesToLow: boolean;
 }
 
 export interface EmbeddingConfig {
@@ -181,6 +206,7 @@ export interface ProjectContext {
     width: number | null;
     height: number | null;
     lightning: boolean | null;
+    videoLoras: WanLoraSpec[] | null;
   };
 }
 

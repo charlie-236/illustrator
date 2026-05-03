@@ -52,11 +52,12 @@ model Project {
   defaultCfg      Float?
   defaultWidth    Int?
   defaultHeight   Int?
-  defaultLightning Boolean?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  generations     Generation[] @relation("ProjectClips")
-  stitchedExports Generation[] @relation("StitchedFromProject")
+  defaultLightning  Boolean?
+  defaultVideoLoras String?      // JSON-encoded WanLoraSpec[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  generations       Generation[] @relation("ProjectClips")
+  stitchedExports   Generation[] @relation("StitchedFromProject")
 }
 
 model CheckpointConfig {
@@ -80,14 +81,16 @@ model CheckpointConfig {
 }
 
 model LoraConfig {
-  id           String   @id @default(cuid())
-  loraName     String   @unique
-  friendlyName String   @default("")
-  triggerWords String   @default("")
-  baseModel    String   @default("")
-  description  String?
-  url          String?
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  loraName      String   @unique
+  friendlyName  String   @default("")
+  triggerWords  String   @default("")
+  baseModel     String   @default("")
+  description   String?
+  url           String?
+  updatedAt     DateTime @updatedAt
+  appliesToHigh Boolean  @default(true)
+  appliesToLow  Boolean  @default(true)
 }
 
 model EmbeddingConfig {

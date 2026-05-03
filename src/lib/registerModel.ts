@@ -44,6 +44,14 @@ export interface RegisteredModelInfo {
   triggerWords: string;
 }
 
+// Normalize CivitAI base model strings to canonical internal values.
+// CivitAI returns "Wan Video 2.2", "WanVideo2.2", "Wan2.2", etc. — all map to 'Wan 2.2'.
+function normalizeBaseModel(raw: string): string {
+  const s = raw.trim();
+  if (/wan\s*(?:video\s*)?2\.?2/i.test(s)) return 'Wan 2.2';
+  return s;
+}
+
 function extractCategoryFromTags(meta: CivitAIMetadata): string | null {
   const tags: string[] = meta.tags ?? meta.model?.tags ?? [];
   if (!Array.isArray(tags) || tags.length === 0) return null;
@@ -65,7 +73,7 @@ export async function registerModel(
 
   const friendlyName = (civitaiMetadata.model?.name ?? civitaiMetadata.name ?? '').trim();
   const triggerWords = (civitaiMetadata.trainedWords ?? []).join(', ');
-  const baseModel = (civitaiMetadata.baseModel ?? '').trim();
+  const baseModel = normalizeBaseModel(civitaiMetadata.baseModel ?? '');
   const description = stripHtml(civitaiMetadata.model?.description ?? civitaiMetadata.description) || null;
   // Preserve the source domain (civitai.red vs civitai.com) from the user's original URL input
   const host = input.sourceHostname ?? 'civitai.com';

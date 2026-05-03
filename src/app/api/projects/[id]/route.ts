@@ -111,6 +111,9 @@ export async function GET(
         defaultWidth: project.defaultWidth,
         defaultHeight: project.defaultHeight,
         defaultLightning: project.defaultLightning,
+        defaultVideoLoras: project.defaultVideoLoras
+          ? (() => { try { return JSON.parse(project.defaultVideoLoras); } catch { return null; } })()
+          : null,
         createdAt: project.createdAt.toISOString(),
         updatedAt: project.updatedAt.toISOString(),
       },
@@ -177,6 +180,13 @@ export async function PATCH(
       : body.defaultLightning === false ? false
       : null;
   }
+  if ('defaultVideoLoras' in body) {
+    if (body.defaultVideoLoras === null || body.defaultVideoLoras === undefined) {
+      data.defaultVideoLoras = null;
+    } else if (Array.isArray(body.defaultVideoLoras)) {
+      data.defaultVideoLoras = JSON.stringify(body.defaultVideoLoras);
+    }
+  }
 
   try {
     const project = await prisma.project.update({
@@ -195,6 +205,9 @@ export async function PATCH(
       defaultWidth: project.defaultWidth,
       defaultHeight: project.defaultHeight,
       defaultLightning: project.defaultLightning,
+      defaultVideoLoras: project.defaultVideoLoras
+        ? (() => { try { return JSON.parse(project.defaultVideoLoras); } catch { return null; } })()
+        : null,
       createdAt: project.createdAt.toISOString(),
       updatedAt: project.updatedAt.toISOString(),
     });

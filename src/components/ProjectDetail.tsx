@@ -18,11 +18,13 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport } from '@/types';
+import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport, WanLoraEntry } from '@/types';
 import ImageModal from './ImageModal';
 import DeleteConfirmDialog from './DeleteConfirmDialog';
 import { imgSrc } from '@/lib/imageSrc';
 import { useQueue } from '@/contexts/QueueContext';
+import { useModelLists } from '@/lib/useModelLists';
+import VideoLoraStack from './VideoLoraStack';
 
 interface Props {
   projectId: string;
@@ -479,6 +481,7 @@ interface SettingsModalProps {
 }
 
 function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
+  const { data: modelLists } = useModelLists();
   const [form, setForm] = useState({
     description: project.description ?? '',
     styleNote: project.styleNote ?? '',
@@ -492,6 +495,10 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
   const [defaultLightning, setDefaultLightning] = useState<boolean | null>(
     project.defaultLightning ?? null,
   );
+  const [defaultVideoLoras, setDefaultVideoLoras] = useState<WanLoraEntry[]>(() => {
+    if (!project.defaultVideoLoras) return [];
+    return project.defaultVideoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -503,6 +510,17 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
     e.preventDefault();
     setSaving(true);
     setError(null);
+    // Build full WanLoraSpec[] from the minimal WanLoraEntry[] + modelLists metadata
+    const fullVideoLoras = defaultVideoLoras.length > 0
+      ? defaultVideoLoras.map((e) => ({
+          loraName: e.loraName,
+          friendlyName: modelLists.loraNames[e.loraName] ?? e.loraName,
+          weight: e.weight,
+          appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
+          appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
+        }))
+      : null;
+
     const body: Record<string, unknown> = {
       description: form.description.trim() || null,
       styleNote: form.styleNote.trim() || null,
@@ -512,6 +530,7 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
       defaultWidth: form.defaultWidth ? parseInt(form.defaultWidth, 10) : null,
       defaultHeight: form.defaultHeight ? parseInt(form.defaultHeight, 10) : null,
       defaultLightning,
+      defaultVideoLoras: fullVideoLoras,
     };
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
@@ -660,6 +679,15 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
                     ? 'New clips will default to Lightning off (full quality).'
                     : 'No override — clips keep whatever Lightning state was last used.'}
               </p>
+            </div>
+
+            <div className="mt-3">
+              <VideoLoraStack
+                loras={defaultVideoLoras}
+                lists={modelLists}
+                onChange={setDefaultVideoLoras}
+              />
+              <p className="text-xs text-zinc-500 mt-1">New clips in this project pre-fill the LoRA stack from these defaults.</p>
             </div>
           </div>
 
