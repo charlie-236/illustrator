@@ -57,6 +57,17 @@ pm2 start ecosystem.config.js && pm2 save
 
 Subsequent deploys: `npm run build && pm2 restart illustrator`
 
+## System dependencies
+
+**ffmpeg** is required on `mint-pc` for last-frame extraction (Phase 2.2) and video stitching (Phase 3).
+
+```bash
+sudo apt-get install -y ffmpeg
+ffmpeg -version  # confirm ≥ 4.x
+```
+
+ffmpeg is called server-side by `POST /api/extract-last-frame` via Node's `child_process.execFile`. It never writes to disk — frames are piped to stdout and base64-encoded in memory.
+
 ## Infrastructure
 
 | Machine | Role |
@@ -272,10 +283,21 @@ Deletes project. DB `onDelete: SetNull` drops clips to project-less. Returns `{ 
 ### `PATCH /api/projects/[id]/reorder`
 Body `{ clipOrder: string[] }`. Validates all IDs belong to this project and count matches. Updates `position` fields in a Prisma transaction. Returns `{ ok: true }` or 400 on validation failure.
 
+### `POST /api/extract-last-frame`
+Extracts the last frame of a video generation as a PNG data URI. Used by Studio when "Use last frame of previous clip" is checked.
+
+Request body: `{ generationId: string }`.
+
+Response: `{ frameB64: string }` where `frameB64` is a `data:image/png;base64,...` data URI.
+
+Implementation: calls `ffmpeg -sseof -0.1 -i <localPath> -vframes 1 -vcodec png -f image2pipe pipe:1` via Node `execFile`. Output captured in memory — never writes to disk. Returns 404 if the generation doesn't exist, 400 if it's not a video.
+
 ### `POST /api/generate-video`
 SSE-streaming video generation via Wan 2.2 14B fp8 MoE. Returns an SSE stream directly (no separate `/progress` route). See **Video generation (Phase 1)** section for full details.
 
-Request body: `{ mode, prompt, negativePrompt?, width, height, frames, steps, cfg, seed?, startImageB64? }`.
+Request body: `{ mode, prompt, negativePrompt?, width, height, frames, steps, cfg, seed?, startImageB64?, projectId? }`.
+
+Optional `projectId`: if present, must reference an existing project (validated against DB). The resulting Generation row gets `projectId` set and `position` auto-computed as `max(existing positions) + 1`.
 
 SSE events: same shape as the image progress route — `progress`, `complete`, `error`. The `complete` event carries `{ id, filePath, frames, fps, seed, createdAt }`.
 
@@ -645,19 +667,51 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 **Project detail view** (`ProjectDetail.tsx`):
 - Header: back button, inline-editable name and description, Settings gear, overflow menu (Delete, two-tap confirm).
 - Style note rendered in a muted box below description (read-only; editable via Settings modal).
-- "Generate new clip in this project" button — disabled with a "coming in 2.2" tooltip.
+- **"Generate new clip in this project" button** — tapping navigates to Studio with the project's context pre-loaded (see Phase 2.2 below).
 - **Linear strip**: horizontal-scrollable `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`). Each tile is a `<video preload="metadata">` thumbnail with position badge (top-left) and duration badge (bottom-right). Click opens `ImageModal` scoped to project clips.
 - Drag to reorder: optimistic update, then `PATCH /api/projects/[id]/reorder`. Reverts on error with a brief toast.
 - Empty strip: placeholder text.
 - **Settings modal**: description, style note, and default generation params (resolution presets + frames/steps/CFG inputs). PATCHes `/api/projects/[id]`.
+- **Play-through toggle** (hidden on 0–1 clips): replaces strip with a single `<video>` player that chains all clips end-to-end. `onEnded` advances to the next clip via `load()` + `play()`. Clip-index chips allow jumping to any clip. "Play again" button shown after the last clip finishes. See **Play-through preview** below.
 
 ### Gallery integration
 
 `GenerationRecord` now includes `projectId: string | null` and `projectName: string | null`. The gallery API (`/api/gallery`) includes the project relation. `ImageModal` shows a **Project** row in the metadata footer for video clips: a tappable link to the project, or "None". `Gallery` accepts `onNavigateToProject` callback to wire the link back to the Projects tab.
 
-### Generation from project
+### Project-aware generation (Phase 2.2)
 
-Not yet implemented. Phase 2.2 will add prompt carry-forward, last-frame extraction, and direct clip generation from the project detail view.
+Clicking "Generate new clip in this project" calls `onGenerateInProject(project, latestClip)` which propagates up to `page.tsx` → sets `projectContextTrigger` → Studio picks it up via `useEffect`.
+
+**Studio project context** (`ProjectContext` type in `src/types/index.ts`):
+- `projectId`, `projectName` — for the badge and the `/api/generate-video` `projectId` field.
+- `latestClipId` — for last-frame extraction.
+- `latestClipPrompt` — carried forward into the positive prompt textarea.
+- `defaults` — `frames/steps/cfg/width/height`, each nullable; Studio falls back to `VIDEO_DEFAULTS` for unset fields.
+
+**Project badge**: shown in Studio header when project context is active. Has a × button to clear it. Persisted via `sessionStorage` key `studio-project-context` so it survives refresh (same pattern as `studio-mode`).
+
+**Form pre-fill**: on context load, Studio switches to Video mode, sets `videoP` from project defaults (with `VIDEO_DEFAULTS` fallback), and sets `positivePrompt` from the latest clip's prompt.
+
+**Prompt threading**: `latestClip?.prompt` is the `promptPos` of the highest-positioned clip in the project. Carry-forward puts it in the textarea so the user can edit before generating.
+
+**Remix vs. project flow**: remix from gallery always clears project context. Remixing is a fresh starting point; re-generating within a project uses the "Generate new clip" button.
+
+### Prompt threading and last-frame extraction (Phase 2.2)
+
+When Studio has project context and a `latestClipId`, a **"Use last frame of previous clip"** checkbox appears in the Starting frame (I2V) section:
+
+- Checking it implicitly enables I2V mode (turns on the Starting frame toggle) and hides the gallery picker.
+- On submit, Studio calls `POST /api/extract-last-frame` with the `latestClipId`, gets a `data:image/png;base64,...` data URI, strips the prefix, and sends the raw base64 as `startImageB64` to `/api/generate-video`.
+- While extraction runs, a spinner appears and the Generate Video button is disabled.
+
+### Play-through preview (Phase 2.2)
+
+Single `<video ref={playerRef}>` element. `playingIdx` state tracks the current clip. `onEnded` increments it (or sets `playDone`). A `useEffect` on `[playingIdx, playThrough]` calls `playerRef.current.load()` then `.play()` when the index advances.
+
+- Clip chips (numbered buttons) jump directly to any clip.
+- "Play again" button at end resets to index 0.
+- Wan 2.2 generates no audio; no click/gap handling needed at this stage. Video stitching (Phase 3) will solve seamless playback.
+- Toggle hidden when project has 0 or 1 clips.
 
 ---
 

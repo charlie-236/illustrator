@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { ProjectSummary, ProjectDetail } from '@/types';
+import type { ProjectSummary, ProjectDetail, ProjectClip } from '@/types';
 import ProjectDetailView from './ProjectDetail';
 import { imgSrc } from '@/lib/imageSrc';
 
 interface Props {
   onNavigateToGallery: () => void;
+  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null) => void;
 }
 
 interface NewProjectForm {
@@ -284,7 +285,7 @@ function ProjectCard({ project, onClick }: { project: ProjectSummary; onClick: (
   );
 }
 
-export default function Projects({ onNavigateToGallery }: Props) {
+export default function Projects({ onNavigateToGallery, onGenerateInProject }: Props) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -321,6 +322,7 @@ export default function Projects({ onNavigateToGallery }: Props) {
         onBack={() => setActiveProjectId(null)}
         onDeleted={handleProjectDeleted}
         onNavigateToGallery={onNavigateToGallery}
+        onGenerateInProject={onGenerateInProject}
       />
     );
   }

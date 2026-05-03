@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { buildT2VWorkflow, buildI2VWorkflow, WAN22_DEFAULT_NEGATIVE_PROMPT } from '@/lib/wan22-workflow';
 import { getComfyWSManager } from '@/lib/comfyws';
 import type { ComfyWorkflow } from '@/lib/wan22-workflow';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,7 @@ interface VideoRequest {
   cfg: number;
   seed?: number;
   startImageB64?: string;
+  projectId?: string;
 }
 
 const SSE_HEADERS = {
@@ -89,6 +91,17 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "startImageB64 is not allowed for mode='t2v'" }), { status: 400 });
   }
 
+  // Validate projectId if provided
+  if (body.projectId !== undefined) {
+    if (typeof body.projectId !== 'string' || !body.projectId.trim()) {
+      return new Response(JSON.stringify({ error: 'projectId must be a non-empty string' }), { status: 400 });
+    }
+    const project = await prisma.project.findUnique({ where: { id: body.projectId }, select: { id: true } });
+    if (!project) {
+      return new Response(JSON.stringify({ error: 'projectId does not reference an existing project' }), { status: 400 });
+    }
+  }
+
   // ─── prepare ──────────────────────────────────────────────────────────────
 
   const seed = typeof body.seed === 'number' && Number.isInteger(body.seed)
@@ -114,7 +127,8 @@ export async function POST(req: NextRequest) {
     seed,
     mode,
     outputDir,
-  } as const;
+    ...(body.projectId ? { projectId: body.projectId } : {}),
+  };
 
   let workflow: ComfyWorkflow;
   try {
