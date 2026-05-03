@@ -34,4 +34,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [ ] Project generation flow + prompt threading + play-through (Phase 2.2) — see prompts/wan22-project-generation-flow.md
 - [ ] Per-checkpoint defaults — see prompts/checkpoint-defaults.md
 - [ ] Video settings popout (Studio UX consistency) — see prompts/wan22-studio-video-settings-popout.md
-#- [ ] Project stitching (Phase 3) — see prompts/wan22-project-stitching.md
+- [ ] Project stitching (Phase 3) — see prompts/wan22-project-stitching.md
