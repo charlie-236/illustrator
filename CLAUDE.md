@@ -892,9 +892,13 @@ New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `
 
 ## Delete confirmation pattern
 
-Destructive actions in the app share a single confirm-dialog pattern: `<DeleteConfirmDialog>` requires the user to type the resource's name to enable the Delete button. Applied to project deletes, gallery modal deletes (image and video clips), and model-tab deletes (checkpoints, LoRAs, embeddings). The gallery's tile-level two-tap delete pattern is intentionally NOT replaced — different intents (sweep cleanup vs. deliberate single-item deletion) get different friction levels.
+Destructive actions in the app share a single confirm-dialog pattern: `<DeleteConfirmDialog>` opens a modal with a clearly-labeled destructive button (red/Delete) and a Cancel button. Tap to confirm — no text input required. The dialog focuses Cancel by default, so an accidental tap-anywhere doesn't delete. Escape and backdrop-click cancel. Applied to project deletes, gallery modal deletes (image and video clips), and model-tab deletes (checkpoints, LoRAs, embeddings).
 
-Component: `src/components/DeleteConfirmDialog.tsx`. Props: `open`, `resourceType` (`'project' | 'clip' | 'checkpoint' | 'lora' | 'embedding'`), `resourceName`, `onConfirm`, `onCancel`, `warningMessage?`. Match is exact and case-sensitive. Enter submits when matched; Escape and backdrop-click cancel.
+Project cascade delete (the "Delete everything" option) adds a 2-second initial delay before the Delete button enables — its scope is large enough to warrant slight extra friction. The button shows a `Wait… Xs` countdown during the delay. Switching back to "Keep items" immediately enables Delete (no delay for the safer choice).
+
+The gallery's tile-level two-tap delete pattern is intentionally NOT routed through this dialog — different intents (sweep cleanup vs. deliberate single-item deletion) get different friction levels.
+
+Component: `src/components/DeleteConfirmDialog.tsx`. Props: `open`, `resourceType` (`'project' | 'clip' | 'checkpoint' | 'lora' | 'embedding'`), `resourceName`, `onConfirm`, `onCancel`, `warningMessage?`, `cascadeInfo?`. Enter confirms when Delete is enabled; Escape and backdrop-click cancel.
 
 ---
 
