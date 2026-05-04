@@ -922,76 +922,108 @@ export default function Studio({
       const takeSeed = baseSeed === -1 ? -1 : baseSeed + i;
       const generateParams: GenerationParams = { ...basePayload, seed: takeSeed };
 
-      let promptId: string;
-      let resolvedSeed: number;
-
+      let res: Response;
       try {
-        const res = await fetch('/api/generate', {
+        res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(generateParams),
         });
-        if (!res.ok) {
-          const { error } = await res.json() as { error: string };
-          throw new Error(error);
-        }
-        ({ promptId, resolvedSeed } = await res.json() as { promptId: string; resolvedSeed: number });
       } catch (err) {
         setSubmitError(String(err));
         return;
       }
 
-      // Display the first take's seed; subsequent takes have their own seeds visible in gallery
-      if (i === 0) setLastResolvedSeed(resolvedSeed);
+      if (!res.ok) {
+        try {
+          const errBody = await res.json() as { error: string };
+          setSubmitError(errBody.error);
+        } catch {
+          setSubmitError(`HTTP ${res.status}`);
+        }
+        return;
+      }
 
-      // Add each take as its own queue-tray job
-      addJob({
-        promptId,
-        generationId: '',
-        mediaType: 'image',
-        promptSummary,
-        startedAt: submitTime,
-        runningSince: null,
-        progress: null,
-        status: 'queued',
-      });
+      if (!res.body) {
+        setSubmitError('No response stream');
+        return;
+      }
 
-      // Open SSE for this take's progress — capture loop vars for closure safety
-      const capturedPromptId = promptId;
+      // Process this take's SSE stream in the background — don't block the submission loop
+      const reader = res.body.getReader();
+      const takeIndex = i;
 
-      const sse = new EventSource(`/api/progress/${capturedPromptId}`);
+      void (async () => {
+        const dec = new TextDecoder();
+        let lineBuf = '';
+        let currentEvt = '';
+        let streamDone = false;
+        let jobPromptId = '';
+        let jobAdded = false;
 
-      sse.addEventListener('progress', (e) => {
-        const d = JSON.parse(e.data) as { value: number; max: number };
-        updateProgress(capturedPromptId, { current: d.value, total: d.max });
-      });
-
-      sse.addEventListener('completing', () => {
-        setCompleting(capturedPromptId);
-      });
-
-      sse.addEventListener('complete', (e) => {
-        const d = JSON.parse(e.data) as { records: GenerationRecord[] };
-        // Accumulate results as each take completes — order depends on ComfyUI queue
-        setLastImageRecords((prev) => [...prev, ...d.records]);
-        completeJob(capturedPromptId, d.records[0]?.id ?? '');
-        sse.close();
-        onGenerated();
-      });
-
-      sse.addEventListener('error', (e) => {
-        const msg = e instanceof MessageEvent
-          ? (JSON.parse(e.data) as { message: string }).message
-          : 'Unknown error';
-        failJob(capturedPromptId, msg);
-        sse.close();
-      });
-
-      sse.onerror = () => {
-        if (sse.readyState === EventSource.CLOSED) return;
-        failJob(capturedPromptId, 'SSE connection lost');
-        sse.close();
-      };
+        try {
+          while (!streamDone) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            lineBuf += dec.decode(value, { stream: true });
+            const lines = lineBuf.split('\n');
+            lineBuf = lines.pop() ?? '';
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                currentEvt = line.slice(7).trim();
+              } else if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                if (currentEvt === 'init') {
+                  const initData = JSON.parse(dataStr) as { promptId: string; resolvedSeed: number };
+                  jobPromptId = initData.promptId;
+                  // Display the first take's seed; subsequent takes visible in gallery
+                  if (takeIndex === 0) setLastResolvedSeed(initData.resolvedSeed);
+                  if (!jobAdded) {
+                    jobAdded = true;
+                    addJob({
+                      promptId: jobPromptId,
+                      generationId: '',
+                      mediaType: 'image',
+                      promptSummary,
+                      startedAt: submitTime,
+                      runningSince: null,
+                      progress: null,
+                      status: 'queued',
+                    });
+                  }
+                } else if (currentEvt === 'progress') {
+                  const pd = JSON.parse(dataStr) as { value: number; max: number };
+                  if (jobPromptId) updateProgress(jobPromptId, { current: pd.value, total: pd.max });
+                } else if (currentEvt === 'completing') {
+                  if (jobPromptId) setCompleting(jobPromptId);
+                } else if (currentEvt === 'complete') {
+                  const d = JSON.parse(dataStr) as { records: GenerationRecord[] };
+                  // Accumulate results as each take completes — order depends on ComfyUI queue
+                  setLastImageRecords((prev) => [...prev, ...d.records]);
+                  if (jobPromptId) completeJob(jobPromptId, d.records[0]?.id ?? '');
+                  onGenerated();
+                  reader.cancel();
+                  streamDone = true;
+                  break;
+                } else if (currentEvt === 'error') {
+                  const er = JSON.parse(dataStr) as { message: string };
+                  if (jobPromptId) {
+                    failJob(jobPromptId, er.message);
+                  } else {
+                    setSubmitError(er.message);
+                  }
+                  reader.cancel();
+                  streamDone = true;
+                  break;
+                }
+                currentEvt = '';
+              }
+            }
+          }
+        } catch {
+          if (jobPromptId) failJob(jobPromptId, 'SSE connection lost');
+        }
+      })();
     }
   }
 
