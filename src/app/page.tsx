@@ -77,10 +77,11 @@ export default function Home() {
     setTab('projects');
   }, []);
   const handleProjectContextTriggerConsumed = useCallback(() => setProjectContextTrigger(null), []);
-  const handleGenerateInProject = useCallback((project: ProjectDetail, latestClip: ProjectClip | null) => {
+  const handleGenerateInProject = useCallback((project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video') => {
     const context: ProjectContext = {
       projectId: project.id,
       projectName: project.name,
+      mode,
       latestClipId: latestClip?.id ?? null,
       latestClipPrompt: latestClip?.prompt ?? null,
       latestClipMediaType: latestClip?.mediaType ?? null,

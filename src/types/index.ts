@@ -199,6 +199,8 @@ export interface ModelInfo {
 export interface ProjectContext {
   projectId: string;
   projectName: string;
+  /** Which Studio mode to open. */
+  mode: 'image' | 'video';
   /** ID of the most-recently-positioned clip (for last-frame extraction). Null if project has no clips. */
   latestClipId: string | null;
   /** Positive prompt of the latest clip (for carry-forward). Null if project has no clips. */

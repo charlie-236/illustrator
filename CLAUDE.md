@@ -774,7 +774,7 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 **Project detail view** (`ProjectDetail.tsx`):
 - Header: back button, inline-editable name and description, Settings gear, overflow menu (Delete, two-tap confirm).
 - Style note rendered in a muted box below description (read-only; editable via Settings modal).
-- **"Generate new clip in this project" button** — tapping navigates to Studio with the project's context pre-loaded (see Phase 2.2 below).
+- **"Generate image" and "Generate clip" buttons** — two equal-weight entry points. Each opens Studio in the corresponding mode with the project context pre-loaded (see Phase 2.2 below).
 - **Clip strip**: `flex flex-wrap` grid. `DndContext` + `SortableContext` (`@dnd-kit/core` + `@dnd-kit/sortable`, `rectSortingStrategy`) wraps source clips only. Stitched output tiles are rendered after source clips as non-draggable `StitchedTile` elements with an emerald **Stitched** badge. Tiles render `<img>` for image clips and `<video preload="metadata">` for video clips. Position badge (top-left) on all source tiles; duration badge (bottom-right) on video tiles. Click opens `ImageModal` scoped to all project clips + stitched exports.
 - **All/Images/Clips/Videos filter**: 4-way filter shown above the strip when the project has mixed content. "All" shows everything; "Images" shows image source clips; "Clips" shows unstitched video source clips; "Videos" shows stitched outputs. Does not affect drag-to-reorder order.
 - Drag to reorder: optimistic update, then `PATCH /api/projects/[id]/reorder`. Reverts on error with a brief toast.
@@ -788,25 +788,30 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 
 ### Project-aware generation (Phase 2.2)
 
-Clicking "Generate new clip in this project" calls `onGenerateInProject(project, latestClip)` which propagates up to `page.tsx` → sets `projectContextTrigger` → Studio picks it up via `useEffect`.
+Clicking "Generate image" or "Generate clip" calls `onGenerateInProject(project, latestClip, mode)` which propagates up to `page.tsx` → sets `projectContextTrigger` (with `mode: 'image' | 'video'`) → Studio picks it up via `useEffect`.
+
+Project Detail offers two entry points: "Generate image" and "Generate clip". Each opens Studio in the corresponding mode with the project context active. The project's defaults (frames/steps/cfg/dimensions/lightning/videoLoras) pre-fill the video form when entering video mode; only dimensions pre-fill the image form when entering image mode. Generated items inherit the project regardless of mode.
+
+Projects are general containers for generated outputs. Today they hold images and video clips; future phases will add JSON storyboards (Phase 5), long-form stories, and prompt roleplay. The two-mode entry on the project detail view is the current shape; new entry points will be added as new generation surfaces ship.
 
 When a project is active in Studio, **both image and video generations** are created with `projectId` set on the resulting `Generation` row, and `position` is auto-computed as `max(existing positions in this project) + 1`. The project's linear strip shows images and clips in `position` order, mixed together. Clips can also be retroactively assigned to a project after generation; images can be assigned the same way (per Phase 2.3).
 
 **Studio project context** (`ProjectContext` type in `src/types/index.ts`):
 - `projectId`, `projectName` — for the badge and the `/api/generate` + `/api/generate-video` `projectId` field.
+- `mode` — `'image' | 'video'`; which Studio mode to open.
 - `latestClipId` — for last-frame extraction.
 - `latestClipPrompt` — carried forward into the positive prompt textarea.
 - `latestClipMediaType` — `'image' | 'video' | null`; determines whether to run ffmpeg or use the image directly (Phase 2.3).
 - `latestClipFilePath` — filePath of the latest clip, used when `latestClipMediaType === 'image'` to load the image directly without an API call.
-- `defaults` — `frames/steps/cfg/width/height`, each nullable; Studio falls back to `VIDEO_DEFAULTS` for unset fields.
+- `defaults` — `frames/steps/cfg/width/height/lightning/videoLoras`, each nullable; Studio falls back to `VIDEO_DEFAULTS` for unset video fields when entering video mode. Image mode only consumes `width`/`height`.
 
 **Project badge**: always visible in the Studio header. The badge is a clickable project picker. Selecting a different project hard-resets the video form to that project's defaults and pre-fills the prompt with the new project's latest clip prompt. Selecting "None" or clicking × clears the project association without resetting form values. The picker is the same `<ProjectPicker>` component used by Phase 2.3's gallery modal sidebar. Persisted via `sessionStorage` key `studio-project-context` so it survives refresh (same pattern as `studio-mode`).
 
-**Form pre-fill**: on context load, Studio switches to Video mode, sets `videoP` from project defaults (with `VIDEO_DEFAULTS` fallback), and sets `positivePrompt` from the latest clip's prompt.
+**Form pre-fill**: on context load, Studio switches to the requested mode. Video mode sets `videoP` from project defaults (with `VIDEO_DEFAULTS` fallback), applies lightning and video LoRA defaults. Image mode applies only `width`/`height` if set. Positive prompt is carried forward in both modes.
 
 **Prompt threading**: `latestClip?.prompt` is the `promptPos` of the highest-positioned clip in the project. Carry-forward puts it in the textarea so the user can edit before generating.
 
-**Remix vs. project flow**: remix from gallery always clears project context. Remixing is a fresh starting point; re-generating within a project uses the "Generate new clip" button.
+**Remix vs. project flow**: remix from gallery always clears project context. Remixing is a fresh starting point; re-generating within a project uses the "Generate image" / "Generate clip" buttons.
 
 ### Prompt threading and last-frame extraction (Phase 2.2 / 2.3)
 
