@@ -474,6 +474,10 @@ When `referenceImages` is present in `GenerationParams`, `buildWorkflow()` injec
 
 `strengthToWeights(strength)` maps 0–1.5 to `weight`/`weight_faceidv2`: linear 0→(0.85, 0.75) at strength=1.0, then up to caps (1.0, 1.0) at strength=1.5. KSampler's model input switches to node 321's output. Without `referenceImages`, the chain is unchanged.
 
+### Image batch independence
+
+Image batches are N independent ComfyUI workflows, not one workflow with `EmptyLatentImage.batch_size > 1`. Each take gets its own seed (random if `seed === -1`, sequential `seed + i` if explicit), its own queue tray entry, its own promptId, and its own `Generation` row. This produces visually-distinct outputs at the cost of N prompt-submission round-trips to ComfyUI. The cap is 4 takes per submit. `buildWorkflow()` always emits `batch_size: 1` on `EmptyLatentImage` — the loop is client-side in `handleGenerate()`.
+
 ## Tailwind conventions
 
 - Page bg: `bg-zinc-950` / Card: `bg-zinc-900` / Input: `bg-zinc-800`

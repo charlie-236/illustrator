@@ -876,91 +876,108 @@ export default function Studio({
 
     const submitTime = Date.now();
     const promptSummary = p.positivePrompt.slice(0, 60).trim() || 'Image generation';
+    const batchSize = p.batchSize ?? 1;
+    const baseSeed = p.seed;
 
-    let promptId: string;
-    let resolvedSeed: number;
+    // Clear previous results before starting new batch
+    setLastImageRecords([]);
+    setLastResolvedSeed(-1);
 
-    try {
-      const generateParams: GenerationParams = {
-        ...p,
-        // Enrich loras with friendlyName so workflow.ts can use it for _meta.title
-        loras: p.loras.map((l) => ({
-          ...l,
-          friendlyName: modelLists.loraNames[l.name] ?? '(unknown LoRA)',
-        })),
-        baseImage: baseImage ?? undefined,
-        mask: mask ?? undefined,
-        denoise: baseImage ? baseImageDenoise : undefined,
-        referenceImages: faceReferences.length > 0
-          ? { images: faceReferences, strength: faceStrength }
-          : undefined,
-      };
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(generateParams),
-      });
-      if (!res.ok) {
-        const { error } = await res.json() as { error: string };
-        throw new Error(error);
-      }
-      ({ promptId, resolvedSeed } = await res.json() as { promptId: string; resolvedSeed: number });
-    } catch (err) {
-      setSubmitError(String(err));
-      return;
-    }
+    const basePayload: GenerationParams = {
+      ...p,
+      batchSize: 1, // each take is its own single-image workflow
+      // Enrich loras with friendlyName so workflow.ts can use it for _meta.title
+      loras: p.loras.map((l) => ({
+        ...l,
+        friendlyName: modelLists.loraNames[l.name] ?? '(unknown LoRA)',
+      })),
+      baseImage: baseImage ?? undefined,
+      mask: mask ?? undefined,
+      denoise: baseImage ? baseImageDenoise : undefined,
+      referenceImages: faceReferences.length > 0
+        ? { images: faceReferences, strength: faceStrength }
+        : undefined,
+    };
 
-    setLastResolvedSeed(resolvedSeed);
-
-    // Add to queue immediately — form stays unlocked
-    addJob({
-      promptId,
-      generationId: '',
-      mediaType: 'image',
-      promptSummary,
-      startedAt: submitTime,
-      runningSince: null,
-      progress: null,
-      status: 'queued',
-    });
-
-    // Request notification permission on first submit
+    // Request notification permission on first submit (once per batch)
     requestPermissionIfNeeded();
 
-    // Open SSE for progress updates
-    const sse = new EventSource(`/api/progress/${promptId}`);
+    for (let i = 0; i < batchSize; i++) {
+      // seed === -1: route randomizes per take; explicit seed: sequential seed + i for reproducibility
+      const takeSeed = baseSeed === -1 ? -1 : baseSeed + i;
+      const generateParams: GenerationParams = { ...basePayload, seed: takeSeed };
 
-    sse.addEventListener('progress', (e) => {
-      const d = JSON.parse(e.data) as { value: number; max: number };
-      updateProgress(promptId, { current: d.value, total: d.max });
-    });
+      let promptId: string;
+      let resolvedSeed: number;
 
-    sse.addEventListener('completing', () => {
-      setCompleting(promptId);
-    });
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(generateParams),
+        });
+        if (!res.ok) {
+          const { error } = await res.json() as { error: string };
+          throw new Error(error);
+        }
+        ({ promptId, resolvedSeed } = await res.json() as { promptId: string; resolvedSeed: number });
+      } catch (err) {
+        setSubmitError(String(err));
+        return;
+      }
 
-    sse.addEventListener('complete', (e) => {
-      const d = JSON.parse(e.data) as { records: GenerationRecord[] };
-      setLastImageRecords(d.records);
-      setLastResolvedSeed(resolvedSeed);
-      completeJob(promptId, d.records[0]?.id ?? '');
-      sse.close();
-      onGenerated();
-    });
+      // Display the first take's seed; subsequent takes have their own seeds visible in gallery
+      if (i === 0) setLastResolvedSeed(resolvedSeed);
 
-    sse.addEventListener('error', (e) => {
-      const msg = e instanceof MessageEvent
-        ? (JSON.parse(e.data) as { message: string }).message
-        : 'Unknown error';
-      failJob(promptId, msg);
-      sse.close();
-    });
+      // Add each take as its own queue-tray job
+      addJob({
+        promptId,
+        generationId: '',
+        mediaType: 'image',
+        promptSummary,
+        startedAt: submitTime,
+        runningSince: null,
+        progress: null,
+        status: 'queued',
+      });
 
-    sse.onerror = () => {
-      if (sse.readyState === EventSource.CLOSED) return;
-      failJob(promptId, 'SSE connection lost');
-      sse.close();
-    };
+      // Open SSE for this take's progress — capture loop vars for closure safety
+      const capturedPromptId = promptId;
+
+      const sse = new EventSource(`/api/progress/${capturedPromptId}`);
+
+      sse.addEventListener('progress', (e) => {
+        const d = JSON.parse(e.data) as { value: number; max: number };
+        updateProgress(capturedPromptId, { current: d.value, total: d.max });
+      });
+
+      sse.addEventListener('completing', () => {
+        setCompleting(capturedPromptId);
+      });
+
+      sse.addEventListener('complete', (e) => {
+        const d = JSON.parse(e.data) as { records: GenerationRecord[] };
+        // Accumulate results as each take completes — order depends on ComfyUI queue
+        setLastImageRecords((prev) => [...prev, ...d.records]);
+        completeJob(capturedPromptId, d.records[0]?.id ?? '');
+        sse.close();
+        onGenerated();
+      });
+
+      sse.addEventListener('error', (e) => {
+        const msg = e instanceof MessageEvent
+          ? (JSON.parse(e.data) as { message: string }).message
+          : 'Unknown error';
+        failJob(capturedPromptId, msg);
+        sse.close();
+      });
+
+      sse.onerror = () => {
+        if (sse.readyState === EventSource.CLOSED) return;
+        failJob(capturedPromptId, 'SSE connection lost');
+        sse.close();
+      };
+    }
   }
 
   // ── Video generation ──────────────────────────────────────────────────────

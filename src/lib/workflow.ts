@@ -66,7 +66,7 @@ export function buildWorkflow(
   } else {
     nodes['2'] = {
       class_type: 'EmptyLatentImage',
-      inputs: { width: params.width, height: params.height, batch_size: params.batchSize ?? 1 },
+      inputs: { width: params.width, height: params.height, batch_size: 1 },
     };
     latentRef = ['2', 0];
   }
