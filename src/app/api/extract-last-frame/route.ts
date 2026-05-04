@@ -9,12 +9,15 @@ export const dynamic = 'force-dynamic';
 
 const execFileAsync = promisify(execFile);
 
-export async function POST(req: NextRequest) {
-  const outputDir = process.env.IMAGE_OUTPUT_DIR;
-  if (!outputDir) {
-    return new Response(JSON.stringify({ error: 'IMAGE_OUTPUT_DIR is not configured' }), { status: 500 });
-  }
+// Pick the output directory based on what kind of file it is.
+// Falls back gracefully when env vars point to the same directory.
+function dirForGeneration(g: { mediaType: string; isStitched: boolean }): string {
+  if (g.mediaType === 'image') return process.env.IMAGE_OUTPUT_DIR ?? '';
+  if (g.isStitched) return process.env.STITCH_OUTPUT_DIR ?? process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
+  return process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
+}
 
+export async function POST(req: NextRequest) {
   let body: { generationId: string };
   try {
     body = await req.json() as { generationId: string };
@@ -28,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   const generation = await prisma.generation.findUnique({
     where: { id: body.generationId },
-    select: { filePath: true, mediaType: true },
+    select: { filePath: true, mediaType: true, isStitched: true },
   });
 
   if (!generation) {
@@ -37,6 +40,11 @@ export async function POST(req: NextRequest) {
 
   if (generation.mediaType !== 'video') {
     return new Response(JSON.stringify({ error: 'Generation is not a video' }), { status: 400 });
+  }
+
+  const outputDir = dirForGeneration(generation);
+  if (!outputDir) {
+    return new Response(JSON.stringify({ error: 'Output directory env var not configured' }), { status: 500 });
   }
 
   // Derive local path from DB filePath (stored as /api/images/<filename>)

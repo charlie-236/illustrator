@@ -44,10 +44,11 @@ export async function DELETE(
     return NextResponse.json({ error: 'A100_SSH_KEY_PATH not configured' }, { status: 500 });
   }
 
+  const modelsRoot = process.env.COMFYUI_MODELS_ROOT ?? '/models/ComfyUI/models';
   const remotePath =
-    modelType === 'checkpoint' ? `/models/ComfyUI/models/checkpoints/${filename}` :
-    modelType === 'lora'       ? `/models/ComfyUI/models/loras/${filename}` :
-                                 `/models/ComfyUI/models/embeddings/${filename}`;
+    modelType === 'checkpoint' ? `${modelsRoot}/checkpoints/${filename}` :
+    modelType === 'lora'       ? `${modelsRoot}/loras/${filename}` :
+                                 `${modelsRoot}/embeddings/${filename}`;
 
   const ssh = new NodeSSH();
   try {

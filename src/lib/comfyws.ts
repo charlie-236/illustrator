@@ -107,9 +107,11 @@ export interface ActiveJobInfo {
 
 const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://127.0.0.1:8188';
 const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
-const IMAGE_JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — covers batch=4 + high-res on A100
-const VIDEO_JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 min — Wan 2.2 at 1280×704 takes ~5 min; 15 gives headroom
-const RECENT_COMPLETED_TTL_MS = 5 * 60 * 1000; // 5 min — keep recently-completed for polling recovery
+const IMAGE_JOB_TIMEOUT_MS = Number(process.env.IMAGE_JOB_TIMEOUT_MS) || 10 * 60 * 1000;
+const VIDEO_JOB_TIMEOUT_MS = Number(process.env.VIDEO_JOB_TIMEOUT_MS) || 15 * 60 * 1000;
+const STITCH_JOB_TIMEOUT_MS = Number(process.env.STITCH_JOB_TIMEOUT_MS) || 5 * 60 * 1000;
+const RECENT_COMPLETED_TTL_MS = Number(process.env.RECENT_COMPLETED_TTL_MS) || 5 * 60 * 1000;
+const COMFYUI_OUTPUT_PATH = process.env.COMFYUI_OUTPUT_PATH ?? '/models/ComfyUI/output';
 const VM_USER = process.env.A100_VM_USER ?? '';
 const VM_IP = process.env.A100_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
@@ -607,7 +609,7 @@ class ComfyWSManager {
     const ssh = new NodeSSH();
     try {
       await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });
-      await ssh.execCommand(`rm -f /models/ComfyUI/output/${filenamePrefix}*`);
+      await ssh.execCommand(`rm -f ${COMFYUI_OUTPUT_PATH}/${filenamePrefix}*`);
     } catch (err) {
       // SSH cleanup failure is non-fatal — file is small and can be cleaned manually
       console.error('[ComfyWS] SSH cleanup error', err);
@@ -871,7 +873,7 @@ class ComfyWSManager {
     outputPath: string,
     controller: ReadableStreamDefaultController<Uint8Array>,
     promptSummary: string,
-    timeoutMs = 5 * 60 * 1000,
+    timeoutMs = STITCH_JOB_TIMEOUT_MS,
     projectId?: string,
   ) {
     const timeoutId = setTimeout(() => this.expireJob(promptId), timeoutMs);

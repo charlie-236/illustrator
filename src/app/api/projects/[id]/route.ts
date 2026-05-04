@@ -36,9 +36,19 @@ function validateDefaults(body: Record<string, unknown>): string | null {
   return null;
 }
 
+function dirForItem(item: { mediaType?: string | null; isStitched?: boolean }): string {
+  if (!item.mediaType || item.mediaType !== 'video') return process.env.IMAGE_OUTPUT_DIR ?? '';
+  if (item.isStitched) return process.env.STITCH_OUTPUT_DIR ?? process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
+  return process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
+}
+
 /** Delete a generation's file from local disk. Errors are logged but not thrown. */
-async function deleteItemFile(filePath: string, outputDir: string): Promise<void> {
-  const filename = filePath
+async function deleteItemFile(
+  item: { filePath: string; mediaType?: string | null; isStitched?: boolean },
+): Promise<void> {
+  const outputDir = dirForItem(item);
+  if (!outputDir) return;
+  const filename = item.filePath
     .replace('/api/images/', '')
     .replace('/generations/', '');
   if (!filename || filename.includes('..') || filename.includes('/')) return;
@@ -257,11 +267,6 @@ export async function DELETE(
 
   // ── Cascade delete path ──────────────────────────────────────────────────
 
-  const outputDir = process.env.IMAGE_OUTPUT_DIR;
-  if (!outputDir) {
-    return NextResponse.json({ error: 'IMAGE_OUTPUT_DIR not configured' }, { status: 500 });
-  }
-
   // Verify project exists first
   const project = await prisma.project.findUnique({ where: { id }, select: { id: true } });
   if (!project) {
@@ -283,17 +288,17 @@ export async function DELETE(
   const [sourceItems, stitchedExports] = await Promise.all([
     prisma.generation.findMany({
       where: { projectId: id },
-      select: { id: true, filePath: true },
+      select: { id: true, filePath: true, mediaType: true, isStitched: true },
     }),
     prisma.generation.findMany({
       where: { parentProjectId: id },
-      select: { id: true, filePath: true },
+      select: { id: true, filePath: true, mediaType: true, isStitched: true },
     }),
   ]);
   const allToDelete = [...sourceItems, ...stitchedExports];
 
   // 3. Delete files from disk (errors log but don't abort)
-  await Promise.all(allToDelete.map((item) => deleteItemFile(item.filePath, outputDir)));
+  await Promise.all(allToDelete.map((item) => deleteItemFile(item)));
 
   // 4. Delete DB rows in a single transaction
   try {
@@ -319,12 +324,12 @@ export async function DELETE(
   //    (e.g. a stitch ffmpeg that completed before SIGTERM landed)
   const stragglers = await prisma.generation.findMany({
     where: { OR: [{ projectId: id }, { parentProjectId: id }] },
-    select: { id: true, filePath: true },
-  }).catch(() => [] as { id: string; filePath: string }[]);
+    select: { id: true, filePath: true, mediaType: true, isStitched: true },
+  }).catch(() => [] as { id: string; filePath: string; mediaType: string | null; isStitched: boolean }[]);
 
   if (stragglers.length > 0) {
     console.warn(`[cascade-delete] ${stragglers.length} straggler(s) appeared after deleteMany — abort race window`);
-    await Promise.all(stragglers.map((s) => deleteItemFile(s.filePath, outputDir).catch(() => {})));
+    await Promise.all(stragglers.map((s) => deleteItemFile(s).catch(() => {})));
     await prisma.generation.deleteMany({ where: { id: { in: stragglers.map((s) => s.id) } } }).catch((err) => {
       console.error('[cascade-delete] straggler deleteMany failed:', err);
     });

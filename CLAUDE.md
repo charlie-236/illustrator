@@ -38,16 +38,47 @@ Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
 
 ## Environment
 
+`.env` is the single source of truth for operational config. Every var has a comment in `.env.example` explaining its purpose, format, default, and missing-value behavior. The general pattern: SSH-related vars (`A100_*`, `A100_SSH_KEY_PATH`) fail closed with a 500 if missing; HTTP endpoint vars have sensible localhost defaults; numeric tuning vars (timeouts, page sizes) have documented defaults that match historical hardcoded values.
+
 ```
-DATABASE_URL=postgresql://...        # local Postgres
-IMAGE_OUTPUT_DIR=/home/charlie/illustrator-images  # absolute path for generated image files (outside repo)
-GALLERY_PAGE_SIZE=30                 # records per page for gallery infinite-scroll (default 30, max 100)
-COMFYUI_URL=http://localhost:8188    # ComfyUI HTTP API
-COMFYUI_WS_URL=ws://localhost:8188   # ComfyUI WebSocket
-CIVITAI_TOKEN=...                    # CivitAI API token, used by add_model.sh and ingest API
-A100_VM_USER=charlie                 # SSH username for the Azure VM
-A100_VM_IP=100.96.99.94              # Tailscale IP of the Azure VM
-A100_SSH_KEY_PATH=/home/charlie/.ssh/a100-key.pem  # Private key for VM SSH
+DATABASE_URL=postgresql://...              # local Postgres — required, no default
+
+# Output directories — must exist and be writable. May all point to the same path.
+IMAGE_OUTPUT_DIR=/home/charlie/illustrator-output/images   # PNG outputs from image generation
+VIDEO_OUTPUT_DIR=/home/charlie/illustrator-output/clips    # .webm outputs from video generation
+STITCH_OUTPUT_DIR=/home/charlie/illustrator-output/videos  # .mp4 outputs from project stitching
+
+GALLERY_PAGE_SIZE=30                       # records per page (default 30, server cap 100)
+
+COMFYUI_URL=http://127.0.0.1:8188          # ComfyUI HTTP API (default: 127.0.0.1:8188)
+COMFYUI_WS_URL=ws://127.0.0.1:8188         # ComfyUI WebSocket (default: 127.0.0.1:8188)
+
+CIVITAI_TOKEN=...                          # CivitAI API token — required for model ingest
+A100_VM_USER=charlie                       # SSH username for the Azure VM — fail-closed
+A100_VM_IP=100.96.99.94                    # Tailscale IP of the Azure VM — fail-closed
+A100_SSH_KEY_PATH=/home/charlie/.ssh/a100-key.pem  # Private key for VM SSH — fail-closed
+
+COMFYUI_MODELS_ROOT=/models/ComfyUI/models # Base path for model files on the VM (default shown)
+COMFYUI_OUTPUT_PATH=/models/ComfyUI/output # VM output dir for SSH cleanup glob (default shown)
+
+LLM_ENDPOINT=http://127.0.0.1:11438/v1/chat/completions  # Polish LLM endpoint
+POLISH_LLM_MODEL=/path/to/model.gguf       # Model identifier for the LLM endpoint
+
+# Polish tuning — all have defaults matching historical values
+POLISH_TIMEOUT_MS=30000                    # LLM call timeout (default 30 s)
+POLISH_TEMPERATURE=0.15
+POLISH_TOP_P=0.9
+POLISH_REPEAT_PENALTY=1.05
+POLISH_MAX_TOKENS=600
+
+# Job watchdog timeouts — default to historical hardcoded values
+IMAGE_JOB_TIMEOUT_MS=600000                # 10 min
+VIDEO_JOB_TIMEOUT_MS=900000                # 15 min
+STITCH_JOB_TIMEOUT_MS=300000               # 5 min
+RECENT_COMPLETED_TTL_MS=300000             # 5 min — completed jobs stay in /api/jobs/active
+
+# Client-side queue polling (NEXT_PUBLIC_ required for browser access)
+NEXT_PUBLIC_QUEUE_POLL_INTERVAL_MS=5000    # default 5 s
 ```
 
 First-time setup:

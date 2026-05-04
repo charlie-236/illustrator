@@ -6,6 +6,7 @@ const VM_USER = process.env.A100_VM_USER ?? '';
 const VM_IP = process.env.A100_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
 const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN ?? '';
+const COMFYUI_MODELS_ROOT = process.env.COMFYUI_MODELS_ROOT ?? '/models/ComfyUI/models';
 const MIN_FILE_SIZE = 1024 * 1024;
 
 export type IngestPhase =
@@ -100,13 +101,13 @@ export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPha
     const stem = randomBytes(6).toString('hex');
     const filename = `${stem}.safetensors`;
     const remotePath =
-      req.type === 'lora' ? `/models/ComfyUI/models/loras/${filename}`
-      : req.type === 'checkpoint' ? `/models/ComfyUI/models/checkpoints/${filename}`
-      : `/models/ComfyUI/models/embeddings/${filename}`;
+      req.type === 'lora' ? `${COMFYUI_MODELS_ROOT}/loras/${filename}`
+      : req.type === 'checkpoint' ? `${COMFYUI_MODELS_ROOT}/checkpoints/${filename}`
+      : `${COMFYUI_MODELS_ROOT}/embeddings/${filename}`;
 
     // Ensure the embeddings directory exists on the VM (idempotent)
     if (req.type === 'embedding') {
-      await ssh.execCommand('mkdir -p /models/ComfyUI/models/embeddings');
+      await ssh.execCommand(`mkdir -p ${COMFYUI_MODELS_ROOT}/embeddings`);
     }
 
     yield { phase: 'download', status: 'starting', filename, remotePath };
