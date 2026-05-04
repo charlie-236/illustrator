@@ -61,4 +61,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Project context entry has image and video options — `batch/project-context-entry-image-video` (PR #54)
 - [~] Category field on LoRAs and Checkpoints (parity with Embeddings) — `batch/lora-checkpoint-category` (PR #55)
 - [~] Migrate image-mode generation to one-call SSE — `batch/image-one-call-sse` (PR #56)
-- [ ] Consolidate per-type switches in comfyws.ts — see prompts/comfyws-job-refactor.md
+- [~] Consolidate per-type switches in comfyws.ts — `batch/comfyws-job-refactor` (PR #57)
