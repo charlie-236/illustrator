@@ -58,7 +58,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] SSE complete-event shape parity (video/stitch emit full GenerationRecord) — `batch/sse-complete-event-parity` (PR #51)
 - [~] Studio video batch result-grid (mirror image-mode) — `batch/studio-video-batch-result-grid` (PR #52)
 - [~] Video remix carries Lightning state and LoRA stack — `batch/video-remix-lightning-loras` (PR #53)
-- [ ] Project context entry has image and video options — see prompts/project-context-entry-image-video.md
+- [~] Project context entry has image and video options — `batch/project-context-entry-image-video` (PR #54)
 - [ ] Category field on LoRAs and Checkpoints (parity with Embeddings) — see prompts/lora-checkpoint-category.md
 - [ ] Migrate image-mode generation to one-call SSE — see prompts/image-one-call-sse.md
 - [ ] Consolidate per-type switches in comfyws.ts — see prompts/comfyws-job-refactor.md
