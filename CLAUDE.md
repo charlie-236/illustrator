@@ -201,6 +201,7 @@ Body: `GenerationParams` JSON.
 2. POSTs `{ prompt: workflow, client_id }` to `http://localhost:8188/prompt`.
 3. Returns `{ promptId: string, resolvedSeed: number }`.
 - No timeout on the ComfyUI fetch — ComfyUI usually responds immediately with a queue ID.
+- Optional `projectId`: if present, validated against DB (must reference an existing project). The resulting `Generation` row gets `projectId` set and `position` auto-computed as `max(existing positions in this project) + 1`, mirroring the video-side behaviour.
 
 ### `GET /api/progress/[promptId]`
 Returns an SSE stream. Calls `manager.registerJob(promptId, controller)`. Params and seed are looked up from the server-side stash populated by `/api/generate`.
@@ -781,8 +782,10 @@ Migration: `prisma/migrations/20260503000000_add_projects/migration.sql`
 
 Clicking "Generate new clip in this project" calls `onGenerateInProject(project, latestClip)` which propagates up to `page.tsx` → sets `projectContextTrigger` → Studio picks it up via `useEffect`.
 
+When a project is active in Studio, **both image and video generations** are created with `projectId` set on the resulting `Generation` row, and `position` is auto-computed as `max(existing positions in this project) + 1`. The project's linear strip shows images and clips in `position` order, mixed together. Clips can also be retroactively assigned to a project after generation; images can be assigned the same way (per Phase 2.3).
+
 **Studio project context** (`ProjectContext` type in `src/types/index.ts`):
-- `projectId`, `projectName` — for the badge and the `/api/generate-video` `projectId` field.
+- `projectId`, `projectName` — for the badge and the `/api/generate` + `/api/generate-video` `projectId` field.
 - `latestClipId` — for last-frame extraction.
 - `latestClipPrompt` — carried forward into the positive prompt textarea.
 - `latestClipMediaType` — `'image' | 'video' | null`; determines whether to run ffmpeg or use the image directly (Phase 2.3).

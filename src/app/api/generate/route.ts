@@ -99,6 +99,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Validate projectId if provided
+  if (params.projectId !== undefined && params.projectId !== null) {
+    if (typeof params.projectId !== 'string' || params.projectId.length === 0) {
+      return bad('projectId must be a non-empty string when provided');
+    }
+    const project = await prisma.project.findUnique({ where: { id: params.projectId } });
+    if (!project) {
+      return bad('projectId does not reference an existing project');
+    }
+  }
+
   // Assemble final prompts server-side; original user prompts go to DB/filename
   const positiveParts: string[] = [];
   const negativeParts: string[] = [];

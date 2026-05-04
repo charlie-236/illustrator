@@ -57,6 +57,7 @@ export interface GenerationParams {
   mask?: string;
   denoise?: number;
   referenceImages?: ReferenceImageSet;
+  projectId?: string;
 }
 
 export interface GenerationRecord {
