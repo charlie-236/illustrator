@@ -35,7 +35,7 @@ const LORA_BLANK = {
   url: '' as string | null | undefined,
 };
 
-const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3', 'Big Love'];
+const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3', 'Big Love', 'Wan 2.2'];
 
 const EMBEDDING_BLANK = {
   friendlyName: '',
