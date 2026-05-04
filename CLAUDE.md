@@ -194,6 +194,55 @@ model Generation {
 }
 ```
 
+```prisma
+model CheckpointConfig {
+  id                    String   @id @default(cuid())
+  checkpointName        String   @unique
+  friendlyName          String   @default("")
+  baseModel             String   @default("")     // "SDXL 1.0", "Pony", "Illustrious", etc.
+  category              String?                   // populated heuristically at ingest from CivitAI tags; user-editable
+  defaultWidth          Int?
+  defaultHeight         Int?
+  defaultPositivePrompt String   @default("")
+  defaultNegativePrompt String   @default("")
+  description           String?
+  url                   String?
+  updatedAt             DateTime @updatedAt
+  defaultSteps          Int?
+  defaultCfg            Float?
+  defaultSampler        String?
+  defaultScheduler      String?
+  defaultHrf            Boolean?
+}
+
+model LoraConfig {
+  id            String   @id @default(cuid())
+  loraName      String   @unique           // 6-byte hex obfuscated filename
+  friendlyName  String   @default("")      // human-readable name shown everywhere except workflow JSON
+  triggerWords  String   @default("")      // appended to positive prompt at generation time
+  baseModel     String   @default("")      // "Wan 2.2", "SDXL 1.0", "Pony", etc.
+  category      String?                    // populated heuristically at ingest from CivitAI tags; user-editable
+  description   String?
+  url           String?
+  updatedAt     DateTime @updatedAt
+  appliesToHigh Boolean  @default(true)    // Wan 2.2 — inject into high-noise expert chain
+  appliesToLow  Boolean  @default(true)    // Wan 2.2 — inject into low-noise expert chain
+}
+
+model EmbeddingConfig {
+  id            String   @id @default(cuid())
+  embeddingName String   @unique
+  friendlyName  String   @default("")
+  triggerWords  String   @default("")
+  baseModel     String   @default("")
+  category      String?                    // populated heuristically at ingest from CivitAI tags; user-editable
+  description   String?
+  url           String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+```
+
 **LoRA storage**: `lora` is the human-readable display string written by `finalizeJob`. `lorasJson` is the canonical structured form (`LoraEntry[]`) used for remix — `recordToParams` prefers `lorasJson` and falls back to parsing the string via `parseLoras` for legacy records.
 
 **Assembled prompts**: The DB stores both the user's typed prompts (`promptPos`/`promptNeg`) and the assembled-with-defaults-and-triggers versions sent to ComfyUI (`assembledPos`/`assembledNeg`). Remix uses the typed prompts so the user can edit them; the assembled fields are forensic-only for now. Legacy records will have `null` for these fields.
