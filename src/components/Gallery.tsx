@@ -16,7 +16,7 @@ interface Props {
   onNavigateToProject?: (projectId: string) => void;
 }
 
-type MediaFilter = 'all' | 'image' | 'video';
+type MediaFilter = 'all' | 'images' | 'clips' | 'videos';
 
 function HeartIcon({ filled }: { filled: boolean }) {
   return (
@@ -73,7 +73,15 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
       const params = new URLSearchParams();
       if (cursorRef.current) params.set('cursor', cursorRef.current);
       if (favoritesOnlyRef.current) params.set('isFavorite', 'true');
-      if (mediaFilterRef.current !== 'all') params.set('mediaType', mediaFilterRef.current);
+      if (mediaFilterRef.current === 'images') {
+        params.set('mediaType', 'image');
+      } else if (mediaFilterRef.current === 'clips') {
+        params.set('mediaType', 'video');
+        params.set('isStitched', 'false');
+      } else if (mediaFilterRef.current === 'videos') {
+        params.set('mediaType', 'video');
+        params.set('isStitched', 'true');
+      }
       const res = await fetch(`/api/gallery?${params}`);
       const data = await res.json() as GalleryResponse;
       setItems((prev) => [...prev, ...data.records]);
@@ -167,7 +175,7 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
     <div className="flex items-center justify-between px-3 pt-3 pb-1 gap-2">
       {/* Media type filter */}
       <div className="flex items-center rounded-lg border border-zinc-700 overflow-hidden text-sm font-medium">
-        {(['all', 'image', 'video'] as MediaFilter[]).map((f) => (
+        {(['all', 'images', 'clips', 'videos'] as MediaFilter[]).map((f) => (
           <button
             key={f}
             onClick={() => setMediaFilter(f)}
@@ -176,7 +184,7 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
                 ? 'bg-violet-600 text-white'
                 : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
           >
-            {f === 'all' ? 'All' : f === 'image' ? 'Images' : 'Videos'}
+            {f === 'all' ? 'All' : f === 'images' ? 'Images' : f === 'clips' ? 'Clips' : 'Videos'}
           </button>
         ))}
       </div>
