@@ -1059,7 +1059,7 @@ export default function Studio({
 
     for (let i = 0; i < batchSize; i++) {
       // seed === -1: route randomizes independently per take; explicit: sequential seed+i
-      const takeSeed = baseSeed === -1 ? undefined : baseSeed + i;
+      const takeSeed = baseSeed === -1 ? -1 : baseSeed + i;
 
       let res: Response;
       try {

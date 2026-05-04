@@ -120,9 +120,17 @@ export async function POST(req: NextRequest) {
 
   // ─── prepare ──────────────────────────────────────────────────────────────
 
-  const seed = typeof body.seed === 'number' && Number.isInteger(body.seed)
-    ? body.seed
-    : Math.floor(Math.random() * 2 ** 32);
+  // Match the image-side contract: seed === -1 means random, anything else is literal.
+  // Treat missing/non-integer body.seed the same as -1 for backward compatibility with
+  // callers that omit the field. Fall back to random in any case where the value
+  // can't be used as a literal seed.
+  const explicitSeed =
+    typeof body.seed === 'number' && Number.isInteger(body.seed) && body.seed !== -1
+      ? body.seed
+      : null;
+  const seed = explicitSeed ?? Math.floor(Math.random() * 2 ** 32);
+
+  console.debug('[generate-video] resolved seed', { received: body.seed, resolved: seed });
 
   const generationId = uuidv4();
   const filenamePrefix = randomBytes(8).toString('hex'); // 16 hex chars, ~64 bits entropy
@@ -218,7 +226,7 @@ export async function POST(req: NextRequest) {
       // Emit init event first so the client can obtain promptId + generationId
       // before any progress events arrive.
       controller.enqueue(
-        sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, generationId })}\n\n`),
+        sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, generationId, resolvedSeed: seed })}\n\n`),
       );
 
       manager.registerVideoJob(promptId, videoParams, controller);
