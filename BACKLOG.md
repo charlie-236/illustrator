@@ -64,5 +64,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Consolidate per-type switches in comfyws.ts — `batch/comfyws-job-refactor` (PR #57)
 - [~] Fix StitchModal complete-event handler (post-PR-#51 cleanup) — `batch/fix-stitch-modal-complete-handler` (PR #59)
 - [~] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — `batch/claude-md-schema-category-docs` (PR #60)
-- [ ] Unify dirForItem with dirForGeneration (M3 cleanup) — see prompts/unify-dirforitem.md
+- [~] Unify dirForItem with dirForGeneration (M3 cleanup) — `batch/unify-dirforitem` (PR #61)
 - [ ] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
