@@ -47,10 +47,10 @@ function validateVideoWorkflow(wf: ComfyWorkflow): void {
 }
 
 export async function POST(req: NextRequest) {
-  const outputDir = process.env.IMAGE_OUTPUT_DIR;
+  const outputDir = process.env.VIDEO_OUTPUT_DIR;
   if (!outputDir) {
     return new Response(
-      JSON.stringify({ error: 'IMAGE_OUTPUT_DIR is not configured' }),
+      JSON.stringify({ error: 'VIDEO_OUTPUT_DIR is not configured' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } },
     );
   }

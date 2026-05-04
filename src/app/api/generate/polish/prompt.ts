@@ -64,13 +64,13 @@ Output:
 [NEGATIVE] bad anatomy, blurry, lowres, deformed, jpeg artifacts, watermark, text, signature, missing limbs, extra fingers, poorly drawn hands`;
 
 export const POLISH_SAMPLING = {
-  temperature: 0.15,
-  top_p: 0.9,
-  repeat_penalty: 1.05,
-  max_tokens: 600,
-} as const;
+  temperature: Number(process.env.POLISH_TEMPERATURE) || 0.15,
+  top_p: Number(process.env.POLISH_TOP_P) || 0.9,
+  repeat_penalty: Number(process.env.POLISH_REPEAT_PENALTY) || 1.05,
+  max_tokens: Number(process.env.POLISH_MAX_TOKENS) || 600,
+};
 
 export const STATIC_NEGATIVE =
   "bad anatomy, blurry, lowres, deformed, jpeg artifacts, watermark, text, signature, missing limbs, extra fingers, poorly drawn hands";
 
-export const POLISH_TIMEOUT_MS = 30_000;
+export const POLISH_TIMEOUT_MS = Number(process.env.POLISH_TIMEOUT_MS) || 30_000;

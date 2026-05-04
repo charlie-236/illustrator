@@ -2,24 +2,35 @@
 #set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-VM_USER="charlie"
-VM_IP="100.96.99.94"
-SSH_KEY="$HOME/.ssh/a100-key.pem"
 NEXT_API_URL="http://127.0.0.1:3001/api/models/register"
 
-# Load CIVITAI_TOKEN from .env (must be in the same directory as this script)
+# Load config from .env (must be in the same directory as this script).
+# grep/cut/tr reads values without sourcing .env (avoids executing arbitrary shell).
+# Handles plain, "double-quoted", and 'single-quoted' values.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Error: .env not found at $ENV_FILE" >&2
-  echo "Add CIVITAI_TOKEN=<your-token> to .env and try again." >&2
+  echo "Copy .env.example to .env and fill in the required values." >&2
   exit 1
 fi
 
-# grep/cut/tr reads CIVITAI_TOKEN without sourcing .env (avoids executing arbitrary shell)
-# Handles plain, "double-quoted", and 'single-quoted' values
-CIVIT_TOKEN=$(grep -E '^CIVITAI_TOKEN=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+read_env() {
+  grep -E "^${1}=" "$ENV_FILE" | head -n1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"
+}
+
+CIVIT_TOKEN=$(read_env CIVITAI_TOKEN)
+VM_USER=$(read_env A100_VM_USER)
+VM_IP=$(read_env A100_VM_IP)
+SSH_KEY=$(read_env A100_SSH_KEY_PATH)
+COMFYUI_MODELS_ROOT=$(read_env COMFYUI_MODELS_ROOT)
+
+# Apply defaults for values that have them
+VM_USER="${VM_USER:-charlie}"
+VM_IP="${VM_IP:-100.96.99.94}"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/a100-key.pem}"
+COMFYUI_MODELS_ROOT="${COMFYUI_MODELS_ROOT:-/models/ComfyUI/models}"
 
 if [ -z "$CIVIT_TOKEN" ]; then
   echo "Error: CIVITAI_TOKEN not set in $ENV_FILE" >&2
@@ -133,9 +144,9 @@ while IFS= read -r RAW_LINE || [ -n "$RAW_LINE" ]; do
   RANDOM_FILENAME="${RANDOM_STEM}.safetensors"
 
   if [ "$TYPE" = "lora" ]; then
-    REMOTE_PATH="/models/ComfyUI/models/loras/$RANDOM_FILENAME"
+    REMOTE_PATH="${COMFYUI_MODELS_ROOT}/loras/$RANDOM_FILENAME"
   else
-    REMOTE_PATH="/models/ComfyUI/models/checkpoints/$RANDOM_FILENAME"
+    REMOTE_PATH="${COMFYUI_MODELS_ROOT}/checkpoints/$RANDOM_FILENAME"
   fi
 
   echo "   filename : $RANDOM_FILENAME"

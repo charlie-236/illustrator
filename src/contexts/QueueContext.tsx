@@ -293,7 +293,8 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       } catch { /* ignore poll errors */ }
     };
 
-    const interval = setInterval(poll, 5_000);
+    const pollInterval = Number(process.env.NEXT_PUBLIC_QUEUE_POLL_INTERVAL_MS) || 5_000;
+    const interval = setInterval(poll, pollInterval);
     return () => clearInterval(interval);
   }, [activeJobIds]);
 

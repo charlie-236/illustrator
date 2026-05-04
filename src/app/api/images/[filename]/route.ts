@@ -13,27 +13,41 @@ export async function GET(
     return new NextResponse('Forbidden', { status: 403 });
   }
 
-  const IMAGE_OUTPUT_DIR = process.env.IMAGE_OUTPUT_DIR;
-  if (!IMAGE_OUTPUT_DIR) {
-    return new NextResponse('IMAGE_OUTPUT_DIR not configured', { status: 500 });
-  }
-  const filePath = path.join(IMAGE_OUTPUT_DIR, filename);
+  const ext = path.extname(filename).toLowerCase();
+  const contentType =
+    ext === '.png'  ? 'image/png'  :
+    ext === '.webm' ? 'video/webm' :
+    ext === '.mp4'  ? 'video/mp4'  :
+    'image/jpeg';
 
-  try {
-    const data = await readFile(filePath);
-    const ext = path.extname(filename).toLowerCase();
-    const contentType =
-      ext === '.png' ? 'image/png' :
-      ext === '.webm' ? 'video/webm' :
-      'image/jpeg';
+  // Try each output directory in order: images → clips → videos.
+  // Filenames are unique (slug + timestamp), so the first hit is the right one.
+  // This lets VIDEO_OUTPUT_DIR and STITCH_OUTPUT_DIR point somewhere other than
+  // IMAGE_OUTPUT_DIR without breaking URLs for files created before the split.
+  const dirs = [
+    process.env.IMAGE_OUTPUT_DIR,
+    process.env.VIDEO_OUTPUT_DIR,
+    process.env.STITCH_OUTPUT_DIR,
+  ].filter((d): d is string => Boolean(d));
 
-    return new NextResponse(data, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
-    });
-  } catch {
-    return new NextResponse('Not Found', { status: 404 });
+  if (dirs.length === 0) {
+    return new NextResponse('Output directories not configured', { status: 500 });
   }
+
+  for (const dir of dirs) {
+    const filePath = path.join(dir, filename);
+    try {
+      const data = await readFile(filePath);
+      return new NextResponse(data, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      });
+    } catch {
+      // ENOENT — try next directory
+    }
+  }
+
+  return new NextResponse('Not Found', { status: 404 });
 }

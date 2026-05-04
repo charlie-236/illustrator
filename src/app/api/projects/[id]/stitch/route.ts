@@ -30,10 +30,10 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const outputDir = process.env.IMAGE_OUTPUT_DIR;
+  const outputDir = process.env.STITCH_OUTPUT_DIR;
   if (!outputDir) {
     return new Response(
-      JSON.stringify({ error: 'IMAGE_OUTPUT_DIR not configured' }),
+      JSON.stringify({ error: 'STITCH_OUTPUT_DIR not configured' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } },
     );
   }
