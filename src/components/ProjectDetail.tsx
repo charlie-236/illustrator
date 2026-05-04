@@ -18,9 +18,10 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport, WanLoraEntry } from '@/types';
+import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport, WanLoraEntry, Storyboard } from '@/types';
 import ImageModal from './ImageModal';
 import DeleteConfirmDialog from './DeleteConfirmDialog';
+import StoryboardGenerationModal from './StoryboardGenerationModal';
 import { imgSrc } from '@/lib/imageSrc';
 import { useQueue } from '@/contexts/QueueContext';
 import { useModelLists } from '@/lib/useModelLists';
@@ -810,6 +811,13 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [stitchedExports, setStitchedExports] = useState<ProjectStitchedExport[]>([]);
   const [showStitch, setShowStitch] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Storyboard state
+  const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
+  const [storyboardExpanded, setStoryboardExpanded] = useState(true);
+  const [showStoryboardModal, setShowStoryboardModal] = useState(false);
+  const [showStoryboardRegenConfirm, setShowStoryboardRegenConfirm] = useState(false);
+  const [showStoryboardDeleteConfirm, setShowStoryboardDeleteConfirm] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [nameSaving, setNameSaving] = useState(false);
@@ -879,6 +887,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       setProject(data.project);
       setClips(data.clips ?? []);
       setStitchedExports(data.stitchedExports ?? []);
+      setStoryboard(data.project.storyboard ?? null);
+      setStoryboardExpanded(!!data.project.storyboard);
       setNameValue(data.project.name);
       setDescValue(data.project.description ?? '');
     } finally {
@@ -953,6 +963,16 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       onDeleted();
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function confirmDeleteStoryboard() {
+    setShowStoryboardDeleteConfirm(false);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/storyboard`, { method: 'DELETE' });
+      if (res.ok) setStoryboard(null);
+    } catch {
+      // silently ignore — storyboard stays rendered
     }
   }
 
@@ -1125,6 +1145,91 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           <div className="mt-2 px-3 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/50">
             <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium mb-1">Style note</p>
             <p className="text-sm text-zinc-300 leading-relaxed">{project.styleNote}</p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Storyboard section ── */}
+      <div className="px-4 pt-4 border-b border-zinc-800 pb-4">
+        <button
+          onClick={() => setStoryboardExpanded((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 group min-h-10"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-base">📓</span>
+            <span className="text-sm font-semibold text-zinc-200">Storyboard</span>
+            {storyboard && (
+              <span className="text-xs text-zinc-500">
+                {storyboard.scenes.length} scene{storyboard.scenes.length !== 1 ? 's' : ''}
+                {' · '}
+                {new Date(storyboard.generatedAt).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          <svg
+            className={`w-4 h-4 text-zinc-500 transition-transform ${storyboardExpanded ? '' : '-rotate-90'}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {storyboardExpanded && (
+          <div className="mt-3 space-y-3">
+            {!storyboard ? (
+              /* Empty state */
+              <div className="rounded-xl border border-dashed border-zinc-700 p-5 text-center space-y-3">
+                <p className="text-sm text-zinc-400 leading-relaxed">
+                  Plan your project with AI. Describe a story idea and generate a scene-by-scene outline you can use to guide your clips.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowStoryboardModal(true)}
+                  className="min-h-12 px-5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 hover:border-violet-600/50 text-violet-300 text-sm font-medium transition-colors"
+                >
+                  + Plan with AI
+                </button>
+              </div>
+            ) : (
+              /* Populated state */
+              <div className="space-y-3">
+                {storyboard.scenes.map((scene, i) => (
+                  <div
+                    key={scene.id}
+                    className="bg-zinc-800/60 rounded-lg p-3 space-y-1.5"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-zinc-300">Scene {i + 1}</span>
+                      <span className="text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">
+                        {scene.durationSeconds}s
+                      </span>
+                    </div>
+                    <p className="text-sm text-zinc-200 leading-relaxed">{scene.description}</p>
+                    <p className="text-xs font-mono text-zinc-500 leading-relaxed break-words">
+                      {scene.positivePrompt}
+                    </p>
+                  </div>
+                ))}
+
+                {/* Regenerate / Delete actions */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowStoryboardRegenConfirm(true)}
+                    className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+                  >
+                    Regenerate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowStoryboardDeleteConfirm(true)}
+                    className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-red-400 text-sm font-medium transition-colors"
+                  >
+                    Delete storyboard
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1391,6 +1496,87 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         onConfirm={(cascade: boolean) => { void confirmDeleteProject(cascade); }}
         onCancel={() => setShowDeleteDialog(false)}
       />
+
+      {/* ── Storyboard generation modal ── */}
+      {showStoryboardModal && (
+        <StoryboardGenerationModal
+          projectId={projectId}
+          initialStoryIdea={storyboard?.storyIdea ?? ''}
+          onClose={() => setShowStoryboardModal(false)}
+          onSaved={(sb) => { setStoryboard(sb); setStoryboardExpanded(true); }}
+        />
+      )}
+
+      {/* ── Storyboard regenerate confirm ── */}
+      {showStoryboardRegenConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowStoryboardRegenConfirm(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-md p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-100">Replace storyboard?</h2>
+            <p className="text-sm text-zinc-400">
+              This will replace your existing storyboard with a new one. The current scenes will be lost. Any clips already generated for this project will remain.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowStoryboardRegenConfirm(false)}
+                className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowStoryboardRegenConfirm(false);
+                  setShowStoryboardModal(true);
+                }}
+                className="flex-1 min-h-12 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors"
+              >
+                Regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Storyboard delete confirm ── */}
+      {showStoryboardDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowStoryboardDeleteConfirm(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-md p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-100">Delete storyboard?</h2>
+            <p className="text-sm text-zinc-400">
+              This removes the scene plan only. Project clips are not affected.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowStoryboardDeleteConfirm(false)}
+                className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void confirmDeleteStoryboard(); }}
+                className="flex-1 min-h-12 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-semibold transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
