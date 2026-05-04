@@ -54,7 +54,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Image generations inherit project context — `batch/image-project-inheritance` (PR #47)
 - [x] Fix seed-zero bug in video batch generation — `batch/fix-video-batch-seed-zero` (PR #48)
 - [x] Fix project stitch reading source clips from STITCH_OUTPUT_DIR instead of VIDEO_OUTPUT_DIR — `batch/fix-stitch-source-clip-dir` (PR #49)
-- [ ] Unify gallery and project-detail filters to four-way (all/images/clips/videos) — see prompts/unify-gallery-project-filters.md
+- [~] Unify gallery and project-detail filters to four-way (all/images/clips/videos) — `batch/unify-gallery-project-filters` (PR #50)
 - [ ] SSE complete-event shape parity (video/stitch emit full GenerationRecord) — see prompts/sse-complete-event-parity.md
 - [ ] Studio video batch result-grid (mirror image-mode) — see prompts/studio-video-batch-result-grid.md
 - [ ] Video remix carries Lightning state and LoRA stack — see prompts/video-remix-lightning-loras.md
