@@ -69,6 +69,8 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     parentProjectId: clip.isStitched ? projectId : null,
     parentProjectName: clip.isStitched ? projectName : null,
     stitchedClipIds: null,
+    videoLorasJson: null,
+    lightning: null,
     createdAt: clip.createdAt,
   };
 }
@@ -102,6 +104,8 @@ function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, pro
     parentProjectId: projectId,
     parentProjectName: projectName,
     stitchedClipIds: null,
+    videoLorasJson: null,
+    lightning: null,
     createdAt: e.createdAt,
   };
 }

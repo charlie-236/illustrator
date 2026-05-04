@@ -529,7 +529,12 @@ export default function Studio({
       cfg: videoRemixParams.cfg,
     });
     setVideoBatchSize(4);
-    setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt }));
+    setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt, seed: videoRemixParams.seed ?? -1 }));
+    setLightningAndPersist(videoRemixParams.lightning ?? false);
+    const loraEntries: WanLoraEntry[] = videoRemixParams.videoLoras
+      ? videoRemixParams.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }))
+      : [];
+    setVideoLorasAndPersist(loraEntries);
     setUseStartingFrame(false);
     setStartingFrameRecord(null);
     setSelectedStartingClipId(null);

@@ -88,6 +88,8 @@ export interface GenerationRecord {
   parentProjectId: string | null;
   parentProjectName: string | null;
   stitchedClipIds: string | null;
+  videoLorasJson: WanLoraSpec[] | null;
+  lightning: boolean | null;
   createdAt: string;
 }
 
@@ -224,6 +226,9 @@ export interface VideoRemixData {
   frames: number;
   steps: number;
   cfg: number;
+  seed: number;
+  videoLoras: WanLoraSpec[] | null;
+  lightning: boolean | null;
 }
 
 export type SSEEvent =

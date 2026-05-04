@@ -4,7 +4,7 @@ import { writeFile, mkdir, unlink } from 'fs/promises';
 import path from 'path';
 import type { Prisma } from '@prisma/client';
 import type { ChildProcessWithoutNullStreams } from 'child_process';
-import type { GenerationParams } from '@/types';
+import type { GenerationParams, WanLoraSpec } from '@/types';
 import { NodeSSH } from 'node-ssh';
 import { prisma } from './prisma';
 
@@ -25,6 +25,8 @@ export interface VideoJobParams {
   outputDir: string;
   /** When true, generation used Lightning distillation (4-step, CFG=1, LCM sampler). */
   lightning?: boolean;
+  /** Wan 2.2 LoRAs used in this generation. Stored on the DB row for remix reconstruction. */
+  loras?: WanLoraSpec[];
   /** Optional project to associate this clip with. Position is auto-computed at save time. */
   projectId?: string;
 }
@@ -567,6 +569,11 @@ class ComfyWSManager {
       }
 
       // Create DB row
+      const videoLorasJsonValue =
+        videoParams.loras && videoParams.loras.length > 0
+          ? (videoParams.loras as unknown as Prisma.InputJsonValue)
+          : null;
+
       const record = await prisma.generation.create({
         data: {
           id: videoParams.generationId,
@@ -585,6 +592,8 @@ class ComfyWSManager {
           mediaType: 'video',
           frames: videoParams.frames,
           fps: 16,
+          videoLorasJson: videoLorasJsonValue ?? undefined,
+          lightning: videoParams.lightning ?? false,
           ...(videoParams.projectId ? { projectId: videoParams.projectId, position } : {}),
         },
       });

@@ -57,6 +57,9 @@ export default function Home() {
         frames: record.frames ?? 57,
         steps: record.steps,
         cfg: record.cfg,
+        seed: -1,
+        videoLoras: record.videoLorasJson ?? null,
+        lightning: record.lightning ?? false,
       });
       setRemixParams(null);
     } else {
