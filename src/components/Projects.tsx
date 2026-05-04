@@ -8,7 +8,7 @@ import { imgSrc } from '@/lib/imageSrc';
 
 interface Props {
   onNavigateToGallery: () => void;
-  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null) => void;
+  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video') => void;
 }
 
 function formatRelativeTime(iso: string): string {

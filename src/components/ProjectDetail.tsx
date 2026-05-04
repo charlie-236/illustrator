@@ -31,7 +31,7 @@ interface Props {
   onBack: () => void;
   onDeleted: () => void;
   onNavigateToGallery: () => void;
-  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null) => void;
+  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video') => void;
 }
 
 const VIDEO_RESOLUTIONS = [
@@ -1123,17 +1123,28 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         )}
       </div>
 
-      {/* ── Generate new clip + Stitch ── */}
+      {/* ── Generate image / clip + Stitch ── */}
       <div className="px-4 pt-4 pb-2 flex gap-2">
-        <button
-          onClick={() => onGenerateInProject(project, clips[clips.length - 1] ?? null)}
-          className="flex-1 min-h-12 rounded-xl border border-violet-600/40 bg-violet-600/10 hover:bg-violet-600/20 hover:border-violet-600/60 text-violet-300 hover:text-violet-200 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Generate new clip
-        </button>
+        <div className="flex gap-2 flex-1">
+          <button
+            onClick={() => onGenerateInProject(project, clips[clips.length - 1] ?? null, 'image')}
+            className="flex-1 min-h-12 rounded-xl border border-violet-600/40 bg-violet-600/10 hover:bg-violet-600/20 hover:border-violet-600/60 text-violet-300 hover:text-violet-200 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            Generate image
+          </button>
+          <button
+            onClick={() => onGenerateInProject(project, clips[clips.length - 1] ?? null, 'video')}
+            className="flex-1 min-h-12 rounded-xl border border-violet-600/40 bg-violet-600/10 hover:bg-violet-600/20 hover:border-violet-600/60 text-violet-300 hover:text-violet-200 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Generate clip
+          </button>
+        </div>
         <button
           onClick={() => setShowStitch(true)}
           disabled={clips.length === 0}
@@ -1213,7 +1224,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
         {clips.length === 0 && stitchedExports.length === 0 ? (
           <div className="flex items-center justify-center h-32 rounded-xl border border-dashed border-zinc-700 text-zinc-600 text-sm">
-            No clips yet. Tap &quot;Generate new clip&quot; above to get started.
+            No items yet. Tap &quot;Generate image&quot; or &quot;Generate clip&quot; above to get started.
           </div>
         ) : playThrough ? (
           /* ── Play-through player (video clips only) ── */

@@ -555,33 +555,44 @@ export default function Studio({
     setProjectContext(projectContextTrigger);
     saveSessionProjectContext(projectContextTrigger);
 
-    // Switch to video mode
-    setMode('video');
-    setLastVideoResults([]);
-    setSubmitError(null);
-    try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
+    if (projectContextTrigger.mode === 'video') {
+      setMode('video');
+      setLastVideoResults([]);
+      setSubmitError(null);
+      try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
 
-    // Pre-fill video params from project defaults (fall back to VIDEO_DEFAULTS for unset fields)
-    setVideoP({
-      frames: projectContextTrigger.defaults.frames ?? VIDEO_DEFAULTS.frames,
-      steps: projectContextTrigger.defaults.steps ?? VIDEO_DEFAULTS.steps,
-      cfg: projectContextTrigger.defaults.cfg ?? VIDEO_DEFAULTS.cfg,
-      width: projectContextTrigger.defaults.width ?? VIDEO_DEFAULTS.width,
-      height: projectContextTrigger.defaults.height ?? VIDEO_DEFAULTS.height,
-    });
+      setVideoP({
+        frames: projectContextTrigger.defaults.frames ?? VIDEO_DEFAULTS.frames,
+        steps: projectContextTrigger.defaults.steps ?? VIDEO_DEFAULTS.steps,
+        cfg: projectContextTrigger.defaults.cfg ?? VIDEO_DEFAULTS.cfg,
+        width: projectContextTrigger.defaults.width ?? VIDEO_DEFAULTS.width,
+        height: projectContextTrigger.defaults.height ?? VIDEO_DEFAULTS.height,
+      });
 
-    // Apply project lightning default if set
-    if (projectContextTrigger.defaults.lightning !== null && projectContextTrigger.defaults.lightning !== undefined) {
-      setLightningAndPersist(projectContextTrigger.defaults.lightning);
+      if (projectContextTrigger.defaults.lightning !== null && projectContextTrigger.defaults.lightning !== undefined) {
+        setLightningAndPersist(projectContextTrigger.defaults.lightning);
+      }
+
+      if (projectContextTrigger.defaults.videoLoras) {
+        const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+        setVideoLorasAndPersist(entries);
+      }
+    } else {
+      setMode('image');
+      setLastImageRecords([]);
+      setSubmitError(null);
+      try { sessionStorage.setItem('studio-mode', 'image'); } catch { /* ignore */ }
+
+      if (projectContextTrigger.defaults.width !== null || projectContextTrigger.defaults.height !== null) {
+        setP((prev) => ({
+          ...prev,
+          ...(projectContextTrigger.defaults.width !== null ? { width: projectContextTrigger.defaults.width! } : {}),
+          ...(projectContextTrigger.defaults.height !== null ? { height: projectContextTrigger.defaults.height! } : {}),
+        }));
+      }
     }
 
-    // Pre-fill video LoRA stack from project defaults if provided
-    if (projectContextTrigger.defaults.videoLoras) {
-      const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
-      setVideoLorasAndPersist(entries);
-    }
-
-    // Carry forward latest clip's prompt if present
+    // Carry forward latest clip's prompt regardless of mode
     if (projectContextTrigger.latestClipPrompt) {
       setP((prev) => ({ ...prev, positivePrompt: projectContextTrigger.latestClipPrompt! }));
     }
@@ -681,6 +692,7 @@ export default function Studio({
       const newCtx: ProjectContext = {
         projectId: project.id,
         projectName: project.name,
+        mode,
         latestClipId: latestClip?.id ?? null,
         latestClipPrompt: latestClip?.prompt ?? null,
         latestClipMediaType: latestClip?.mediaType ?? null,
@@ -745,6 +757,7 @@ export default function Studio({
     const newCtx: ProjectContext = {
       projectId: project.id,
       projectName: project.name,
+      mode,
       latestClipId: null,
       latestClipPrompt: null,
       latestClipMediaType: null,
