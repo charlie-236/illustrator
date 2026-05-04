@@ -591,12 +591,11 @@ class ComfyWSManager {
 
       this.addToRecentlyCompleted(job, 'done', undefined, record.id);
       pushSSE(controller, 'complete', {
-        id: record.id,
-        filePath: record.filePath,
-        frames: record.frames,
-        fps: record.fps,
-        seed: record.seed.toString(),
-        createdAt: record.createdAt.toISOString(),
+        records: [{
+          ...record,
+          seed: record.seed.toString(),
+          createdAt: record.createdAt.toISOString(),
+        }],
       });
     } catch (err) {
       console.error('[ComfyWS] finalizeVideoJob error', err);
@@ -923,7 +922,7 @@ class ComfyWSManager {
   finalizeStitchSuccess(
     promptId: string,
     generationId: string,
-    data: { id: string; filePath: string; frames: number | null; fps: number | null; width?: number; height?: number; seed: string; createdAt: string },
+    record: Record<string, unknown>,
   ) {
     const job = this.jobs.get(promptId);
     if (!job || job.mediaType !== 'stitch' || job.finalized) return;
@@ -932,7 +931,7 @@ class ComfyWSManager {
     this.jobs.delete(promptId);
     this.addToRecentlyCompleted(job, 'done', undefined, generationId);
     pushSSE(job.controller, 'completing', {});
-    pushSSE(job.controller, 'complete', data);
+    pushSSE(job.controller, 'complete', { records: [record] });
     closeSSE(job.controller);
   }
 

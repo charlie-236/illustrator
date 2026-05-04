@@ -64,14 +64,7 @@ const VIDEO_PRESETS = [
   { label: '704×1280', w: 704, h: 1280 },
 ] as const;
 
-interface VideoResult {
-  id: string;
-  filePath: string;
-  frames: number;
-  fps: number;
-  seed: string;
-  createdAt: string;
-}
+type VideoResult = GenerationRecord;
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -1146,7 +1139,8 @@ export default function Studio({
                 } else if (currentEvt === 'completing') {
                   if (jobPromptId) setCompleting(jobPromptId);
                 } else if (currentEvt === 'complete') {
-                  const vr = JSON.parse(dataStr) as VideoResult;
+                  const d = JSON.parse(dataStr) as { records: GenerationRecord[] };
+                  const vr = d.records[0];
                   setVideoResult(vr);
                   if (jobPromptId) completeJob(jobPromptId, vr.id);
                   onGenerated();
@@ -1351,9 +1345,11 @@ export default function Studio({
             className="w-full rounded-lg"
           />
           <p className="text-xs text-zinc-400 tabular-nums">Seed: {videoResult.seed}</p>
-          <p className="text-xs text-zinc-500">
-            {videoResult.frames} frames · {videoResult.fps} fps · {(videoResult.frames / videoResult.fps).toFixed(1)}s
-          </p>
+          {videoResult.frames != null && videoResult.fps != null && (
+            <p className="text-xs text-zinc-500">
+              {videoResult.frames} frames · {videoResult.fps} fps · {(videoResult.frames / videoResult.fps).toFixed(1)}s
+            </p>
+          )}
         </div>
       )}
 

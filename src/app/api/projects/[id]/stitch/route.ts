@@ -195,7 +195,7 @@ export async function POST(
             onChildProcess: (cp) => manager.setStitchProcess(promptId, cp),
           });
 
-          await prisma.generation.update({
+          const updatedRecord = await prisma.generation.update({
             where: { id: generationId },
             data: {
               width: result.width,
@@ -206,14 +206,9 @@ export async function POST(
           });
 
           manager.finalizeStitchSuccess(promptId, generationId, {
-            id: generationId,
-            filePath,
-            frames: result.frameCount,
-            fps: 16,
-            width: result.width,
-            height: result.height,
-            seed: '0',
-            createdAt: new Date().toISOString(),
+            ...updatedRecord,
+            seed: updatedRecord.seed.toString(),
+            createdAt: updatedRecord.createdAt.toISOString(),
           });
         } catch (err) {
           // Delete partial output file (abort path may have already done this — idempotent)

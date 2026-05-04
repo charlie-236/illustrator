@@ -349,7 +349,7 @@ Request body: `{ mode, prompt, negativePrompt?, width, height, frames, steps, cf
 
 Optional `projectId`: if present, must reference an existing project (validated against DB). The resulting Generation row gets `projectId` set and `position` auto-computed as `max(existing positions) + 1`.
 
-SSE events: same shape as the image progress route — `progress`, `complete`, `error`. The `complete` event carries `{ id, filePath, frames, fps, seed, createdAt }`.
+SSE events: same shape as the image progress route — `progress`, `complete`, `error`. The `complete` event carries `{ records: GenerationRecord[] }` — single-element array; matches image-mode shape.
 
 Validation: `width`/`height` multiples of 32 (256–1280); `frames` = 8N+1 (17–121); `steps` even (4–40); `cfg` 1.0–10.0; `mode='i2v'` ↔ `startImageB64` present.
 
@@ -612,7 +612,7 @@ Project `defaultVideoLoras` stores a JSON-encoded `WanLoraSpec[]` in the `Projec
 | event | data shape |
 |-------|-----------|
 | `progress` | `{ value: number, max: number }` |
-| `complete` | `{ id, filePath, frames, fps, seed, createdAt }` |
+| `complete` | `{ records: GenerationRecord[] }` — single-element array; matches image-mode shape |
 | `error` | `{ message: string }` |
 
 **Watchdog timeout:** 15 minutes (image jobs use 10 minutes). Set via `registerVideoJob`'s `timeoutMs` parameter.
@@ -906,7 +906,7 @@ SSE events:
 | `init` | `{ promptId, generationId }` |
 | `progress` | `{ value: number, max: number }` |
 | `completing` | `{}` |
-| `complete` | `{ id, filePath, frames, fps, seed, createdAt }` |
+| `complete` | `{ records: GenerationRecord[] }` — single-element array; matches image-mode shape |
 | `error` | `{ message: string }` |
 
 The route reads each source clip from its media-type-appropriate directory via `dirForGeneration` (image → `IMAGE_OUTPUT_DIR`; stitched → `STITCH_OUTPUT_DIR`; otherwise `VIDEO_OUTPUT_DIR`), with `??` fallbacks across the three env vars so co-located output directories degrade gracefully. The output `.mp4` always writes to `STITCH_OUTPUT_DIR`. The shared helper lives in `src/lib/outputDirs.ts` and is also used by `src/app/api/extract-last-frame/route.ts`.
