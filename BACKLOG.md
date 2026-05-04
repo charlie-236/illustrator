@@ -65,4 +65,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Fix StitchModal complete-event handler (post-PR-#51 cleanup) — `batch/fix-stitch-modal-complete-handler` (PR #59)
 - [~] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — `batch/claude-md-schema-category-docs` (PR #60)
 - [~] Unify dirForItem with dirForGeneration (M3 cleanup) — `batch/unify-dirforitem` (PR #61)
-- [ ] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
+- [~] Wan LoRA expert scope — ingest detection + manual override UI — `batch/wan-lora-expert-scope` (PR #62)
