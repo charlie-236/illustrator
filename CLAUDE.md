@@ -395,9 +395,9 @@ src/
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
     civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/
     civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel; type now includes 'embedding'
-    registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; includes extractCategoryFromTags() heuristic
+    registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; calls extractCategoryFromTags() in all three branches (lora, checkpoint, embedding)
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
-    useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config + /api/embedding-config; consumed by ModelSelect and ModelConfig
+    useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config + /api/embedding-config; consumed by ModelSelect and ModelConfig; exposes loraCategories, checkpointCategories, and embeddingCategories maps
   types/
     index.ts            GenerationParams, GenerationRecord (now includes projectId/projectName/isStitched/parentProjectId/parentProjectName/stitchedClipIds), ModelInfo (now includes embeddings[]), EmbeddingConfig,
                         ProjectSummary, ProjectDetail, ProjectClip, ProjectStitchedExport, SSEEvent, SAMPLERS, SCHEDULERS, RESOLUTIONS constants
@@ -415,7 +415,7 @@ src/
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields; shows Project link for video clips; shows Stitched-from-project + source clip count for stitched videos
     Projects.tsx        Projects tab — 2-col project card grid, New Project modal
     ProjectDetail.tsx   Project detail view — inline-editable header, flex-wrap DnD clip strip + stitched output tiles (@dnd-kit, rectSortingStrategy), 4-way filter, Settings modal, Stitch button + StitchModal
-    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax
+    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax; Checkpoints and LoRAs sub-tabs have a free-text category field (heuristic-populated at ingest, user-editable)
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
     GalleryPicker.tsx   Modal for selecting a gallery image as I2V starting frame; images-only filter (mediaType=image), infinite scroll, no delete/remix/favorite actions

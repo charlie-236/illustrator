@@ -152,6 +152,7 @@ export interface CheckpointConfig {
   checkpointName: string;
   friendlyName: string;
   baseModel: string;
+  category?: string | null;
   defaultWidth: number | null;
   defaultHeight: number | null;
   defaultPositivePrompt: string;
@@ -172,6 +173,7 @@ export interface LoraConfig {
   friendlyName: string;
   triggerWords: string;
   baseModel: string;
+  category?: string | null;
   description?: string | null;
   url?: string | null;
   appliesToHigh: boolean;
