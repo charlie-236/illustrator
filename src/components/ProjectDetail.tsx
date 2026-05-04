@@ -216,18 +216,24 @@ function StitchModal({ projectId, projectName, videoClips, allClips, onClose, on
           } else if (eventName === 'completing') {
             if (promptId) setCompleting(promptId);
           } else if (eventName === 'complete') {
-            const result = JSON.parse(data) as { id: string; filePath: string; frames: number; fps: number; width?: number; height?: number; createdAt: string };
+            const parsed = JSON.parse(data) as { records: GenerationRecord[] };
+            const record = parsed.records[0];
+            if (!record) {
+              setStatus('error');
+              setErrorMsg('Stitch completed but no record returned');
+              return;
+            }
             if (promptId && generationId) completeJob(promptId, generationId);
             setStatus('done');
             onStitched({
-              id: result.id,
-              filePath: result.filePath,
-              frames: result.frames,
-              fps: result.fps,
-              width: result.width ?? 0,
-              height: result.height ?? 0,
-              createdAt: result.createdAt,
-              promptPos: `Stitched: ${projectName}`,
+              id: record.id,
+              filePath: record.filePath,
+              frames: record.frames ?? 0,
+              fps: record.fps ?? 0,
+              width: record.width,
+              height: record.height,
+              createdAt: record.createdAt,
+              promptPos: record.promptPos,
             });
           } else if (eventName === 'error') {
             const parsed = JSON.parse(data) as { message: string };
