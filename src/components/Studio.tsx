@@ -419,6 +419,7 @@ export default function Studio({
   const [faceStrength, setFaceStrength] = useState(0.85);
   const [polishing, setPolishing] = useState(false);
   const [polishError, setPolishError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false); // 800ms double-tap guard
   const polishErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Apply session mode on mount + recover in-flight jobs from server
@@ -867,6 +868,9 @@ export default function Studio({
   // ── Image generation ──────────────────────────────────────────────────────
 
   async function handleGenerate() {
+    if (submitting) return;
+    setSubmitting(true);
+    setTimeout(() => setSubmitting(false), 800);
     setDrawerOpen(false);
     setSubmitError(null);
 
@@ -962,6 +966,9 @@ export default function Studio({
   // ── Video generation ──────────────────────────────────────────────────────
 
   async function handleGenerateVideo() {
+    if (submitting) return;
+    setSubmitting(true);
+    setTimeout(() => setSubmitting(false), 800);
     setSubmitError(null);
 
     const submitTime = Date.now();
@@ -1547,7 +1554,7 @@ export default function Studio({
               {/* Generate — image mode (always enabled when checkpoint is selected) */}
               <button
                 onClick={() => void handleGenerate()}
-                disabled={!p.checkpoint}
+                disabled={!p.checkpoint || submitting}
                 className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
                            bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
                            disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
@@ -1577,7 +1584,7 @@ export default function Studio({
             {/* Generate — video mode */}
             <button
               onClick={() => void handleGenerateVideo()}
-              disabled={videoGenerateDisabled}
+              disabled={videoGenerateDisabled || submitting}
               className="flex-1 py-4 rounded-xl font-semibold text-base transition-all
                          bg-violet-600 hover:bg-violet-500 active:scale-[0.98]
                          disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
