@@ -46,5 +46,8 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Wan 2.2 LoRA support (Phase 1.4b) — `batch/wan22-lora-support` (PR #37)
 - [x] Phase 2.3 / 3.1 follow-up bundle (starting-frame picker, stitched in strip, friendly-name fallbacks) — `batch/phase-2-3-followup-bundle` (PR #39)
 - [x] Rollback type-to-confirm; restore tap-based delete UX — `batch/delete-confirm-tablet-rollback` (PR #40)
-- [~] Configuration to .env (split output dirs, document all vars) — `batch/env-refactor` (PR #41)
-- [~] Generate button debounce (tablet double-tap guard) — `batch/generate-button-debounce` (PR #42)
+- [x] Configuration to .env (split output dirs, document all vars) — `batch/env-refactor` (PR #41)
+- [x] Generate button debounce (tablet double-tap guard) — `batch/generate-button-debounce` (PR #42)
+- [ ] Image batch as N independent jobs (visually-distinct outputs) — see prompts/image-batch-independence.md
+- [ ] Video generation batch support — see prompts/video-batch-support.md
+- [ ] Remix sets batch size to 4 — see prompts/remix-default-batch-4.md
