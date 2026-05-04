@@ -3,6 +3,7 @@ import { unlink } from 'fs/promises';
 import path from 'path';
 import { prisma } from '@/lib/prisma';
 import { getComfyWSManager } from '@/lib/comfyws';
+import { dirForGeneration } from '@/lib/outputDirs';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,17 +37,11 @@ function validateDefaults(body: Record<string, unknown>): string | null {
   return null;
 }
 
-function dirForItem(item: { mediaType?: string | null; isStitched?: boolean }): string {
-  if (!item.mediaType || item.mediaType !== 'video') return process.env.IMAGE_OUTPUT_DIR ?? '';
-  if (item.isStitched) return process.env.STITCH_OUTPUT_DIR ?? process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
-  return process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
-}
-
 /** Delete a generation's file from local disk. Errors are logged but not thrown. */
 async function deleteItemFile(
   item: { filePath: string; mediaType?: string | null; isStitched?: boolean },
 ): Promise<void> {
-  const outputDir = dirForItem(item);
+  const outputDir = dirForGeneration(item);
   if (!outputDir) return;
   const filename = item.filePath
     .replace('/api/images/', '')
