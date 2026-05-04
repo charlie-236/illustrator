@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { GenerationRecord, ProjectSummary } from '@/types';
+import type { GenerationRecord, ProjectSummary, Storyboard } from '@/types';
 import { imgSrc } from '@/lib/imageSrc';
 import NewProjectModal from './NewProjectModal';
 import DeleteConfirmDialog from './DeleteConfirmDialog';
@@ -19,6 +19,8 @@ interface Props {
   onNavigateToProject?: (projectId: string) => void;
   /** Called after a successful project assignment. */
   onProjectAssign?: (generationId: string, projectId: string | null) => void;
+  /** When passed (from ProjectDetail), enables "Scene N" sidebar info for clips with sceneId. */
+  storyboard?: Storyboard | null;
 }
 
 function HeartIcon({ filled }: { filled: boolean }) {
@@ -31,7 +33,7 @@ function HeartIcon({ filled }: { filled: boolean }) {
   );
 }
 
-export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject, onProjectAssign }: Props) {
+export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject, onProjectAssign, storyboard }: Props) {
   const [items, setItems] = useState(initialItems);
   const [idx, setIdx] = useState(Math.min(startIndex, Math.max(0, initialItems.length - 1)));
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -283,6 +285,19 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
           )}
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
+
+        {/* Scene row — shown when this clip has a sceneId and the storyboard is in scope */}
+        {record.sceneId && storyboard && (() => {
+          const sceneIdx = storyboard.scenes.findIndex((s) => s.id === record.sceneId);
+          if (sceneIdx === -1) return null;
+          const scene = storyboard.scenes[sceneIdx];
+          return (
+            <p className="text-xs text-zinc-500">
+              Scene {sceneIdx + 1} of {storyboard.scenes.length}
+              {scene.description ? <span className="text-zinc-600"> · {scene.description}</span> : null}
+            </p>
+          );
+        })()}
 
         {/* Project row — shown for all non-stitched clips (image and video) */}
         {!record.isStitched && (

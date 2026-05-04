@@ -1,14 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { ProjectSummary, ProjectDetail, ProjectClip } from '@/types';
+import type { ProjectSummary, ProjectDetail, ProjectClip, ProjectContext } from '@/types';
 import ProjectDetailView from './ProjectDetail';
 import NewProjectModal from './NewProjectModal';
 import { imgSrc } from '@/lib/imageSrc';
 
 interface Props {
   onNavigateToGallery: () => void;
-  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video') => void;
+  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video', sceneContext?: ProjectContext['sceneContext']) => void;
 }
 
 function formatRelativeTime(iso: string): string {

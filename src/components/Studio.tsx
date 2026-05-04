@@ -58,6 +58,19 @@ const VIDEO_DEFAULTS: VideoParams = {
   cfg: 3.5,
 };
 
+// Valid Wan 2.2 frame counts: (frames - 1) % 8 === 0, range 17–121
+const VALID_FRAME_COUNTS = [17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121] as const;
+
+function clampToValidFrameCount(n: number): number {
+  let best: number = VALID_FRAME_COUNTS[0];
+  let minDist = Math.abs(n - best);
+  for (const f of VALID_FRAME_COUNTS) {
+    const dist = Math.abs(n - f);
+    if (dist < minDist) { minDist = dist; best = f; }
+  }
+  return best;
+}
+
 const VIDEO_PRESETS = [
   { label: '1280×704', w: 1280, h: 704 },
   { label: '768×768', w: 768, h: 768 },
@@ -377,6 +390,8 @@ export default function Studio({
 
   // Project context — set when navigating from Projects tab; persisted in sessionStorage
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
+  // Scene ID from a storyboard scene trigger — flows to the generate-video request body
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   // Project frame picker (replaces the "use last frame" checkbox)
   const [selectedStartingClipId, setSelectedStartingClipId] = useState<string | null>(null);
   const [framePickerOpen, setFramePickerOpen] = useState(false);
@@ -494,11 +509,12 @@ export default function Studio({
   useEffect(() => {
     if (!remixParams) return;
     setP({ ...remixParams, batchSize: 4 });
-    // Remix clears project context
+    // Remix clears project context and scene state
     setProjectContext(null);
     saveSessionProjectContext(null);
     setSelectedStartingClipId(null);
     setPickerItems([]);
+    setActiveSceneId(null);
     setMode('image');
     try { sessionStorage.setItem('studio-mode', 'image'); } catch { /* ignore */ }
     onRemixConsumed();
@@ -540,9 +556,10 @@ export default function Studio({
     setSelectedStartingClipId(null);
     setPickerItems([]);
     setLastVideoResults([]);
-    // Remix clears project context — remix is a fresh generation, not a project continuation
+    // Remix clears project context and scene state — remix is a fresh generation, not a project continuation
     setProjectContext(null);
     saveSessionProjectContext(null);
+    setActiveSceneId(null);
     setMode('video');
     try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
     onVideoRemixConsumed();
@@ -554,6 +571,56 @@ export default function Studio({
 
     setProjectContext(projectContextTrigger);
     saveSessionProjectContext(projectContextTrigger);
+
+    // Scene context overrides: always open video mode and apply scene-specific values
+    if (projectContextTrigger.sceneContext) {
+      const sc = projectContextTrigger.sceneContext;
+
+      setMode('video');
+      setLastVideoResults([]);
+      setSubmitError(null);
+      try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
+
+      // Apply project defaults first (same as regular video mode trigger)
+      setVideoP({
+        frames: clampToValidFrameCount(sc.durationSeconds * 16),
+        steps: projectContextTrigger.defaults.steps ?? VIDEO_DEFAULTS.steps,
+        cfg: projectContextTrigger.defaults.cfg ?? VIDEO_DEFAULTS.cfg,
+        width: projectContextTrigger.defaults.width ?? VIDEO_DEFAULTS.width,
+        height: projectContextTrigger.defaults.height ?? VIDEO_DEFAULTS.height,
+      });
+
+      if (projectContextTrigger.defaults.lightning !== null && projectContextTrigger.defaults.lightning !== undefined) {
+        setLightningAndPersist(projectContextTrigger.defaults.lightning);
+      }
+
+      if (projectContextTrigger.defaults.videoLoras) {
+        const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+        setVideoLorasAndPersist(entries);
+      }
+
+      // Override prompt with scene's prompt
+      setP((prev) => ({ ...prev, positivePrompt: sc.prompt }));
+
+      // Stash sceneId for the generate-video request
+      setActiveSceneId(sc.sceneId);
+
+      // Suggest starting frame from previous scene's canonical clip
+      setUseStartingFrame(false);
+      setStartingFrameRecord(null);
+      if (sc.suggestedStartingClipId) {
+        setSelectedStartingClipId(sc.suggestedStartingClipId);
+      } else {
+        setSelectedStartingClipId(null);
+      }
+      setPickerItems([]);
+
+      onProjectContextTriggerConsumed();
+      return;
+    }
+
+    // Regular (non-scene) project context trigger
+    setActiveSceneId(null);
 
     if (projectContextTrigger.mode === 'video') {
       setMode('video');
@@ -812,6 +879,7 @@ export default function Studio({
     setLastImageRecords([]);
     setLastVideoResults([]);
     setSubmitError(null);
+    setActiveSceneId(null);
     if (newMode === 'video') {
       // Don't reset videoP if a project context pre-filled it
       if (!projectContext) setVideoP(VIDEO_DEFAULTS);
@@ -1123,6 +1191,7 @@ export default function Studio({
             loras: wanLoras.length > 0 ? wanLoras : undefined,
             ...(startImageB64 ? { startImageB64 } : {}),
             ...(projectContext ? { projectId: projectContext.projectId } : {}),
+            ...(activeSceneId ? { sceneId: activeSceneId } : {}),
           }),
         });
       } catch (err) {
@@ -1194,6 +1263,9 @@ export default function Studio({
                   setLastVideoResults((prev) => [...prev, ...d.records]);
                   if (jobPromptId) completeJob(jobPromptId, d.records[0]?.id ?? '');
                   onGenerated();
+                  // Clear activeSceneId after first take completes — subsequent takes from
+                  // the same submit don't carry the scene ID
+                  setActiveSceneId(null);
                   reader.cancel();
                   streamDone = true;
                   break;
