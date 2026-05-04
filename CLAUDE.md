@@ -121,8 +121,7 @@ This forwards `mint-pc:8188` → `a100-core:8188` over Tailscale, so the Next.js
 ## Architecture overview
 
 ```
-Browser → POST /api/generate → ComfyUI /prompt  (returns promptId)
-Browser → GET  /api/progress/[promptId] (SSE)
+Browser → POST /api/generate (SSE stream)
                      ↕
           global.__comfyWSManager  ←→  ws://localhost:8188/ws
                      ↓ on execution_success
@@ -149,15 +148,15 @@ Browser → GET  /api/progress/[promptId] (SSE)
 
 ComfyUI binary frames carry a format-type word at bytes 4–7 (BE uint32): `2` = PNG (emitted by `SaveImageWebsocket`), `1` = JPEG (live previews from taesd/latent2rgb/auto). `parseImageFrame()` reads that byte, slices from offset 8, and verifies the image magic bytes. If magic doesn't match the declared format it falls back to scanning the first 32 bytes — defensive against protocol drift. JPEG preview frames are dropped at the call site (`onBinary`); only PNG frames are pushed to `imageBuffers`. A `// TODO` marks where JPEG frames should be forwarded to a `preview` SSE event once live previews are wired up.
 
-### SSE job registration split
+### SSE-streaming generation (image and video)
 
-`POST /api/generate` builds and submits the workflow, gets back `promptId` + `resolvedSeed`, calls `manager.stashJobParams(promptId, params, resolvedSeed)` to store the params server-side (with a 60-second TTL and `baseImage`/`denoise` stripped), and returns immediately. The browser then opens `GET /api/progress/[promptId]` (no query params) which calls `manager.registerJob(promptId, controller)`. `registerJob` looks up and deletes the stashed entry, populating the `Job` record; if the entry has expired or is missing it sends an `error` SSE and closes. This avoids round-tripping `GenerationParams` through the URL, which would exceed header limits when a base image (~1–4 MB base64) is attached.
+Both image (`POST /api/generate`) and video (`POST /api/generate-video`) use a single-call SSE pattern: the POST response itself is the SSE stream. After the workflow is submitted to ComfyUI and `promptId` is obtained, the route calls `manager.registerJob()` (image) or `manager.registerVideoJob()` (video) with the params and controller inline, then emits an `init` event and keeps the stream open. Large fields (`referenceImages`, `mask`, `baseImage`, `denoise`) are stripped before passing to the manager — not needed in finalization. Client disconnect (browser refresh, tab close) detaches the controller via `manager.removeSubscriber()` but does NOT abort the job — refresh survivability works via the active-jobs poll on mount.
 
 ### Seed resolution
 
-`params.seed === -1` means random. The seed is resolved inside `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `buildWorkflow` returns `{ workflow, resolvedSeed }` — the seed is returned directly from the same scope where it was generated, not extracted from the node graph after the fact. The resolved seed travels: `buildWorkflow()` return value → `/api/generate` response → `stashJobParams()` → `registerJob()` → `prisma.generation.create()`.
+`params.seed === -1` means random. The seed is resolved inside `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `buildWorkflow` returns `{ workflow, resolvedSeed }` — the seed is returned directly from the same scope where it was generated, not extracted from the node graph after the fact. The resolved seed travels: `buildWorkflow()` return value → SSE `init` event → `registerJob()` argument → `prisma.generation.create()`.
 
-**Video seed resolution** mirrors the image-side contract: `params.seed === -1` means random, resolved inside `/api/generate-video` via `Math.floor(Math.random() * 2**32)` and embedded in both `KSamplerAdvanced` nodes (57 and 58) of the Wan 2.2 workflow. Writing to both samplers is defensive — node 58 has `add_noise: "disable"` so the seed is conceptually unused, but the template's literal `0` stays out of the workflow JSON entirely as a result. The resolved seed is emitted in the SSE `init` event as `resolvedSeed` (parity with `/api/generate`'s response field) and persisted to the DB row's `seed` column at finalize time.
+**Video seed resolution** mirrors the image-side contract: `params.seed === -1` means random, resolved inside `/api/generate-video` via `Math.floor(Math.random() * 2**32)` and embedded in both `KSamplerAdvanced` nodes (57 and 58) of the Wan 2.2 workflow. Writing to both samplers is defensive — node 58 has `add_noise: "disable"` so the seed is conceptually unused, but the template's literal `0` stays out of the workflow JSON entirely as a result. The resolved seed is emitted in the SSE `init` event as `resolvedSeed` (same pattern as `/api/generate`) and persisted to the DB row's `seed` column at finalize time.
 
 ### BigInt serialization
 
@@ -200,20 +199,25 @@ model Generation {
 ## API routes
 
 ### `POST /api/generate`
-Body: `GenerationParams` JSON.
-1. Calls `buildWorkflow(params)` → ComfyUI API-format workflow object.
-2. POSTs `{ prompt: workflow, client_id }` to `http://localhost:8188/prompt`.
-3. Returns `{ promptId: string, resolvedSeed: number }`.
-- No timeout on the ComfyUI fetch — ComfyUI usually responds immediately with a queue ID.
+SSE-streaming image generation. Returns an SSE stream directly (no separate `/progress` route).
+
+Request body: `GenerationParams` JSON.
+1. Validates all params; runs prompt assembly (checkpoint defaults + LoRA trigger words + user prompts).
+2. Calls `buildWorkflow(params)` → ComfyUI API-format workflow object.
+3. Asserts no forbidden class_types (`SaveImage`, `LoadImage`) in the workflow.
+4. POSTs `{ prompt: workflow, client_id }` to `http://localhost:8188/prompt`.
+5. Opens SSE stream, emits `init`, calls `manager.registerJob()` inline with params and controller.
+
+Pre-stream errors (validation, ComfyUI unreachable, forbidden class_types) return JSON with appropriate HTTP status codes; only successful submissions open an SSE stream.
+
 - Optional `projectId`: if present, validated against DB (must reference an existing project). The resulting `Generation` row gets `projectId` set and `position` auto-computed as `max(existing positions in this project) + 1`, mirroring the video-side behaviour.
 
-### `GET /api/progress/[promptId]`
-Returns an SSE stream. Calls `manager.registerJob(promptId, controller)`. Params and seed are looked up from the server-side stash populated by `/api/generate`.
-
-SSE events emitted by the manager:
+SSE events:
 | event | data shape |
 |-------|-----------|
+| `init` | `{ promptId: string, resolvedSeed: number }` |
 | `progress` | `{ value: number, max: number }` |
+| `completing` | `{}` |
 | `complete` | `{ records: GenerationRecord[] }` |
 | `error` | `{ message: string }` |
 
@@ -367,8 +371,7 @@ src/
     globals.css         Tailwind directives + utility classes: .input-base, .label, .card
     api/
       models/           GET — checkpoint + lora lists from ComfyUI
-      generate/         POST — submit workflow, return promptId
-      progress/[promptId]/  GET — SSE stream
+      generate/         POST — SSE-streaming image generation
       gallery/          GET — paginated DB query
       generation/[id]/  GET — single record
       models/register/       POST — thin wrapper over registerModel; used by add_model.sh

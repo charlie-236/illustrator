@@ -4,7 +4,17 @@ import { getComfyWSManager } from '@/lib/comfyws';
 import { prisma } from '@/lib/prisma';
 import type { GenerationParams } from '@/types';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 const COMFYUI = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
+
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache, no-transform',
+  Connection: 'keep-alive',
+  'X-Accel-Buffering': 'no',
+};
 
 export async function POST(req: NextRequest) {
   let params: GenerationParams;
@@ -191,12 +201,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No prompt_id in ComfyUI response' }, { status: 500 });
   }
 
-  // Stash original params (not workflowParams) so DB stores the user's typed prompts, not the
-  // assembled-with-defaults version. The SSE route picks these up via registerJob().
-  // finalPositive/finalNegative are recorded alongside for forensic reference.
-  // Strip referenceImages (potentially several MB of base64) — not needed in finalizeJob.
-  const { referenceImages: _ri, mask: _mk, ...paramsForStash } = params;
-  manager.stashJobParams(promptId, paramsForStash as GenerationParams, resolvedSeed, finalPositive, finalNegative);
+  // Strip large fields not needed in finalizeImageJob:
+  //   referenceImages / mask  — potentially several MB of base64
+  //   baseImage / denoise     — not needed after workflow is built
+  const { referenceImages: _ri, mask: _mk, baseImage: _bi, denoise: _d, ...paramsForJob } = params;
 
-  return NextResponse.json({ promptId, resolvedSeed });
+  const sseEncoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, resolvedSeed })}\n\n`),
+      );
+
+      manager.registerJob(
+        promptId,
+        paramsForJob as GenerationParams,
+        resolvedSeed,
+        finalPositive,
+        finalNegative,
+        controller,
+      );
+
+      // SSE stream close means the browser disconnected (refresh, tab close, network drop).
+      // It does NOT mean the user pressed Abort. The job stays alive on the server so
+      // that the next /api/jobs/active poll can reattach. Explicit abort goes through
+      // POST /api/jobs/[promptId]/abort instead.
+      req.signal.addEventListener('abort', () => {
+        manager.removeSubscriber(promptId, controller);
+        try { controller.close(); } catch { /* already closed */ }
+      });
+    },
+  });
+
+  return new Response(stream, { headers: SSE_HEADERS });
 }

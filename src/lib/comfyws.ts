@@ -215,7 +215,6 @@ class ComfyWSManager {
   private ws: WebSocket | null = null;
   private clientId: string;
   private jobs = new Map<string, Job>();
-  private pendingParams = new Map<string, { params: GenerationParams; resolvedSeed: number; assembledPos: string; assembledNeg: string; createdAt: number }>();
   private recentlyCompleted = new Map<string, RecentlyCompletedEntry>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
@@ -678,47 +677,24 @@ class ComfyWSManager {
     this.recentlyCompleted.set(job.promptId, entry);
   }
 
-  stashJobParams(
+  registerJob(
     promptId: string,
     params: GenerationParams,
     resolvedSeed: number,
     assembledPos: string,
     assembledNeg: string,
-  ) {
-    // TTL purge: drop stale entries from tabs that closed before opening SSE
-    const now = Date.now();
-    for (const [id, entry] of this.pendingParams) {
-      if (now - entry.createdAt > 60_000) this.pendingParams.delete(id);
-    }
-
-    // Strip baseImage and denoise — not needed in finalizeImageJob, and baseImage can be several MB
-    const { baseImage: _bi, denoise: _d, ...rest } = params;
-    this.pendingParams.set(promptId, { params: rest as GenerationParams, resolvedSeed, assembledPos, assembledNeg, createdAt: now });
-  }
-
-  registerJob(
-    promptId: string,
     controller: ReadableStreamDefaultController<Uint8Array>,
   ) {
-    const entry = this.pendingParams.get(promptId);
-    this.pendingParams.delete(promptId);
-
-    if (!entry) {
-      controller.enqueue(sseChunk('error', { message: 'Job parameters expired or not found' }));
-      try { controller.close(); } catch { /* already closed */ }
-      return;
-    }
-
     const timeoutId = setTimeout(() => this.expireJob(promptId), IMAGE_JOB_TIMEOUT_MS);
-    const promptSummary = entry.params.positivePrompt.slice(0, 60).trim() || 'Image generation';
+    const promptSummary = params.positivePrompt.slice(0, 60).trim() || 'Image generation';
 
     this.jobs.set(promptId, {
       promptId,
       mediaType: 'image',
-      params: entry.params,
-      resolvedSeed: entry.resolvedSeed,
-      assembledPos: entry.assembledPos,
-      assembledNeg: entry.assembledNeg,
+      params,
+      resolvedSeed,
+      assembledPos,
+      assembledNeg,
       controller,
       imageBuffers: [],
       activeNode: null,
