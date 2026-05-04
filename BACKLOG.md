@@ -53,3 +53,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Remix sets batch size to 4 — `batch/remix-default-batch-4` (PR #46)
 - [x] Image generations inherit project context — `batch/image-project-inheritance` (PR #47)
 - [ ] Fix seed-zero bug in video batch generation — see prompts/fix-video-batch-seed-zero.md
+- [ ] Fix project stitch reading source clips from STITCH_OUTPUT_DIR instead of VIDEO_OUTPUT_DIR — see prompts/fix-stitch-source-clip-dir.md
