@@ -450,7 +450,6 @@ class ComfyWSManager {
 
       const slug = slugifyPrompt(params.positivePrompt);
       const timestamp = Date.now();
-      const isBatch = imageBuffers.length > 1;
 
       const loraStr = params.loras.length > 0
         ? params.loras.map((l) => `${l.name} (${l.weight.toFixed(2)})`).join(', ')
@@ -460,11 +459,11 @@ class ComfyWSManager {
         : undefined;
 
       const records = await Promise.all(
-        imageBuffers.map(async (buf, i) => {
+        imageBuffers.map(async (buf) => {
           const ext = 'png'; // SaveImageWebsocket always emits PNG; only PNG frames reach imageBuffers
-          const filename = isBatch
-            ? `${slug}_${timestamp}_${i + 1}.${ext}`
-            : `${slug}_${timestamp}.${ext}`;
+          // Use promptId prefix for collision-free filenames — batch takes submitted in the same
+          // millisecond share a timestamp, so slug+timestamp alone is not unique.
+          const filename = `${slug}_${timestamp}_${job.promptId.slice(0, 8)}.${ext}`;
 
           await writeFile(path.join(dir, filename), buf);
           const filePath = `/api/images/${filename}`;
