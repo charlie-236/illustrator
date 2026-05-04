@@ -64,8 +64,6 @@ const VIDEO_PRESETS = [
   { label: '704×1280', w: 704, h: 1280 },
 ] as const;
 
-type VideoResult = GenerationRecord;
-
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -374,7 +372,7 @@ export default function Studio({
   const [useStartingFrame, setUseStartingFrame] = useState(false);
   const [startingFrameRecord, setStartingFrameRecord] = useState<GenerationRecord | null>(null);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
-  const [videoResult, setVideoResult] = useState<VideoResult | null>(null);
+  const [lastVideoResults, setLastVideoResults] = useState<GenerationRecord[]>([]);
   const [videoBatchSize, setVideoBatchSize] = useState(1);
 
   // Project context — set when navigating from Projects tab; persisted in sessionStorage
@@ -402,6 +400,8 @@ export default function Studio({
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStartIdx, setModalStartIdx] = useState(0);
+  const [videoModalOpen, setVideoModalOpen] = useState(false);
+  const [videoModalIdx, setVideoModalIdx] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [checkpointDefaults, setCheckpointDefaults] = useState<CheckpointDefaults | null>(null);
@@ -469,7 +469,7 @@ export default function Studio({
     if (tab !== 'studio') {
       setDrawerOpen(false);
       setLastImageRecords([]);
-      setVideoResult(null);
+      setLastVideoResults([]);
       setSubmitError(null);
     }
   }, [tab]);
@@ -534,6 +534,7 @@ export default function Studio({
     setStartingFrameRecord(null);
     setSelectedStartingClipId(null);
     setPickerItems([]);
+    setLastVideoResults([]);
     // Remix clears project context — remix is a fresh generation, not a project continuation
     setProjectContext(null);
     saveSessionProjectContext(null);
@@ -551,7 +552,7 @@ export default function Studio({
 
     // Switch to video mode
     setMode('video');
-    setVideoResult(null);
+    setLastVideoResults([]);
     setSubmitError(null);
     try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
 
@@ -724,7 +725,7 @@ export default function Studio({
 
       // Switch to video mode
       setMode('video');
-      setVideoResult(null);
+      setLastVideoResults([]);
       setSubmitError(null);
       try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
     } catch {
@@ -783,7 +784,7 @@ export default function Studio({
     setPickerItems([]);
 
     setMode('video');
-    setVideoResult(null);
+    setLastVideoResults([]);
     setSubmitError(null);
     try { sessionStorage.setItem('studio-mode', 'video'); } catch { /* ignore */ }
   }
@@ -791,7 +792,7 @@ export default function Studio({
   function switchMode(newMode: 'image' | 'video') {
     if (newMode === mode) return;
     setLastImageRecords([]);
-    setVideoResult(null);
+    setLastVideoResults([]);
     setSubmitError(null);
     if (newMode === 'video') {
       // Don't reset videoP if a project context pre-filled it
@@ -983,7 +984,7 @@ export default function Studio({
     setSubmitting(true);
     setTimeout(() => setSubmitting(false), 800);
     setSubmitError(null);
-    setVideoResult(null);
+    setLastVideoResults([]);
 
     const submitTime = Date.now();
     const promptSummary = p.positivePrompt.slice(0, 60).trim() || 'Video generation';
@@ -1140,9 +1141,8 @@ export default function Studio({
                   if (jobPromptId) setCompleting(jobPromptId);
                 } else if (currentEvt === 'complete') {
                   const d = JSON.parse(dataStr) as { records: GenerationRecord[] };
-                  const vr = d.records[0];
-                  setVideoResult(vr);
-                  if (jobPromptId) completeJob(jobPromptId, vr.id);
+                  setLastVideoResults((prev) => [...prev, ...d.records]);
+                  if (jobPromptId) completeJob(jobPromptId, d.records[0]?.id ?? '');
                   onGenerated();
                   reader.cancel();
                   streamDone = true;
@@ -1332,23 +1332,39 @@ export default function Studio({
         </div>
       )}
 
-      {/* ── After video generation: video result card ── */}
-      {mode === 'video' && videoResult && (
-        <div className="card space-y-2">
-          <p className="text-sm font-medium text-zinc-200">Video ready</p>
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video
-            src={videoResult.filePath}
-            controls
-            loop
-            playsInline
-            className="w-full rounded-lg"
-          />
-          <p className="text-xs text-zinc-400 tabular-nums">Seed: {videoResult.seed}</p>
-          {videoResult.frames != null && videoResult.fps != null && (
-            <p className="text-xs text-zinc-500">
-              {videoResult.frames} frames · {videoResult.fps} fps · {(videoResult.frames / videoResult.fps).toFixed(1)}s
-            </p>
+      {/* ── After video generation: thumbnail grid ── */}
+      {mode === 'video' && lastVideoResults.length > 0 && (
+        <div className="card">
+          <div className="grid grid-cols-3 gap-1.5">
+            {lastVideoResults.map((rec, i) => (
+              <div
+                key={rec.id}
+                className="relative aspect-square rounded-lg overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors"
+              >
+                <button
+                  className="absolute inset-0 w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                  onClick={() => { setVideoModalIdx(i); setVideoModalOpen(true); }}
+                  aria-label={`View video ${i + 1}`}
+                >
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <video
+                    src={imgSrc(rec.filePath)}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                  {rec.frames != null && rec.fps != null && (
+                    <span className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/70 rounded text-[10px] text-white tabular-nums pointer-events-none">
+                      {(rec.frames / rec.fps).toFixed(1)}s
+                    </span>
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+          {lastVideoResults.length === 1 && (
+            <p className="text-xs text-zinc-400 mt-2 tabular-nums">Seed: {lastVideoResults[0].seed}</p>
           )}
         </div>
       )}
@@ -1990,6 +2006,22 @@ export default function Studio({
           onClose={() => setModalOpen(false)}
           onRemix={(record) => { onRemix(record); setModalOpen(false); }}
           onDelete={handleStudioDelete}
+        />
+      )}
+
+      {/* ── Full-screen video result modal ── */}
+      {videoModalOpen && lastVideoResults.length > 0 && (
+        <ImageModal
+          items={lastVideoResults}
+          startIndex={videoModalIdx}
+          onClose={() => setVideoModalOpen(false)}
+          onRemix={(record) => { onRemix(record); setVideoModalOpen(false); }}
+          onDelete={async (id) => {
+            const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Delete failed');
+            setLastVideoResults((prev) => prev.filter((r) => r.id !== id));
+            onGenerated();
+          }}
         />
       )}
 
