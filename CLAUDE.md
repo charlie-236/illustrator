@@ -652,7 +652,9 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 
 **Starting frame picker:** When the starting frame toggle is On, a "Pick from gallery" button appears. Clicking it opens `GalleryPicker` — a modal that shows the gallery grid filtered to `mediaType=image` only. Selecting an image closes the modal and populates a thumbnail preview. The × button clears the selection (keeps the toggle on). The i2v `startImageB64` field is populated by fetching the selected image's URL client-side and base64-encoding it at submit time.
 
-**Generate Video button:** replaces the image-mode "Generate" button. POSTs to `/api/generate-video` as a streaming fetch (not EventSource, since the route is a direct POST→SSE response). Progress and error events are parsed from the SSE stream inline. On `complete`, a `<video>` element is shown in Studio with controls/loop.
+**Generate Video button:** replaces the image-mode "Generate" button. POSTs to `/api/generate-video` as a streaming fetch (not EventSource, since the route is a direct POST→SSE response). Progress and error events are parsed from the SSE stream inline.
+
+**Video batch result card** mirrors image-mode: per-take `GenerationRecord` accumulates into a 3-column thumbnail grid (`<video preload="metadata">` tiles with duration badge). Tapping a tile opens the existing `ImageModal` at that record's index. The grid resets on mode switch, new batch submission, video remix, or project context trigger — same lifecycle as image-mode's `lastImageRecords`.
 
 **Queue UX (Phase 1.2b):** The Generate/Generate Video buttons are never locked. Each submit adds a job to the queue and returns immediately. See **Queue UX** section below.
 
