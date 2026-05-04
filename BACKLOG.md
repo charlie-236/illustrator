@@ -46,5 +46,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Wan 2.2 LoRA support (Phase 1.4b) — `batch/wan22-lora-support` (PR #37)
 - [x] Phase 2.3 / 3.1 follow-up bundle (starting-frame picker, stitched in strip, friendly-name fallbacks) — `batch/phase-2-3-followup-bundle` (PR #39)
 - [x] Rollback type-to-confirm; restore tap-based delete UX — `batch/delete-confirm-tablet-rollback` (PR #40)
-- [ ] Configuration to .env (split output dirs, document all vars) — see prompts/env-refactor.md
+- [~] Configuration to .env (split output dirs, document all vars) — `batch/env-refactor` (PR #41)
 - [ ] Generate button debounce (tablet double-tap guard) — see prompts/generate-button-debounce.md
