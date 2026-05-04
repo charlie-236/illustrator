@@ -382,6 +382,7 @@ export default function Studio({
   const [startingFrameRecord, setStartingFrameRecord] = useState<GenerationRecord | null>(null);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
   const [videoResult, setVideoResult] = useState<VideoResult | null>(null);
+  const [videoBatchSize, setVideoBatchSize] = useState(1);
 
   // Project context — set when navigating from Projects tab; persisted in sessionStorage
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
@@ -987,161 +988,188 @@ export default function Studio({
     setSubmitting(true);
     setTimeout(() => setSubmitting(false), 800);
     setSubmitError(null);
+    setVideoResult(null);
 
     const submitTime = Date.now();
     const promptSummary = p.positivePrompt.slice(0, 60).trim() || 'Video generation';
+    const batchSize = videoBatchSize;
+    const baseSeed = p.seed;
 
-    try {
-      let startImageB64: string | undefined;
+    // ── Resolve starting frame once before the loop ───────────────────────
+    let startImageB64: string | undefined;
 
-      if (selectedStartingClipId) {
-        // Project frame picker path
-        const item = pickerItems.find((pi) => pi.id === selectedStartingClipId);
-        if (item) {
-          setExtractingLastFrame(true);
-          try {
-            if (item.mediaType === 'image') {
-              startImageB64 = await encodeImageToBase64(imgSrc(item.filePath));
-            } else {
-              // Use cached last-frame if available, otherwise extract now
-              const cached = frameCache.current.get(item.id);
-              if (cached) {
-                startImageB64 = cached.replace(/^data:image\/[^;]+;base64,/, '');
-              } else {
-                const lfRes = await fetch('/api/extract-last-frame', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ generationId: item.id }),
-                });
-                const lfData = await lfRes.json() as { frameB64?: string; error?: string };
-                if (!lfRes.ok || !lfData.frameB64) {
-                  throw new Error(lfData.error ?? 'Failed to extract last frame');
-                }
-                startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
-              }
-            }
-          } catch (err) {
-            setSubmitError(`Failed to prepare starting frame: ${String(err)}`);
-            return;
-          } finally {
-            setExtractingLastFrame(false);
-          }
-        }
-      } else if (useStartingFrame && startingFrameRecord) {
-        // Gallery picker path (non-project I2V)
+    if (selectedStartingClipId) {
+      // Project frame picker path
+      const item = pickerItems.find((pi) => pi.id === selectedStartingClipId);
+      if (item) {
+        setExtractingLastFrame(true);
         try {
-          startImageB64 = await encodeImageToBase64(imgSrc(startingFrameRecord.filePath));
+          if (item.mediaType === 'image') {
+            startImageB64 = await encodeImageToBase64(imgSrc(item.filePath));
+          } else {
+            // Use cached last-frame if available, otherwise extract now
+            const cached = frameCache.current.get(item.id);
+            if (cached) {
+              startImageB64 = cached.replace(/^data:image\/[^;]+;base64,/, '');
+            } else {
+              const lfRes = await fetch('/api/extract-last-frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ generationId: item.id }),
+              });
+              const lfData = await lfRes.json() as { frameB64?: string; error?: string };
+              if (!lfRes.ok || !lfData.frameB64) {
+                throw new Error(lfData.error ?? 'Failed to extract last frame');
+              }
+              startImageB64 = lfData.frameB64.replace(/^data:image\/[^;]+;base64,/, '');
+            }
+          }
         } catch (err) {
-          setSubmitError(`Failed to load starting frame: ${String(err)}`);
+          setSubmitError(`Failed to prepare starting frame: ${String(err)}`);
           return;
+        } finally {
+          setExtractingLastFrame(false);
         }
       }
+    } else if (useStartingFrame && startingFrameRecord) {
+      // Gallery picker path (non-project I2V)
+      try {
+        startImageB64 = await encodeImageToBase64(imgSrc(startingFrameRecord.filePath));
+      } catch (err) {
+        setSubmitError(`Failed to load starting frame: ${String(err)}`);
+        return;
+      }
+    }
 
-      const videoMode: 't2v' | 'i2v' = startImageB64 ? 'i2v' : 't2v';
+    const videoMode: 't2v' | 'i2v' = startImageB64 ? 'i2v' : 't2v';
 
-      // Build full WanLoraSpec[] from the minimal WanLoraEntry[] state + lists metadata
-      const wanLoras: WanLoraSpec[] = videoLoras.map((e) => ({
-        loraName: e.loraName,
-        friendlyName: modelLists.loraNames[e.loraName] ?? '(unknown LoRA)',
-        weight: e.weight,
-        appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
-        appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
-      }));
+    // Build full WanLoraSpec[] once — same across all takes
+    const wanLoras: WanLoraSpec[] = videoLoras.map((e) => ({
+      loraName: e.loraName,
+      friendlyName: modelLists.loraNames[e.loraName] ?? '(unknown LoRA)',
+      weight: e.weight,
+      appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
+      appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
+    }));
 
-      const res = await fetch('/api/generate-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: videoMode,
-          prompt: p.positivePrompt.trim(),
-          width: videoP.width,
-          height: videoP.height,
-          frames: videoP.frames,
-          steps: videoP.steps,
-          cfg: videoP.cfg,
-          seed: p.seed >= 0 ? p.seed : undefined,
-          lightning,
-          loras: wanLoras.length > 0 ? wanLoras : undefined,
-          ...(startImageB64 ? { startImageB64 } : {}),
-          ...(projectContext ? { projectId: projectContext.projectId } : {}),
-        }),
-      });
+    // Request notification permission once before the batch
+    requestPermissionIfNeeded();
+
+    for (let i = 0; i < batchSize; i++) {
+      // seed === -1: route randomizes independently per take; explicit: sequential seed+i
+      const takeSeed = baseSeed === -1 ? undefined : baseSeed + i;
+
+      let res: Response;
+      try {
+        res = await fetch('/api/generate-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: videoMode,
+            prompt: p.positivePrompt.trim(),
+            width: videoP.width,
+            height: videoP.height,
+            frames: videoP.frames,
+            steps: videoP.steps,
+            cfg: videoP.cfg,
+            seed: takeSeed,
+            lightning,
+            loras: wanLoras.length > 0 ? wanLoras : undefined,
+            ...(startImageB64 ? { startImageB64 } : {}),
+            ...(projectContext ? { projectId: projectContext.projectId } : {}),
+          }),
+        });
+      } catch (err) {
+        setSubmitError(String(err));
+        return;
+      }
 
       if (!res.ok) {
-        const errBody = await res.json() as { error: string };
-        throw new Error(errBody.error);
-      }
-
-      if (!res.body) throw new Error('No response stream');
-
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let lineBuf = '';
-      let currentEvt = '';
-      let streamDone = false;
-      let jobPromptId = '';
-      let jobGenerationId = '';
-      let jobAdded = false;
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        lineBuf += dec.decode(value, { stream: true });
-        const lines = lineBuf.split('\n');
-        lineBuf = lines.pop() ?? '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvt = line.slice(7).trim();
-          } else if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6);
-            if (currentEvt === 'init') {
-              const initData = JSON.parse(dataStr) as { promptId: string; generationId: string };
-              jobPromptId = initData.promptId;
-              jobGenerationId = initData.generationId;
-              if (!jobAdded) {
-                jobAdded = true;
-                addJob({
-                  promptId: jobPromptId,
-                  generationId: jobGenerationId,
-                  mediaType: 'video',
-                  promptSummary,
-                  startedAt: submitTime,
-                  runningSince: null,
-                  progress: null,
-                  status: 'queued',
-                });
-                requestPermissionIfNeeded();
-              }
-            } else if (currentEvt === 'progress') {
-              const pd = JSON.parse(dataStr) as { value: number; max: number };
-              if (jobPromptId) updateProgress(jobPromptId, { current: pd.value, total: pd.max });
-            } else if (currentEvt === 'completing') {
-              if (jobPromptId) setCompleting(jobPromptId);
-            } else if (currentEvt === 'complete') {
-              const vr = JSON.parse(dataStr) as VideoResult;
-              setVideoResult(vr);
-              if (jobPromptId) completeJob(jobPromptId, vr.id);
-              onGenerated();
-              reader.cancel();
-              streamDone = true;
-              break;
-            } else if (currentEvt === 'error') {
-              const er = JSON.parse(dataStr) as { message: string };
-              if (jobPromptId) {
-                failJob(jobPromptId, er.message);
-              } else {
-                setSubmitError(er.message);
-              }
-              reader.cancel();
-              streamDone = true;
-              break;
-            }
-            currentEvt = '';
-          }
+        try {
+          const errBody = await res.json() as { error: string };
+          setSubmitError(errBody.error);
+        } catch {
+          setSubmitError(`HTTP ${res.status}`);
         }
+        return;
       }
-    } catch (err) {
-      setSubmitError(String(err));
+
+      if (!res.body) {
+        setSubmitError('No response stream');
+        return;
+      }
+
+      // Process this take's SSE stream in the background — don't block the submission loop
+      const reader = res.body.getReader();
+
+      void (async () => {
+        const dec = new TextDecoder();
+        let lineBuf = '';
+        let currentEvt = '';
+        let streamDone = false;
+        let jobPromptId = '';
+        let jobAdded = false;
+
+        try {
+          while (!streamDone) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            lineBuf += dec.decode(value, { stream: true });
+            const lines = lineBuf.split('\n');
+            lineBuf = lines.pop() ?? '';
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                currentEvt = line.slice(7).trim();
+              } else if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                if (currentEvt === 'init') {
+                  const initData = JSON.parse(dataStr) as { promptId: string; generationId: string };
+                  jobPromptId = initData.promptId;
+                  if (!jobAdded) {
+                    jobAdded = true;
+                    addJob({
+                      promptId: jobPromptId,
+                      generationId: initData.generationId,
+                      mediaType: 'video',
+                      promptSummary,
+                      startedAt: submitTime,
+                      runningSince: null,
+                      progress: null,
+                      status: 'queued',
+                    });
+                  }
+                } else if (currentEvt === 'progress') {
+                  const pd = JSON.parse(dataStr) as { value: number; max: number };
+                  if (jobPromptId) updateProgress(jobPromptId, { current: pd.value, total: pd.max });
+                } else if (currentEvt === 'completing') {
+                  if (jobPromptId) setCompleting(jobPromptId);
+                } else if (currentEvt === 'complete') {
+                  const vr = JSON.parse(dataStr) as VideoResult;
+                  setVideoResult(vr);
+                  if (jobPromptId) completeJob(jobPromptId, vr.id);
+                  onGenerated();
+                  reader.cancel();
+                  streamDone = true;
+                  break;
+                } else if (currentEvt === 'error') {
+                  const er = JSON.parse(dataStr) as { message: string };
+                  if (jobPromptId) {
+                    failJob(jobPromptId, er.message);
+                  } else {
+                    setSubmitError(er.message);
+                  }
+                  reader.cancel();
+                  streamDone = true;
+                  break;
+                }
+                currentEvt = '';
+              }
+            }
+          }
+        } catch {
+          if (jobPromptId) failJob(jobPromptId, 'SSE connection lost');
+        }
+      })();
     }
   }
 
@@ -1607,7 +1635,7 @@ export default function Studio({
                          disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
                          text-white shadow-lg shadow-violet-900/40"
             >
-              Generate Video
+              {videoBatchSize > 1 ? `Generate Video ×${videoBatchSize}` : 'Generate Video'}
             </button>
           </div>
         )}
@@ -1915,6 +1943,14 @@ export default function Studio({
                     </div>
                   )}
                 </div>
+                <ParamSlider
+                  label="Batch"
+                  value={videoBatchSize}
+                  min={1}
+                  max={4}
+                  step={1}
+                  onChange={setVideoBatchSize}
+                />
               </div>
 
               <div className="border-t border-zinc-800" />

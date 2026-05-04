@@ -49,5 +49,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Configuration to .env (split output dirs, document all vars) — `batch/env-refactor` (PR #41)
 - [x] Generate button debounce (tablet double-tap guard) — `batch/generate-button-debounce` (PR #42)
 - [~] Image batch as N independent jobs (visually-distinct outputs) — `batch/image-batch-independence` (PR #44)
-- [ ] Video generation batch support — see prompts/video-batch-support.md
+- [~] Video generation batch support — `batch/video-batch-support` (PR #45)
 - [ ] Remix sets batch size to 4 — see prompts/remix-default-batch-4.md

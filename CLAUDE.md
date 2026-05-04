@@ -641,6 +641,7 @@ A pill toggle at the top of Studio switches between **Image** and **Video** mode
 | Steps slider | 20 | 4–40, step 2 (even-only) |
 | CFG slider | 3.5 | 1.0–10.0, step 0.1 |
 | Seed | -1 (random) | shared with image mode |
+| Batch | 1 | 1–4, step 1 — produces N independent parallel jobs in the queue tray, identical to image-mode batch behaviour |
 
 The settings drawer is mode-aware: opening it in image mode shows checkpoint/LoRA/generation/sampling controls; opening it in video mode shows resolution/frames/steps/cfg/seed controls. Switching modes while the drawer is open immediately shows the new mode's controls. Closing and reopening preserves all entered values (state lives in the parent form, not the drawer).
 
@@ -656,7 +657,7 @@ Image-mode-only controls are hidden in Video mode: checkpoint selector, LoRA sta
 
 ### Queue UX (Phase 1.2b)
 
-**Concurrency model.** Submitting a generation never locks the form. Each submit immediately adds a job to the in-memory `ActiveJob` queue (client-side, `QueueContext`) and returns. Multiple image, video, or mixed jobs can run concurrently. The queue is single-user and has no cap.
+**Concurrency model.** Submitting a generation never locks the form. Each submit immediately adds a job to the in-memory `ActiveJob` queue (client-side, `QueueContext`) and returns. Multiple image, video, or mixed jobs can run concurrently. The queue is single-user and has no cap. Video batch submissions (batchSize 1–4) behave identically to image-mode batch: Studio loops N times, each take gets its own independent POST to `/api/generate-video`, its own SSE stream, its own queue-tray entry, and its own `Generation` row — the starting frame (if i2v) is resolved once before the loop and reused across all takes.
 
 **Job status lifecycle.** Jobs are registered with status `'queued'` and transition to `'running'` when the first WS `executing` event arrives from ComfyUI for that prompt (meaning ComfyUI dequeued it and started GPU work). The full status union is: `'queued' | 'running' | 'completing' | 'done' | 'error'`. The tray distinguishes queued (no elapsed counter, no progress bar, shows "Queued" or "Queued (N of M)") from running (live progress, elapsed since execution start). Elapsed is tracked from `runningSince` (execution start), not `startedAt` (submission time), so a job that sat queued for 5 minutes shows elapsed starting from 0 when execution begins. Stitch jobs (local ffmpeg) skip the `'queued'` state and start `'running'` immediately.
 
