@@ -899,6 +899,7 @@ export default function Studio({
       referenceImages: faceReferences.length > 0
         ? { images: faceReferences, strength: faceStrength }
         : undefined,
+      projectId: projectContext?.projectId ?? undefined,
     };
 
     // Request notification permission on first submit (once per batch)

@@ -458,6 +458,17 @@ class ComfyWSManager {
         ? (params.loras as unknown as Prisma.InputJsonValue)
         : undefined;
 
+      // Compute position for project clips (sequential across the batch; ComfyUI
+      // finalizes one job at a time, so each aggregate query sees prior rows committed)
+      let position: number | undefined;
+      if (params.projectId) {
+        const maxResult = await prisma.generation.aggregate({
+          where: { projectId: params.projectId },
+          _max: { position: true },
+        });
+        position = (maxResult._max.position ?? 0) + 1;
+      }
+
       const records = await Promise.all(
         imageBuffers.map(async (buf) => {
           const ext = 'png'; // SaveImageWebsocket always emits PNG; only PNG frames reach imageBuffers
@@ -487,6 +498,7 @@ class ComfyWSManager {
               scheduler: params.scheduler,
               highResFix: params.highResFix ?? false,
               mediaType: 'image',
+              ...(params.projectId ? { projectId: params.projectId, position } : {}),
             },
           });
 
