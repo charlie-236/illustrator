@@ -138,6 +138,8 @@ Browser → POST /api/generate (SSE stream)
 
 `global.__comfyWSManager` holds a single `ComfyWSManager` instance that persists across requests. The `global.*` pattern prevents hot-reload from creating duplicate connections in dev.
 
+`ComfyWSManager` maintains a discriminated union `Job = ImageJob | VideoJob | StitchJob`. Cross-type operations route through private helpers (`getJobGenerationId(job)`, `getJobInitialStatus(job)`, `getJobTimeoutMinutes(job)`, `getJobProjectId(job)`, `cleanupJob(job)`, `dispatchFinalize(job)`, `applyExecutedOutput(job, output)`, `performAbortCleanup(job)`, `isStitchJob(job)`, `addJob(job, timeoutMs)`) rather than inline `mediaType` switches at call sites. The public API surface — `registerJob`, `registerVideoJob`, `registerStitchJob`, `getActiveJobs`, `removeSubscriber`, `abortJob`, the finalize methods — is unchanged.
+
 - Connects to ComfyUI WS with a stable `clientId` (UUID generated once at startup). The `client_id` is passed in every `/prompt` POST so ComfyUI routes events back to this client only.
 - Reconnects automatically after 4 s on drop; increments `reconnectAttempts`.
 - On reconnect (`reconnectAttempts > 0`), calls `flushJobsOnReconnect()` (async, fire-and-forget). For each pending job it fetches `/history/{promptId}` from ComfyUI (5 s timeout): `status_str === 'success'` → the prompt finished but the binary frame was lost into the dead socket — send a "completed but image lost, please retry" error SSE; `status_str === 'error'` → send a "failed on GPU server" error SSE; anything else (empty response, still running, fetch failure) → **leave the job in place** so events can resume on the new connection. A 10-minute per-job watchdog (`expireJob`) reaps any job that goes permanently silent.
@@ -929,7 +931,7 @@ On success: updates the `Generation` row with `width/height/frames/fps`, then ca
 
 ### `ComfyWSManager` additions (Phase 3)
 
-New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `registerStitchJob()`, `setStitchProcess()`, `updateStitchProgress()`, `finalizeStitchSuccess()` (no-op if already finalized), `finalizeStitchError()` (no-op if already aborted). `abortJob()` for stitch jobs kills the child process and deletes the partial output — no `/interrupt` call to ComfyUI.
+New `StitchJob` interface alongside `ImageJob` and `VideoJob`. Public methods: `registerStitchJob()`, `setStitchProcess()`, `updateStitchProgress()`, `finalizeStitchSuccess()` (no-op if already finalized), `finalizeStitchError()` (no-op if already aborted). `abortJob()` for stitch jobs kills the child process and deletes the partial output — no `/interrupt` call to ComfyUI. All cross-type dispatch in the manager is consolidated into private helpers; see the Global WebSocket singleton section above.
 
 ### UI
 
