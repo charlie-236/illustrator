@@ -449,7 +449,7 @@ src/
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
     civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/
     civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel; type now includes 'embedding'
-    registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; calls extractCategoryFromTags() in all three branches (lora, checkpoint, embedding)
+    registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; calls extractCategoryFromTags() in all three branches (lora, checkpoint, embedding). `extractCategoryFromTags` and `detectWanExpertScope` are called from the relevant branches; both consume CivitAI metadata and return null when no positive signal is present, leaving schema defaults intact.
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
     useModelLists.ts    React hook: shared fetcher for /api/models + /api/checkpoint-config + /api/lora-config + /api/embedding-config; consumed by ModelSelect and ModelConfig; exposes loraCategories, checkpointCategories, and embeddingCategories maps
   types/
@@ -469,7 +469,7 @@ src/
     ImageModal.tsx      bottom-sheet modal with full image + all metadata fields; shows Project link for video clips; shows Stitched-from-project + source clip count for stitched videos
     Projects.tsx        Projects tab — 2-col project card grid, New Project modal
     ProjectDetail.tsx   Project detail view — inline-editable header, flex-wrap DnD clip strip + stitched output tiles (@dnd-kit, rectSortingStrategy), 4-way filter, Settings modal, Stitch button + StitchModal
-    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax; Checkpoints and LoRAs sub-tabs have a free-text category field (heuristic-populated at ingest, user-editable)
+    ModelConfig.tsx     Model Settings tab; sub-tabs Checkpoints / LoRAs / Embeddings / Add Models; saves trigger onSaved (increments modelConfigVersion); Embeddings sub-tab has copy-to-clipboard for embedding:name usage syntax; Checkpoints and LoRAs sub-tabs have a free-text category field (heuristic-populated at ingest, user-editable); LoRA editor includes Wan 2.2 expert-scope checkboxes (visible only for Wan LoRAs)
     IngestPanel.tsx     CivitAI URL paste form for single + batch model ingestion (Add Models sub-tab)
     ServerBay.tsx       Admin tab; Illustrator Stack card with Start All/Stop All (sequential with progress) + individual service rows + Check Status
     GalleryPicker.tsx   Modal for selecting a gallery image as I2V starting frame; images-only filter (mediaType=image), infinite scroll, no delete/remix/favorite actions
@@ -650,6 +650,8 @@ When `lightning: true` is sent to `/api/generate-video`, the route silently over
 ### Wan LoRA support
 
 Wan 2.2 LoRAs from CivitAI use the same ingest pipeline (with the same 6-byte hex filename obfuscation) as SD LoRAs but require two booleans (`appliesToHigh`, `appliesToLow`) on `LoraConfig`, indicating which UNet expert(s) they affect. Most Wan LoRAs apply to both (both default to `true`). Single-expert LoRAs can be adjusted via the Models tab after ingest.
+
+**Expert scope.** Wan 2.2 has two transformer experts (high-noise, low-noise). Paired CivitAI LoRAs ship as two files, one per expert. `LoraConfig.appliesToHigh` and `appliesToLow` (both boolean, schema default true) control which transformer chain each LoRA injects into. Auto-detected at ingest from the CivitAI filename pattern (`high_noise` / `low_noise`); user-editable in the Models tab LoRA editor for non-paired LoRAs or detection misses. The workflow builder (`applyUserLoras` in `wan22-workflow.ts`) creates one `LoraLoaderModelOnly` node per active flag — a paired-correctly stack of N pairs produces N×2 nodes total (one per chain).
 
 The video form's LoRA stack injects `LoraLoaderModelOnly` nodes per LoRA per applicable expert, chained between UNETLoader (or Lightning's loader at nodes 100/101) and ModelSamplingSD3 (nodes 54/55). User LoRA nodes start at ID 200; Lightning reserves 100/101. When Lightning is active, user LoRAs chain after Lightning LoRAs: the full sequence is UNETLoader → Lightning LoRA (100/101) → user LoRAs (200+) → ModelSamplingSD3. Lightning + user LoRA combinations are flagged "experimental" in the UI since Lightning was distilled against the bare base model, not against arbitrary LoRA stacks.
 

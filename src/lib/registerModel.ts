@@ -7,6 +7,7 @@ export interface CivitAIMetadata {
   baseModel?: string;
   description?: string | null;
   tags?: string[];
+  files?: Array<{ name?: string }>;
   model?: {
     name?: string;
     description?: string | null;
@@ -50,6 +51,31 @@ function normalizeBaseModel(raw: string): string {
   const s = raw.trim();
   if (/wan\s*(?:video\s*)?2\.?2/i.test(s)) return 'Wan 2.2';
   return s;
+}
+
+/**
+ * Detect whether a Wan 2.2 LoRA file targets the high-noise or low-noise expert
+ * based on its CivitAI filename and version name.
+ *
+ * Returns null when no clear signal is present — caller should keep schema
+ * defaults (both true) so non-paired LoRAs retain "applies to both" behavior.
+ */
+function detectWanExpertScope(meta: CivitAIMetadata): {
+  appliesToHigh: boolean;
+  appliesToLow: boolean;
+} | null {
+  const haystack = [
+    meta.files?.[0]?.name ?? '',
+    meta.name ?? '',
+  ].join(' ').toLowerCase();
+
+  const highMatch = /high[\s_-]?noise/.test(haystack);
+  const lowMatch  = /low[\s_-]?noise/.test(haystack);
+
+  if (highMatch && !lowMatch) return { appliesToHigh: true,  appliesToLow: false };
+  if (lowMatch  && !highMatch) return { appliesToHigh: false, appliesToLow: true };
+
+  return null;
 }
 
 function extractCategoryFromTags(meta: CivitAIMetadata): string | null {
@@ -104,6 +130,7 @@ export async function registerModel(
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else if (type === 'lora') {
       const category = extractCategoryFromTags(civitaiMetadata);
+      const expertScope = detectWanExpertScope(civitaiMetadata);
       const record = await prisma.loraConfig.upsert({
         where: { loraName: filename },
         create: {
@@ -114,8 +141,17 @@ export async function registerModel(
           category,
           description,
           url,
+          ...(expertScope ?? {}),
         },
-        update: { friendlyName, triggerWords, ...(baseModel ? { baseModel } : {}), ...(category ? { category } : {}), description, url },
+        update: {
+          friendlyName,
+          triggerWords,
+          ...(baseModel ? { baseModel } : {}),
+          ...(category ? { category } : {}),
+          description,
+          url,
+          ...(expertScope ?? {}),
+        },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else {

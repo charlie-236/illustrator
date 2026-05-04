@@ -33,6 +33,8 @@ const LORA_BLANK = {
   category: '',
   description: '',
   url: '' as string | null | undefined,
+  appliesToHigh: true,
+  appliesToLow: true,
 };
 
 const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3', 'Big Love', 'Wan 2.2'];
@@ -279,6 +281,8 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               category: config.category ?? '',
               description: config.description ?? '',
               url: config.url,
+              appliesToHigh: config.appliesToHigh ?? true,
+              appliesToLow: config.appliesToLow ?? true,
             }
           : { ...LORA_BLANK });
       })
@@ -958,6 +962,48 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
                 ))}
               </select>
             </div>
+
+            {loraForm.baseModel === 'Wan 2.2' && (
+              <div>
+                <label className="label">Wan 2.2 expert scope</label>
+                <p className="text-xs text-zinc-400 mb-2">
+                  Wan 2.2 has two transformer experts (high-noise and low-noise). Paired CivitAI
+                  LoRAs ship as two files, one per expert — each should apply to only its
+                  target. General-purpose LoRAs apply to both.
+                </p>
+                <div className="space-y-2">
+                  <label className="flex items-start gap-3 p-3 rounded-xl border border-zinc-700 hover:border-zinc-600 cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={loraForm.appliesToHigh}
+                      onChange={(e) => loraField('appliesToHigh', e.target.checked)}
+                      className="mt-0.5 accent-violet-500 flex-shrink-0"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-zinc-200">Applies to high-noise expert</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">Inject into the high-noise transformer chain</p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-3 p-3 rounded-xl border border-zinc-700 hover:border-zinc-600 cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={loraForm.appliesToLow}
+                      onChange={(e) => loraField('appliesToLow', e.target.checked)}
+                      className="mt-0.5 accent-violet-500 flex-shrink-0"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-zinc-200">Applies to low-noise expert</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">Inject into the low-noise transformer chain</p>
+                    </div>
+                  </label>
+                </div>
+                {!loraForm.appliesToHigh && !loraForm.appliesToLow && (
+                  <p className="text-xs text-amber-400/80 mt-2">
+                    Both unchecked — this LoRA will not be injected into any chain.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="label">Category</label>
