@@ -57,7 +57,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [~] Unify gallery and project-detail filters to four-way (all/images/clips/videos) — `batch/unify-gallery-project-filters` (PR #50)
 - [~] SSE complete-event shape parity (video/stitch emit full GenerationRecord) — `batch/sse-complete-event-parity` (PR #51)
 - [~] Studio video batch result-grid (mirror image-mode) — `batch/studio-video-batch-result-grid` (PR #52)
-- [ ] Video remix carries Lightning state and LoRA stack — see prompts/video-remix-lightning-loras.md
+- [~] Video remix carries Lightning state and LoRA stack — `batch/video-remix-lightning-loras` (PR #53)
 - [ ] Project context entry has image and video options — see prompts/project-context-entry-image-video.md
 - [ ] Category field on LoRAs and Checkpoints (parity with Embeddings) — see prompts/lora-checkpoint-category.md
 - [ ] Migrate image-mode generation to one-call SSE — see prompts/image-one-call-sse.md
