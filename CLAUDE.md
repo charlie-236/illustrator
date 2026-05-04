@@ -186,6 +186,8 @@ model Generation {
   sampler      String
   scheduler    String
   highResFix   Boolean
+  videoLorasJson Json?    // WanLoraSpec[] for video; null for image and legacy
+  lightning      Boolean? // true for Wan 2.2 Lightning; null for image and legacy
   createdAt    DateTime @default(now())
   @@index([createdAt(sort: Desc)])
 }
@@ -602,6 +604,8 @@ Base model canonical string: `'Wan 2.2'` (normalised from CivitAI's various spel
 The LoRA picker filters by base model: video mode shows only LoRAs with `baseModel === 'Wan 2.2'`; image mode shows all LoRAs (matches sorted to top). The Models tab shows all LoRAs unfiltered.
 
 Project `defaultVideoLoras` stores a JSON-encoded `WanLoraSpec[]` in the `Project` DB row. New clips generated in a project pre-fill the Studio video LoRA stack from this default. The stored `WanLoraSpec` includes both `loraName` (obfuscated) and `friendlyName` (human-readable); the `friendlyName` can become stale if the LoRA is renamed in the Models tab, but the `loraName` remains correct for ComfyUI resolution.
+
+Video clips persist their LoRA stack and Lightning state on the `Generation` row (`videoLorasJson` and `lightning` columns). Remix-from-gallery reconstructs both into Studio's video form, matching image-mode's full-parameter remix. Legacy rows (pre-batch) have null for both and degrade gracefully on remix — Lightning OFF, empty LoRA stack — preserving today's behavior.
 
 ### `/api/generate-video` endpoint
 

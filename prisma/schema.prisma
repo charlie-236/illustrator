@@ -36,6 +36,8 @@ model Generation {
   parentProjectId  String?                      // source project for stitched outputs
   parentProject    Project? @relation("StitchedFromProject", fields: [parentProjectId], references: [id], onDelete: SetNull)
   stitchedClipIds  String?                      // JSON array of source generation IDs
+  videoLorasJson   Json?                        // WanLoraSpec[] for video; null for image and legacy
+  lightning        Boolean?                     // true for Wan 2.2 Lightning; null for image and legacy
   createdAt        DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
