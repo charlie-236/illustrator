@@ -63,6 +63,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Migrate image-mode generation to one-call SSE — `batch/image-one-call-sse` (PR #56)
 - [x] Consolidate per-type switches in comfyws.ts — `batch/comfyws-job-refactor` (PR #57)
 - [~] Fix StitchModal complete-event handler (post-PR-#51 cleanup) — `batch/fix-stitch-modal-complete-handler` (PR #59)
-- [ ] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — see prompts/claude-md-schema-category-docs.md
+- [~] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — `batch/claude-md-schema-category-docs` (PR #60)
 - [ ] Unify dirForItem with dirForGeneration (M3 cleanup) — see prompts/unify-dirforitem.md
 - [ ] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
