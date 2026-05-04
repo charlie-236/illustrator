@@ -51,4 +51,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Image batch as N independent jobs (visually-distinct outputs) — `batch/image-batch-independence` (PR #44)
 - [x] Video generation batch support — `batch/video-batch-support` (PR #45)
 - [x] Remix sets batch size to 4 — `batch/remix-default-batch-4` (PR #46)
-- [~] Image generations inherit project context — `batch/image-project-inheritance` (PR #47)
+- [x] Image generations inherit project context — `batch/image-project-inheritance` (PR #47)
+- [ ] Fix seed-zero bug in video batch generation — see prompts/fix-video-batch-seed-zero.md
