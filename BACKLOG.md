@@ -54,11 +54,14 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Image generations inherit project context — `batch/image-project-inheritance` (PR #47)
 - [x] Fix seed-zero bug in video batch generation — `batch/fix-video-batch-seed-zero` (PR #48)
 - [x] Fix project stitch reading source clips from STITCH_OUTPUT_DIR instead of VIDEO_OUTPUT_DIR — `batch/fix-stitch-source-clip-dir` (PR #49)
-- [~] Unify gallery and project-detail filters to four-way (all/images/clips/videos) — `batch/unify-gallery-project-filters` (PR #50)
-- [~] SSE complete-event shape parity (video/stitch emit full GenerationRecord) — `batch/sse-complete-event-parity` (PR #51)
-- [~] Studio video batch result-grid (mirror image-mode) — `batch/studio-video-batch-result-grid` (PR #52)
-- [~] Video remix carries Lightning state and LoRA stack — `batch/video-remix-lightning-loras` (PR #53)
-- [~] Project context entry has image and video options — `batch/project-context-entry-image-video` (PR #54)
-- [~] Category field on LoRAs and Checkpoints (parity with Embeddings) — `batch/lora-checkpoint-category` (PR #55)
-- [~] Migrate image-mode generation to one-call SSE — `batch/image-one-call-sse` (PR #56)
-- [~] Consolidate per-type switches in comfyws.ts — `batch/comfyws-job-refactor` (PR #57)
+- [x] Unify gallery and project-detail filters to four-way (all/images/clips/videos) — `batch/unify-gallery-project-filters` (PR #50)
+- [x] SSE complete-event shape parity (video/stitch emit full GenerationRecord) — `batch/sse-complete-event-parity` (PR #51)
+- [x] Studio video batch result-grid (mirror image-mode) — `batch/studio-video-batch-result-grid` (PR #52)
+- [x] Video remix carries Lightning state and LoRA stack — `batch/video-remix-lightning-loras` (PR #53)
+- [x] Project context entry has image and video options — `batch/project-context-entry-image-video` (PR #54)
+- [x] Category field on LoRAs and Checkpoints (parity with Embeddings) — `batch/lora-checkpoint-category` (PR #55)
+- [x] Migrate image-mode generation to one-call SSE — `batch/image-one-call-sse` (PR #56)
+- [x] Consolidate per-type switches in comfyws.ts — `batch/comfyws-job-refactor` (PR #57)
+- [ ] Fix StitchModal complete-event handler (post-PR-#51 cleanup) — see prompts/fix-stitch-modal-complete-handler.md
+- [ ] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — see prompts/claude-md-schema-category-docs.md
+- [ ] Unify dirForItem with dirForGeneration (M3 cleanup) — see prompts/unify-dirforitem.md
