@@ -26,6 +26,7 @@ interface VideoRequest {
   projectId?: string;
   lightning?: boolean;
   loras?: WanLoraSpec[];
+  batchSize?: number;
 }
 
 const SSE_HEADERS = {
@@ -109,6 +110,12 @@ export async function POST(req: NextRequest) {
     if (!project) {
       return new Response(JSON.stringify({ error: 'projectId does not reference an existing project' }), { status: 400 });
     }
+  }
+
+  // Validate batchSize if provided (Studio sends 1 per request; this enforces the API contract)
+  const batchSize = body.batchSize ?? 1;
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 4) {
+    return new Response(JSON.stringify({ error: 'batchSize must be an integer between 1 and 4 inclusive' }), { status: 400 });
   }
 
   // ─── prepare ──────────────────────────────────────────────────────────────
