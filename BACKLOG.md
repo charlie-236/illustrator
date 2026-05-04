@@ -67,4 +67,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Unify dirForItem with dirForGeneration (M3 cleanup) — see prompts/unify-dirforitem.md
 - [x] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
 - [~] Phase 5a — Storyboard data model + LLM generation — `batch/phase-5a-storyboard` (PR #63)
-- [ ] Phase 5b — Storyboard scene execution + editing — see prompts/phase-5b-storyboard-execution.md
+- [~] Phase 5b — Storyboard scene execution + editing — `batch/phase-5b-storyboard-execution` (PR #64)
