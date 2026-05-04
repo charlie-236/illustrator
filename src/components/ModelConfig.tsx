@@ -12,6 +12,7 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 const CKPT_BLANK = {
   friendlyName: '',
   baseModel: '',
+  category: '',
   defaultWidth: null as number | null,
   defaultHeight: null as number | null,
   defaultPositivePrompt: '',
@@ -29,6 +30,7 @@ const LORA_BLANK = {
   friendlyName: '',
   triggerWords: '',
   baseModel: '',
+  category: '',
   description: '',
   url: '' as string | null | undefined,
 };
@@ -238,6 +240,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
           ? {
               friendlyName: config.friendlyName,
               baseModel: config.baseModel ?? '',
+              category: config.category ?? '',
               defaultWidth: config.defaultWidth,
               defaultHeight: config.defaultHeight,
               defaultPositivePrompt: config.defaultPositivePrompt,
@@ -273,6 +276,7 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               friendlyName: config.friendlyName,
               triggerWords: config.triggerWords,
               baseModel: config.baseModel,
+              category: config.category ?? '',
               description: config.description ?? '',
               url: config.url,
             }
@@ -528,6 +532,17 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               <p className="text-xs text-zinc-500 mt-1">
                 Used to match compatible LoRAs and to flag stylized checkpoints in the Reference panel.
               </p>
+            </div>
+
+            <div>
+              <label className="label">Category</label>
+              <input
+                type="text"
+                value={ckptForm.category ?? ''}
+                onChange={(e) => ckptField('category', e.target.value)}
+                placeholder="negative, style, character, concept…"
+                className="input-base min-h-12"
+              />
             </div>
 
             <div>
@@ -942,6 +957,17 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
                   <option key={o} value={o}>{o || '— Not specified —'}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className="label">Category</label>
+              <input
+                type="text"
+                value={loraForm.category ?? ''}
+                onChange={(e) => loraField('category', e.target.value)}
+                placeholder="negative, style, character, concept…"
+                className="input-base min-h-12"
+              />
             </div>
 
             <div>

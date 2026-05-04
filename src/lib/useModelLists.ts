@@ -9,9 +9,11 @@ export interface ModelLists {
   embeddings: string[];
   checkpointNames: Record<string, string>;
   checkpointBaseModels: Record<string, string>;
+  checkpointCategories: Record<string, string>;
   loraNames: Record<string, string>;
   loraTriggerWords: Record<string, string>;
   loraBaseModels: Record<string, string>;
+  loraCategories: Record<string, string>;
   loraAppliesToHigh: Record<string, boolean>;
   loraAppliesToLow: Record<string, boolean>;
   embeddingNames: Record<string, string>;
@@ -26,9 +28,11 @@ const EMPTY: ModelLists = {
   embeddings: [],
   checkpointNames: {},
   checkpointBaseModels: {},
+  checkpointCategories: {},
   loraNames: {},
   loraTriggerWords: {},
   loraBaseModels: {},
+  loraCategories: {},
   loraAppliesToHigh: {},
   loraAppliesToLow: {},
   embeddingNames: {},
@@ -59,19 +63,23 @@ export function useModelLists(refreshToken?: number): {
       .then(([modelsData, ckptConfigs, loraConfigs, embeddingConfigs]) => {
         const checkpointNames: Record<string, string> = {};
         const checkpointBaseModels: Record<string, string> = {};
+        const checkpointCategories: Record<string, string> = {};
         for (const c of ckptConfigs) {
           if (c.friendlyName) checkpointNames[c.checkpointName] = c.friendlyName;
           if (c.baseModel) checkpointBaseModels[c.checkpointName] = c.baseModel;
+          checkpointCategories[c.checkpointName] = c.category ?? '';
         }
         const loraNames: Record<string, string> = {};
         const loraTriggerWords: Record<string, string> = {};
         const loraBaseModels: Record<string, string> = {};
+        const loraCategories: Record<string, string> = {};
         const loraAppliesToHigh: Record<string, boolean> = {};
         const loraAppliesToLow: Record<string, boolean> = {};
         for (const l of loraConfigs) {
           if (l.friendlyName) loraNames[l.loraName] = l.friendlyName;
           if (l.triggerWords?.trim()) loraTriggerWords[l.loraName] = l.triggerWords;
           if (l.baseModel?.trim()) loraBaseModels[l.loraName] = l.baseModel;
+          loraCategories[l.loraName] = l.category ?? '';
           loraAppliesToHigh[l.loraName] = l.appliesToHigh ?? true;
           loraAppliesToLow[l.loraName] = l.appliesToLow ?? true;
         }
@@ -93,9 +101,11 @@ export function useModelLists(refreshToken?: number): {
           embeddings: modelsData.embeddings ?? [],
           checkpointNames,
           checkpointBaseModels,
+          checkpointCategories,
           loraNames,
           loraTriggerWords,
           loraBaseModels,
+          loraCategories,
           loraAppliesToHigh,
           loraAppliesToLow,
           embeddingNames,

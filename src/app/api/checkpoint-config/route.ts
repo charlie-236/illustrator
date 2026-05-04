@@ -35,6 +35,7 @@ export async function PUT(req: NextRequest) {
     checkpointName: string;
     friendlyName: string;
     baseModel?: string;
+    category?: string;
     defaultWidth: number | null;
     defaultHeight: number | null;
     defaultPositivePrompt: string;
@@ -53,7 +54,7 @@ export async function PUT(req: NextRequest) {
   }
 
   const {
-    checkpointName, friendlyName, baseModel,
+    checkpointName, friendlyName, baseModel, category,
     defaultWidth, defaultHeight, defaultPositivePrompt, defaultNegativePrompt, description,
     defaultSteps, defaultCfg, defaultSampler, defaultScheduler, defaultHrf,
   } = body;
@@ -97,6 +98,7 @@ export async function PUT(req: NextRequest) {
   const data = {
     friendlyName: friendlyName ?? '',
     baseModel: baseModel ?? '',
+    category: category?.trim() || null,
     defaultWidth,
     defaultHeight,
     defaultPositivePrompt,

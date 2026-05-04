@@ -32,6 +32,7 @@ export async function PUT(req: NextRequest) {
     friendlyName: string;
     triggerWords: string;
     baseModel: string;
+    category?: string;
     description?: string;
     appliesToHigh?: boolean;
     appliesToLow?: boolean;
@@ -42,13 +43,14 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { loraName, friendlyName, triggerWords, baseModel, description } = body;
+  const { loraName, friendlyName, triggerWords, baseModel, category, description } = body;
   if (!loraName) return NextResponse.json({ error: 'loraName required' }, { status: 400 });
 
   const shared = {
     friendlyName: friendlyName ?? '',
     triggerWords: triggerWords ?? '',
     baseModel: baseModel ?? '',
+    category: category?.trim() || null,
     description: description?.trim() || null,
     ...(body.appliesToHigh !== undefined && { appliesToHigh: Boolean(body.appliesToHigh) }),
     ...(body.appliesToLow !== undefined && { appliesToLow: Boolean(body.appliesToLow) }),

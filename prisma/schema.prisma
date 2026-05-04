@@ -67,6 +67,7 @@ model CheckpointConfig {
   checkpointName        String   @unique
   friendlyName          String   @default("")
   baseModel             String   @default("")
+  category              String?
   defaultWidth          Int?
   defaultHeight         Int?
   defaultPositivePrompt String   @default("")
@@ -88,6 +89,7 @@ model LoraConfig {
   friendlyName  String   @default("")
   triggerWords  String   @default("")
   baseModel     String   @default("")
+  category      String?
   description   String?
   url           String?
   updatedAt     DateTime @updatedAt

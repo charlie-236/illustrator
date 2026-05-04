@@ -84,12 +84,14 @@ export async function registerModel(
 
   try {
     if (type === 'checkpoint') {
+      const category = extractCategoryFromTags(civitaiMetadata);
       const record = await prisma.checkpointConfig.upsert({
         where: { checkpointName: filename },
         create: {
           checkpointName: filename,
           friendlyName,
           baseModel,
+          category,
           defaultWidth: 1024,
           defaultHeight: 1024,
           defaultPositivePrompt: '',
@@ -97,10 +99,11 @@ export async function registerModel(
           description,
           url,
         },
-        update: { friendlyName, ...(baseModel ? { baseModel } : {}), description, url },
+        update: { friendlyName, ...(baseModel ? { baseModel } : {}), ...(category ? { category } : {}), description, url },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else if (type === 'lora') {
+      const category = extractCategoryFromTags(civitaiMetadata);
       const record = await prisma.loraConfig.upsert({
         where: { loraName: filename },
         create: {
@@ -108,10 +111,11 @@ export async function registerModel(
           friendlyName,
           triggerWords,
           baseModel,
+          category,
           description,
           url,
         },
-        update: { friendlyName, triggerWords, baseModel, description, url },
+        update: { friendlyName, triggerWords, ...(baseModel ? { baseModel } : {}), ...(category ? { category } : {}), description, url },
       });
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else {
