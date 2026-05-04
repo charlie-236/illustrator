@@ -500,7 +500,7 @@ export default function Studio({
   // Apply image remix params from Gallery (remix is always project-less)
   useEffect(() => {
     if (!remixParams) return;
-    setP({ ...remixParams, batchSize: remixParams.batchSize ?? 1 });
+    setP({ ...remixParams, batchSize: 4 });
     // Remix clears project context
     setProjectContext(null);
     saveSessionProjectContext(null);
@@ -535,6 +535,7 @@ export default function Studio({
       steps: videoRemixParams.steps,
       cfg: videoRemixParams.cfg,
     });
+    setVideoBatchSize(4);
     setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt }));
     setUseStartingFrame(false);
     setStartingFrameRecord(null);
