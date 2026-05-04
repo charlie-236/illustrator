@@ -3,19 +3,12 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { prisma } from '@/lib/prisma';
+import { dirForGeneration } from '@/lib/outputDirs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const execFileAsync = promisify(execFile);
-
-// Pick the output directory based on what kind of file it is.
-// Falls back gracefully when env vars point to the same directory.
-function dirForGeneration(g: { mediaType: string; isStitched: boolean }): string {
-  if (g.mediaType === 'image') return process.env.IMAGE_OUTPUT_DIR ?? '';
-  if (g.isStitched) return process.env.STITCH_OUTPUT_DIR ?? process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
-  return process.env.VIDEO_OUTPUT_DIR ?? process.env.IMAGE_OUTPUT_DIR ?? '';
-}
 
 export async function POST(req: NextRequest) {
   let body: { generationId: string };

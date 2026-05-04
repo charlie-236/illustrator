@@ -5,6 +5,7 @@ import { unlink } from 'fs/promises';
 import { prisma } from '@/lib/prisma';
 import { getComfyWSManager } from '@/lib/comfyws';
 import { stitchProject } from '@/lib/stitch';
+import { dirForGeneration } from '@/lib/outputDirs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -63,14 +64,14 @@ export async function POST(
   const allVideoClips = await prisma.generation.findMany({
     where: { projectId, mediaType: 'video' },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-    select: { id: true, filePath: true },
+    select: { id: true, filePath: true, mediaType: true, isStitched: true },
   });
 
   const totalVideoCount = allVideoClips.length;
 
   // ─── resolve clip selection ────────────────────────────────────────────────
 
-  let clips: { id: string; filePath: string }[];
+  let clips: { id: string; filePath: string; mediaType: string; isStitched: boolean }[];
 
   if (body.clipIds !== undefined) {
     if (body.clipIds.length < 2) {
@@ -118,7 +119,11 @@ export async function POST(
 
   const clipPaths = clips.map((c) => {
     const filename = c.filePath.replace('/api/images/', '').replace('/generations/', '');
-    return path.join(outputDir, filename);
+    const clipDir = dirForGeneration(c);
+    if (!clipDir) {
+      throw new Error(`Source clip directory env var not configured for clip ${c.id}`);
+    }
+    return path.join(clipDir, filename);
   });
 
   // ─── generate IDs and output path ─────────────────────────────────────────

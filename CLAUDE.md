@@ -909,6 +909,8 @@ SSE events:
 | `complete` | `{ id, filePath, frames, fps, seed, createdAt }` |
 | `error` | `{ message: string }` |
 
+The route reads each source clip from its media-type-appropriate directory via `dirForGeneration` (image → `IMAGE_OUTPUT_DIR`; stitched → `STITCH_OUTPUT_DIR`; otherwise `VIDEO_OUTPUT_DIR`), with `??` fallbacks across the three env vars so co-located output directories degrade gracefully. The output `.mp4` always writes to `STITCH_OUTPUT_DIR`. The shared helper lives in `src/lib/outputDirs.ts` and is also used by `src/app/api/extract-last-frame/route.ts`.
+
 On success: updates the `Generation` row with `width/height/frames/fps`, then calls `manager.finalizeStitchSuccess()`. On error: `unlink(outputPath)` + `prisma.generation.delete()` + `manager.finalizeStitchError()`. Client disconnect (req.signal abort) detaches the SSE subscriber but does NOT kill ffmpeg (refresh survivability). Explicit abort (`DELETE /api/jobs/[promptId]`) calls `abortJob()` → kills the ffmpeg child process via SIGTERM + deletes the partial output file.
 
 ### `ComfyWSManager` additions (Phase 3)
