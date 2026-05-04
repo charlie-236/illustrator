@@ -157,6 +157,8 @@ ComfyUI binary frames carry a format-type word at bytes 4–7 (BE uint32): `2` =
 
 `params.seed === -1` means random. The seed is resolved inside `buildWorkflow()` via `Math.floor(Math.random() * 2**32)` and embedded directly into the KSampler node. `buildWorkflow` returns `{ workflow, resolvedSeed }` — the seed is returned directly from the same scope where it was generated, not extracted from the node graph after the fact. The resolved seed travels: `buildWorkflow()` return value → `/api/generate` response → `stashJobParams()` → `registerJob()` → `prisma.generation.create()`.
 
+**Video seed resolution** mirrors the image-side contract: `params.seed === -1` means random, resolved inside `/api/generate-video` via `Math.floor(Math.random() * 2**32)` and embedded in both `KSamplerAdvanced` nodes (57 and 58) of the Wan 2.2 workflow. Writing to both samplers is defensive — node 58 has `add_noise: "disable"` so the seed is conceptually unused, but the template's literal `0` stays out of the workflow JSON entirely as a result. The resolved seed is emitted in the SSE `init` event as `resolvedSeed` (parity with `/api/generate`'s response field) and persisted to the DB row's `seed` column at finalize time.
+
 ### BigInt serialization
 
 Prisma returns `seed` as `BigInt`. All API routes that return generation records call `.toString()` on it before serialising to JSON. `GenerationRecord.seed` is typed as `string` on the client side.

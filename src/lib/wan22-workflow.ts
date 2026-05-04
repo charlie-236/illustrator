@@ -151,8 +151,12 @@ export function buildT2VWorkflow(params: VideoParams): ComfyWorkflow {
   wf['61'].inputs.height = params.height;
   wf['61'].inputs.length = params.frames;
 
-  // Seed
+  // Seed — write to both MoE samplers. Node 58 has add_noise: "disable" and the
+  // template default is 0; writing the resolved seed here removes the literal-zero
+  // from the workflow JSON entirely. Defense-in-depth against ComfyUI sampler
+  // behavior we can't fully verify (LCM under Lightning).
   wf['57'].inputs.noise_seed = params.seed;
+  wf['58'].inputs.noise_seed = params.seed;
 
   // Base model refs: UNETLoader nodes 37 (high) and 56 (low)
   let highModelRef: [string, number] = ['37', 0];
@@ -193,8 +197,12 @@ export function buildI2VWorkflow(params: VideoParams & { startImageB64: string }
   wf['50'].inputs.height = params.height;
   wf['50'].inputs.length = params.frames;
 
-  // Seed
+  // Seed — write to both MoE samplers. Node 58 has add_noise: "disable" and the
+  // template default is 0; writing the resolved seed here removes the literal-zero
+  // from the workflow JSON entirely. Defense-in-depth against ComfyUI sampler
+  // behavior we can't fully verify (LCM under Lightning).
   wf['57'].inputs.noise_seed = params.seed;
+  wf['58'].inputs.noise_seed = params.seed;
 
   // Base model refs: UNETLoader nodes 37 (high) and 56 (low)
   let highModelRef: [string, number] = ['37', 0];
