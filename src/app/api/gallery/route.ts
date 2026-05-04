@@ -13,11 +13,16 @@ export async function GET(req: NextRequest) {
   const cursor = cursorParam ? new Date(cursorParam) : undefined;
 
   const mediaTypeParam = url.searchParams.get('mediaType');
+  const isStitchedParam = url.searchParams.get('isStitched');
+  let isStitchedFilter: boolean | undefined;
+  if (isStitchedParam === 'true') isStitchedFilter = true;
+  else if (isStitchedParam === 'false') isStitchedFilter = false;
 
   const where = {
     ...(favoritesOnly ? { isFavorite: true } : {}),
     ...(cursor ? { createdAt: { lt: cursor } } : {}),
     ...(mediaTypeParam ? { mediaType: mediaTypeParam } : {}),
+    ...(isStitchedFilter !== undefined ? { isStitched: isStitchedFilter } : {}),
   };
 
   try {

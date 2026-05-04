@@ -704,11 +704,11 @@ Video generations appear in the Gallery alongside images:
 - **Duration badge:** Bottom-right corner of every video tile, dark pill: `${(frames / fps).toFixed(1)}s`. Render-only on `mediaType === 'video'` tiles.
 - **Modal playback:** `<video controls autoPlay loop playsInline>` with native HTML5 controls. No `muted` attribute — Wan 2.2 generates no audio, so autoplay without mute is permitted. Previous/Next navigation works across mixed media respecting any active filter.
 - **Sidebar metadata (modal):** Frames and FPS rows shown for video; sampler/scheduler/HRF shown for image.
-- **All/Images/Videos filter:** Pill toggle group in the filter bar alongside the favorites toggle. Default: All. Passes `mediaType=image` or `mediaType=video` to `GET /api/gallery`. Combines with favorites filter (AND).
+- **All/Images/Clips/Videos filter:** Pill toggle group in the filter bar alongside the favorites toggle. Default: All. Four-way taxonomy matches the project detail view: "Clips" = unstitched videos, "Videos" = stitched outputs. Passes `mediaType=image` (Images), `mediaType=video&isStitched=false` (Clips), or `mediaType=video&isStitched=true` (Videos) to `GET /api/gallery`. Combines with favorites filter (AND).
 - **Remix from video:** Switches Studio to Video mode and populates the video form with prompt, width, height, frames, steps, cfg. The starting frame is not restored — re-pick from gallery if desired. Remix sets batch size to 4 by default, treating the action as "generate alternates of this clip." The user can adjust down before clicking Generate. This default applies to both image-mode and video-mode remix.
 - **Delete/favorite:** Work identically for video — the delete endpoint and favorite toggle are media-type-agnostic.
 
-`GET /api/gallery` accepts an optional `mediaType` query parameter (`image` or `video`). Omitting it returns all generations. Combines with `isFavorite=true` as an AND filter.
+`GET /api/gallery` accepts optional `mediaType` (`image` or `video`), `isStitched` (`true` or `false`), and `isFavorite=true` query parameters. All filters AND together. Omitting any returns unfiltered for that dimension.
 
 ---
 
