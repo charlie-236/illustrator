@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { NodeSSH } from 'node-ssh';
+import { getServiceByKey } from '@/lib/servicesConfig';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,13 +8,6 @@ export const dynamic = 'force-dynamic';
 const VM_USER = process.env.GPU_VM_USER ?? '';
 const VM_IP = process.env.GPU_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
-
-// Exact systemctl unit names per service key
-const SERVICE_UNITS: Record<string, string> = {
-  'comfy-illustrator': 'comfy-illustrator.service',
-  'aphrodite-writer': 'aphrodite-writer',
-  'aphrodite-cinematographer': 'aphrodite-cinematographer',
-};
 
 export async function POST(req: NextRequest) {
   if (!SSH_KEY_PATH) {
@@ -35,14 +29,15 @@ export async function POST(req: NextRequest) {
 
   const { serviceName, action } = body;
 
-  const unit = SERVICE_UNITS[serviceName];
-  if (!unit) {
+  const service = getServiceByKey(serviceName);
+  if (!service) {
     return Response.json({ error: `Unknown service: ${serviceName}` }, { status: 400 });
   }
   if (action !== 'start' && action !== 'stop') {
     return Response.json({ error: "action must be 'start' or 'stop'" }, { status: 400 });
   }
 
+  const { unit } = service;
   const ssh = new NodeSSH();
   try {
     await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });

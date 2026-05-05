@@ -2,7 +2,7 @@
 
 Two small hardening changes that make failure modes loud.
 
-1. `src/lib/civitaiIngest.ts` and `src/app/api/models/[id]/route.ts` both have `?? '100.96.99.94'` for `A100_VM_IP` and `?? 'charlie'` for `A100_VM_USER`. If `.env` is misconfigured these defaults silently work, masking the misconfiguration. Worse, the Tailscale IP is then in source. We already have the right pattern for `IMAGE_OUTPUT_DIR` (return 500 / fail loudly when unset). Apply the same pattern.
+1. `src/lib/civitaiIngest.ts` and `src/app/api/models/[id]/route.ts` both had hardcoded fallbacks for `A100_VM_IP` and `A100_VM_USER`. If `.env` is misconfigured these defaults silently work, masking the misconfiguration. We already have the right pattern for `IMAGE_OUTPUT_DIR` (return 500 / fail loudly when unset). Apply the same pattern.
 2. `/api/generate` validates `mask` and `referenceImages` carefully but does no shape validation on `params.checkpoint`, `params.steps`, `params.width`, `params.height`, `params.cfg`, `params.seed`, `params.sampler`, `params.scheduler`, `params.batchSize`. Bad values silently get forwarded to ComfyUI which complains in obscure ways. Add lightweight inline validation — no new dependencies.
 
 Re-read CLAUDE.md before starting. Disk-avoidance is unaffected.
@@ -16,8 +16,8 @@ Re-read CLAUDE.md before starting. Disk-avoidance is unaffected.
 Currently at the top:
 
 ```ts
-const VM_USER = process.env.A100_VM_USER ?? 'charlie';
-const VM_IP = process.env.A100_VM_IP ?? '100.96.99.94';
+const VM_USER = process.env.A100_VM_USER ?? '<your-vm-user>';
+const VM_IP = process.env.A100_VM_IP ?? '<gpu-vm-ip>';
 const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
 ```
 
@@ -139,8 +139,8 @@ Don't validate `highResFix` / `baseImage` / `denoise` here either — `highResFi
 - `npm run build` passes clean.
 - `grep -rn "class_type.*['\"]SaveImage['\"]" src/` returns only SaveImageWebsocket.
 - `grep -rn "class_type.*['\"]LoadImage['\"]" src/` returns only ETN_LoadImageBase64 / ETN_LoadMaskBase64.
-- `grep -rn "?? '100.96.99.94'" src/` returns nothing.
-- `grep -rn "?? 'charlie'" src/` returns nothing.
+- `grep -rn "?? '<gpu-vm-ip>'" src/` returns nothing.
+- No hardcoded username fallbacks remain in SSH-using source files.
 - The disk-avoidance assertion in `/api/generate` still runs after the new validation block (validation order: JSON parse → param shape checks → mask/refs checks → assemble prompts → buildWorkflow → forbidden-class scan → POST to ComfyUI).
 - No new npm dependencies were added (`git diff package.json package-lock.json` should be empty).
 

@@ -45,9 +45,9 @@ Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
 DATABASE_URL=postgresql://...              # local Postgres — required, no default
 
 # Output directories — must exist and be writable. May all point to the same path.
-IMAGE_OUTPUT_DIR=/home/charlie/illustrator-output/images   # PNG outputs from image generation
-VIDEO_OUTPUT_DIR=/home/charlie/illustrator-output/clips    # .webm outputs from video generation
-STITCH_OUTPUT_DIR=/home/charlie/illustrator-output/videos  # .mp4 outputs from project stitching
+IMAGE_OUTPUT_DIR=/home/<your-user>/illustrator-output/images   # PNG outputs from image generation
+VIDEO_OUTPUT_DIR=/home/<your-user>/illustrator-output/clips    # .webm outputs from video generation
+STITCH_OUTPUT_DIR=/home/<your-user>/illustrator-output/videos  # .mp4 outputs from project stitching
 
 GALLERY_PAGE_SIZE=30                       # records per page (default 30, server cap 100)
 
@@ -297,18 +297,16 @@ SSH-based remote service control. Body: `{ serviceName: string, action: 'start' 
 
 Opens a NodeSSH connection to `GPU_VM_IP` using `GPU_VM_SSH_KEY_PATH`, then runs `sudo systemctl {action} {unit}`. Returns `{ ok: true }` on success or `{ ok: false, error: string }` if systemctl fails. Returns HTTP 500 on SSH connection failure.
 
-Service name → systemctl unit mapping:
-| serviceName | systemctl unit |
-|---|---|
-| `comfy-illustrator` | `comfy-illustrator.service` |
-| `aphrodite-writer` | `aphrodite-writer.service` |
-| `aphrodite-cinematographer` | `aphrodite-cinematographer.service` |
+Service identity → systemctl unit mapping comes from `SERVICE_N_KEY` / `SERVICE_N_UNIT` env vars loaded by `src/lib/servicesConfig.ts`. Returns `{ ok: false, error: 'Unknown service: ...' }` (HTTP 400) when the supplied `serviceName` doesn't match any configured key.
+
+### `GET /api/services/list`
+Returns the list of configured services (key + label only — no unit names or probe URLs) for the Admin tab UI. Response: `{ services: { key: string, label: string }[] }`. Reads from `loadServicesConfig()` (same loader as status/control). Returns an empty array when no SERVICE_N_* vars are set.
 
 ### `GET /api/services/status`
 Combines two checks per service, run in parallel: (1) SSH `systemctl is-active <unit>` (process running) and (2) HTTP probe of the service's endpoint via the localhost SSH tunnel (process actually answering). Returns:
 
 ```ts
-{ statuses: Record<ServiceName, 'ready' | 'loading' | 'inactive' | 'unknown'> }
+{ statuses: Record<string, 'ready' | 'loading' | 'inactive' | 'unknown'> }
 ```
 
 - `inactive` — systemd reports the unit isn't active.
@@ -316,16 +314,9 @@ Combines two checks per service, run in parallel: (1) SSH `systemctl is-active <
 - `ready` — systemd active and the probe returned 2xx.
 - `unknown` — SSH itself failed; HTTP results aren't meaningful in that case (route returns HTTP 500).
 
-Aphrodite services need an endpoint that exercises the loaded model — `/v1/models` returns 2xx as soon as the API server binds, before the model finishes loading into VRAM, so it can't be used as a readiness signal. ComfyUI loads lazily, so `/system_stats` (a process-level check) is sufficient.
+Returns `{ statuses: {} }` when no services are configured. Service units and probe URLs come entirely from the `SERVICE_N_*` env vars — no identities are hardcoded in source.
 
-Probe endpoints:
-| Service | Probe URL |
-|---|---|
-| `comfy-illustrator` | `http://127.0.0.1:8188/system_stats` |
-| `aphrodite-writer` | `http://127.0.0.1:21434/health` |
-| `aphrodite-cinematographer` | `http://127.0.0.1:11438/health` |
-
-All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by `/api/generate`. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-cinematographer'`.
+**Service configuration.** The Admin tab's services are configured via numbered env vars: `SERVICE_1_KEY`, `SERVICE_1_UNIT`, `SERVICE_1_PROBE_URL`, `SERVICE_1_LABEL`, then `SERVICE_2_*` and so on through `SERVICE_5_*`. A slot is included only when all four vars are set. The loader (`src/lib/servicesConfig.ts`) reads them once at startup; service status (`/api/services/status`) and service control (`/api/services/control`) consume the loaded list. The client UI (`ServerBay.tsx`) fetches the service list via `/api/services/list` and renders dynamically — no hardcoded service identities anywhere in source. See `.env.example` for the full slot pattern and sample values.
 
 ### `GET /api/gallery?page=1&limit=20`
 Paginated. `limit` capped at 50. Returns:
@@ -499,7 +490,7 @@ src/app/
 3. On `polished: true`, replaces the textarea with the expanded prompt that preserves all weighted tokens (`(word:N)`, `((word))`, `[[word]]`) byte-for-byte.
 4. On `polished: false`, leaves the textarea unchanged and shows a brief reason indicator (timeout, weight drift, parse error, etc.) — the user's prompt is never lost.
 
-The endpoint is configured via `POLISH_LLM_ENDPOINT` (typically `http://127.0.0.1:11438/v1/chat/completions` when llama-server is tunnelled to mint-pc:11438) and `POLISH_LLM_MODEL` (the model identifier or path). See the `POST /api/generate/polish` API entry above for full request/response shape.
+The endpoint is configured via `POLISH_LLM_ENDPOINT` (typically `http://127.0.0.1:11438/v1/chat/completions` when llama-server is tunnelled locally) and `POLISH_LLM_MODEL` (the model identifier or path). See the `POST /api/generate/polish` API entry above for full request/response shape.
 
 ## Workflow node graph
 
