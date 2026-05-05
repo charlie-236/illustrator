@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import type { ProjectClip, StoryboardScene, Storyboard, GenerationRecord } from '@/types';
 import { imgSrc } from '@/lib/imageSrc';
 import ImageModal from './ImageModal';
-import GalleryPicker from './GalleryPicker';
 
 interface Props {
   scene: StoryboardScene;
@@ -18,6 +17,8 @@ interface Props {
   storyboard: Storyboard;
   onClose: () => void;
   onCanonicalChanged: (updated: Storyboard) => void;
+  /** Called after a clip is attached or detached — parent should reload project clips */
+  onClipAttached?: () => void;
 }
 
 function clipToRecord(clip: ProjectClip, projectId: string, projectName: string): GenerationRecord {
@@ -52,6 +53,7 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     videoLorasJson: null,
     lightning: null,
     sceneId: clip.sceneId,
+    storyboardId: null,
     createdAt: clip.createdAt,
   };
 }
@@ -67,6 +69,7 @@ export default function CanonicalClipPickerModal({
   storyboard,
   onClose,
   onCanonicalChanged,
+  onClipAttached,
 }: Props) {
   const [localCanonicalId, setLocalCanonicalId] = useState<string | null>(canonicalClipId);
   const [settingId, setSettingId] = useState<string | null>(null);
@@ -112,6 +115,8 @@ export default function CanonicalClipPickerModal({
 
       setLocalCanonicalId(clipId);
       onCanonicalChanged(updatedStoryboard);
+      // Reload project clips so attached clips appear immediately
+      onClipAttached?.();
     } catch {
       setError('Network error');
     }
@@ -124,11 +129,54 @@ export default function CanonicalClipPickerModal({
     setSettingId(null);
   }
 
-  async function handleDetach() {
-    setSettingId('detaching');
-    // Clear canonicalClipId on storyboard (sceneId on the clip stays — non-destructive)
-    await saveCanonical(null, null);
-    setSettingId(null);
+  /** Detach a clip from this scene: clear its sceneId server-side; if it was canonical, clear that too. */
+  async function handleDetach(clip: ProjectClip) {
+    setSettingId(`detach-${clip.id}`);
+    setError(null);
+    try {
+      // Clear sceneId on the clip
+      const sceneRes = await fetch(`/api/generations/${clip.id}/scene`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sceneId: null }),
+      });
+      if (!sceneRes.ok) {
+        setError('Failed to detach clip');
+        return;
+      }
+
+      // If this clip was canonical, also clear canonicalClipId on the storyboard
+      if (clip.id === localCanonicalId) {
+        const updatedScenes = storyboard.scenes.map((s) =>
+          s.id === scene.id ? { ...s, canonicalClipId: null } : s,
+        );
+        const updatedStoryboard: Storyboard = { ...storyboard, scenes: updatedScenes };
+        const sbRes = await fetch(`/api/storyboards/${storyboard.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storyboard: updatedStoryboard }),
+        });
+        if (sbRes.ok) {
+          setLocalCanonicalId(null);
+          onCanonicalChanged(updatedStoryboard);
+        } else {
+          // Roll back the sceneId clear — best-effort
+          await fetch(`/api/generations/${clip.id}/scene`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sceneId: scene.id }),
+          });
+          setError('Failed to update storyboard');
+          return;
+        }
+      }
+
+      onClipAttached?.();
+    } catch {
+      setError('Network error');
+    } finally {
+      setSettingId(null);
+    }
   }
 
   async function handleAttachProjectClip(clip: ProjectClip) {
@@ -185,6 +233,7 @@ export default function CanonicalClipPickerModal({
               sceneClips.map((clip, i) => {
                 const isCanonical = clip.id === localCanonicalId;
                 const isSettingThis = settingId === clip.id;
+                const isDetachingThis = settingId === `detach-${clip.id}`;
                 const durationSec = clip.fps > 0 ? (clip.frames / clip.fps).toFixed(1) : null;
 
                 return (
@@ -222,16 +271,15 @@ export default function CanonicalClipPickerModal({
                         {durationSec ? ` · ${durationSec}s` : ''}
                       </p>
                       <div className="flex gap-2 flex-shrink-0">
-                        {isCanonical && (
-                          <button
-                            type="button"
-                            onClick={() => void handleDetach()}
-                            disabled={settingId !== null}
-                            className="min-h-10 px-3 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-60 disabled:pointer-events-none"
-                          >
-                            Detach
-                          </button>
-                        )}
+                        {/* Detach — visible on every clip */}
+                        <button
+                          type="button"
+                          onClick={() => void handleDetach(clip)}
+                          disabled={settingId !== null}
+                          className="min-h-10 px-3 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-60 disabled:pointer-events-none"
+                        >
+                          {isDetachingThis ? 'Detaching…' : 'Detach'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => void handleSetCanonical(clip.id)}
@@ -366,9 +414,10 @@ export default function CanonicalClipPickerModal({
         </div>
       )}
 
-      {/* Pick from gallery — uses GalleryPicker with video filter */}
+      {/* Pick from gallery — video-filtered inline picker */}
       {showGalleryPicker && (
-        <GalleryPickerVideoAdapter
+        <GalleryPickerVideo
+          open
           onClose={() => setShowGalleryPicker(false)}
           onSelect={(record) => void handleAttachGalleryClip(record)}
         />
@@ -377,20 +426,7 @@ export default function CanonicalClipPickerModal({
   );
 }
 
-/** Thin wrapper that opens GalleryPicker but resets to video filter */
-function GalleryPickerVideoAdapter({
-  onClose,
-  onSelect,
-}: {
-  onClose: () => void;
-  onSelect: (record: GenerationRecord) => void;
-}) {
-  return (
-    <GalleryPickerVideo open onClose={onClose} onSelect={onSelect} />
-  );
-}
-
-/** Inline video-filtered gallery picker (avoids modifying GalleryPicker's existing API) */
+/** Inline video-filtered gallery picker */
 function GalleryPickerVideo({
   open,
   onClose,
@@ -400,7 +436,6 @@ function GalleryPickerVideo({
   onClose: () => void;
   onSelect: (record: GenerationRecord) => void;
 }) {
-  // Reuse GalleryPicker but it only shows images by default; we render our own video picker
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -410,12 +445,12 @@ function GalleryPickerVideo({
     if (loading || !hasMore) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ mediaType: 'video', limit: '20' });
+      const params = new URLSearchParams({ mediaType: 'video', isStitched: 'false', limit: '20' });
       if (cursor) params.set('cursor', cursor);
       const res = await fetch(`/api/gallery?${params}`);
       if (!res.ok) return;
-      const data = await res.json() as { items: GenerationRecord[]; nextCursor: string | null };
-      setItems((prev) => [...prev, ...data.items]);
+      const data = await res.json() as { records: GenerationRecord[]; nextCursor: string | null };
+      setItems((prev) => [...prev, ...data.records]);
       setCursor(data.nextCursor);
       setHasMore(!!data.nextCursor);
     } finally {

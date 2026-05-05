@@ -77,6 +77,7 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     videoLorasJson: null,
     lightning: null,
     sceneId: clip.sceneId ?? null,
+    storyboardId: null,
     createdAt: clip.createdAt,
   };
 }
@@ -144,7 +145,7 @@ async function encodeImageToBase64(url: string): Promise<string> {
 }
 
 function readLastUsedImageCheckpoint(): string | null {
-  try { return sessionStorage.getItem('studio-checkpoint'); } catch { return null; }
+  try { return sessionStorage.getItem('studio-last-image-checkpoint'); } catch { return null; }
 }
 
 async function readInitEvent(body: ReadableStream<Uint8Array>): Promise<string> {
@@ -203,6 +204,7 @@ function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, pro
     videoLorasJson: null,
     lightning: null,
     sceneId: null,
+    storyboardId: e.storyboardId ?? null,
     createdAt: e.createdAt,
   };
 }
@@ -573,13 +575,15 @@ interface StitchModalProps {
   videoClips: ProjectClip[];
   /** All clips (video + image) — used to compute each video clip's project-wide position number. */
   allClips: ProjectClip[];
-  /** If provided, only these clip IDs are pre-selected. */
+  /** If provided, only these clip IDs are pre-selected (order is preserved for stitching). */
   initialClipIds?: string[];
+  /** If set, passed to the stitch API so the output is named/associated with this storyboard. */
+  storyboardId?: string;
   onClose: () => void;
   onStitched: (export_: ProjectStitchedExport) => void;
 }
 
-function StitchModal({ projectId, projectName, videoClips, allClips, initialClipIds, onClose, onStitched }: StitchModalProps) {
+function StitchModal({ projectId, projectName, videoClips, allClips, initialClipIds, storyboardId, onClose, onStitched }: StitchModalProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initialClipIds ?? videoClips.map((c) => c.id)),
   );
@@ -616,13 +620,20 @@ function StitchModal({ projectId, projectName, videoClips, allClips, initialClip
     const ac = new AbortController();
     abortRef.current = ac;
 
-    const clipIds = videoClips.filter((c) => selectedIds.has(c.id)).map((c) => c.id);
+    // Preserve initialClipIds order when provided; fall back to videoClips position order.
+    const orderedIds = initialClipIds
+      ? initialClipIds.filter((id) => selectedIds.has(id))
+      : videoClips.filter((c) => selectedIds.has(c.id)).map((c) => c.id);
+    const clipIds = orderedIds;
+
+    const stitchBody: Record<string, unknown> = { transition, clipIds };
+    if (storyboardId) stitchBody.storyboardId = storyboardId;
 
     try {
       const res = await fetch(`/api/projects/${projectId}/stitch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transition, clipIds }),
+        body: JSON.stringify(stitchBody),
         signal: ac.signal,
       });
 
@@ -688,6 +699,7 @@ function StitchModal({ projectId, projectName, videoClips, allClips, initialClip
               height: record.height,
               createdAt: record.createdAt,
               promptPos: record.promptPos,
+              storyboardId: record.storyboardId ?? null,
             });
           } else if (eventName === 'error') {
             const parsed = JSON.parse(data) as { message: string };
@@ -1030,6 +1042,9 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
     defaultWidth: project.defaultWidth != null ? String(project.defaultWidth) : '',
     defaultHeight: project.defaultHeight != null ? String(project.defaultHeight) : '',
   });
+  const [defaultCheckpoint, setDefaultCheckpoint] = useState<string>(
+    project.defaultCheckpoint ?? '',
+  );
   // tri-state: null = no default, true = always on, false = always off
   const [defaultLightning, setDefaultLightning] = useState<boolean | null>(
     project.defaultLightning ?? null,
@@ -1068,6 +1083,7 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
       defaultCfg: form.defaultCfg ? parseFloat(form.defaultCfg) : null,
       defaultWidth: form.defaultWidth ? parseInt(form.defaultWidth, 10) : null,
       defaultHeight: form.defaultHeight ? parseInt(form.defaultHeight, 10) : null,
+      defaultCheckpoint: defaultCheckpoint.trim() || null,
       defaultLightning,
       defaultVideoLoras: fullVideoLoras,
     };
@@ -1195,6 +1211,21 @@ function SettingsModal({ project, onClose, onSaved }: SettingsModalProps) {
             </div>
 
             <div className="mt-3">
+              <label className="label block mb-1">Default Image Checkpoint</label>
+              <select
+                className="input-base"
+                value={defaultCheckpoint}
+                onChange={(e) => setDefaultCheckpoint(e.target.value)}
+              >
+                <option value="">— No default (use last-used checkpoint) —</option>
+                {(modelLists?.checkpoints ?? []).map((cp) => (
+                  <option key={cp} value={cp}>{cp}</option>
+                ))}
+              </select>
+              <p className="text-xs text-zinc-500 mt-1">Used for keyframe generation from this project's storyboards.</p>
+            </div>
+
+            <div className="mt-3">
               <label className="label block mb-1">Default Lightning</label>
               <div className="flex gap-2">
                 {([true, false, null] as const).map((val) => (
@@ -1288,6 +1319,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [canonicalPickerScene, setCanonicalPickerScene] = useState<StoryboardScene | null>(null);
   // Canonical play/stitch state
   const [canonicalStitchClipIds, setCanonicalStitchClipIds] = useState<string[]>([]);
+  const [canonicalStitchStoryboardId, setCanonicalStitchStoryboardId] = useState<string | null>(null);
   const [playCanonical, setPlayCanonical] = useState(false);
   const [playingCanonicalIdx, setPlayingCanonicalIdx] = useState(0);
   const [playCanonicalDone, setPlayCanonicalDone] = useState(false);
@@ -1307,6 +1339,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [batchKeyframeScenes, setBatchKeyframeScenes] = useState<Set<string>>(new Set());
   const [canonicalKeyframePickerScene, setCanonicalKeyframePickerScene] = useState<StoryboardScene | null>(null);
   const [showBatchKeyframeConfirm, setShowBatchKeyframeConfirm] = useState(false);
+
+  const { data: modelLists } = useModelLists();
 
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -1808,9 +1842,13 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     if (!project) return;
     if (inFlightKeyframeScenes.has(scene.id)) return;
 
-    const checkpoint = readLastUsedImageCheckpoint();
+    const checkpoint =
+      project.defaultCheckpoint ??
+      readLastUsedImageCheckpoint() ??
+      modelLists.checkpoints[0] ??
+      null;
     if (!checkpoint) {
-      setKeyframeError({ sceneId: scene.id, message: 'No image checkpoint available. Select one in Studio first.' });
+      setKeyframeError({ sceneId: scene.id, message: 'No image checkpoint available. Add one in the Models tab or set a project default in Settings.' });
       return;
     }
 
@@ -2260,17 +2298,29 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                       disabled={renameSaving}
                     />
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedStoryboardId(sb.id); setTabMenuStoryboardId(null); }}
-                      onContextMenu={(e) => { e.preventDefault(); setTabMenuStoryboardId(sb.id); }}
-                      className={`min-h-10 px-3 rounded-lg text-sm font-medium transition-colors whitespace-nowrap
-                        ${selectedStoryboardId === sb.id
-                          ? 'bg-violet-600/20 border border-violet-600/40 text-violet-300'
-                          : 'bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
-                    >
-                      {sb.name}
-                    </button>
+                    <div className="flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedStoryboardId(sb.id); setTabMenuStoryboardId(null); }}
+                        onContextMenu={(e) => { e.preventDefault(); setTabMenuStoryboardId(sb.id); }}
+                        className={`min-h-10 px-3 rounded-lg text-sm font-medium transition-colors whitespace-nowrap
+                          ${selectedStoryboardId === sb.id
+                            ? 'bg-violet-600/20 border border-violet-600/40 text-violet-300 rounded-r-none border-r-0'
+                            : 'bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
+                      >
+                        {sb.name}
+                      </button>
+                      {selectedStoryboardId === sb.id && (
+                        <button
+                          type="button"
+                          onClick={() => setTabMenuStoryboardId(tabMenuStoryboardId === sb.id ? null : sb.id)}
+                          className="min-h-10 min-w-8 flex items-center justify-center rounded-lg rounded-l-none bg-violet-600/20 border border-violet-600/40 border-l-0 text-violet-400 hover:text-violet-200 transition-colors"
+                          title="Storyboard options"
+                        >
+                          ⋮
+                        </button>
+                      )}
+                    </div>
                   )}
                   {/* Tab context menu */}
                   {tabMenuStoryboardId === sb.id && (
@@ -2375,6 +2425,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                         type="button"
                         onClick={() => {
                           setCanonicalStitchClipIds(canonicalClipsInSceneOrder.map((c) => c.id));
+                          setCanonicalStitchStoryboardId(storyboard?.id ?? null);
                           setShowStitch(true);
                         }}
                         className="flex-1 min-h-12 rounded-xl border border-emerald-600/30 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-300 text-sm font-medium transition-colors flex items-center justify-center gap-2"
@@ -2857,12 +2908,14 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           videoClips={videoClips}
           allClips={clips}
           initialClipIds={canonicalStitchClipIds.length > 0 ? canonicalStitchClipIds : undefined}
-          onClose={() => { setShowStitch(false); setCanonicalStitchClipIds([]); }}
+          storyboardId={canonicalStitchStoryboardId ?? undefined}
+          onClose={() => { setShowStitch(false); setCanonicalStitchClipIds([]); setCanonicalStitchStoryboardId(null); }}
           onStitched={(export_) => {
             // Prepend to stitchedExports — the new stitch becomes the most recent
             setStitchedExports((prev) => [export_, ...prev]);
             setShowStitch(false);
             setCanonicalStitchClipIds([]);
+            setCanonicalStitchStoryboardId(null);
           }}
         />
       )}
@@ -3020,6 +3073,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           storyboard={storyboard}
           onClose={() => setCanonicalPickerScene(null)}
           onCanonicalChanged={(updated) => setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
+          onClipAttached={() => void load()}
         />
       )}
 
