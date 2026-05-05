@@ -68,7 +68,9 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
 - [x] Phase 5a — Storyboard data model + LLM generation — `batch/phase-5a-storyboard` (PR #63)
 - [x] Phase 5b — Storyboard scene execution + editing — `batch/phase-5b-storyboard-execution` (PR #64)
-- [~] Env cleanup — split LLM endpoints, remove hardware-specific names — `batch/env-cleanup-llm-split-and-hardware-neutral` (PR #65)
-- [~] Watchdog timer starts on execution, not registration; sentinel 0 disables — `batch/watchdog-queue-aware` (PR #66)
-- [~] Fix Phase 5b: scene's suggested starting frame doesn't auto-populate — `batch/fix-5b-auto-select-starting-frame` (PR #67)
-- [~] Phase 5c — Storyboard quick-generate toggle — `batch/phase-5c-storyboard-quick-generate` (PR #68)
+- [x] Env cleanup — split LLM endpoints, remove hardware-specific names — `batch/env-cleanup-llm-split-and-hardware-neutral` (PR #65)
+- [x] Watchdog timer starts on execution, not registration; sentinel 0 disables — `batch/watchdog-queue-aware` (PR #66)
+- [x] Fix Phase 5b: scene's suggested starting frame doesn't auto-populate — `batch/fix-5b-auto-select-starting-frame` (PR #67)
+- [x] Phase 5c — Storyboard quick-generate toggle — `batch/phase-5c-storyboard-quick-generate` (PR #68)
+- [ ] Phase 5d — Multi-storyboard + scene management + canonical play/stitch — see prompts/phase-5d-multi-storyboard-and-scene-management.md
+- [ ] Phase 6 — Storyboard keyframes (cheap previews + promote to video) — see prompts/phase-6-storyboard-keyframes.md
