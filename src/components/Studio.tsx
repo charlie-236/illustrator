@@ -900,6 +900,7 @@ export default function Studio({
 
   async function handleCheckpointChange(newCheckpoint: string) {
     update('checkpoint', newCheckpoint);
+    try { sessionStorage.setItem('studio-last-image-checkpoint', newCheckpoint); } catch { /* ignore */ }
     if (!newCheckpoint) { setCheckpointDefaults(null); return; }
     try {
       const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);
@@ -936,6 +937,7 @@ export default function Studio({
   // so the user's last-session values are preserved after a page refresh.
   async function handleInitialCheckpoint(newCheckpoint: string) {
     update('checkpoint', newCheckpoint);
+    try { sessionStorage.setItem('studio-last-image-checkpoint', newCheckpoint); } catch { /* ignore */ }
     if (!newCheckpoint) { setCheckpointDefaults(null); return; }
     try {
       const res = await fetch(`/api/checkpoint-config?name=${encodeURIComponent(newCheckpoint)}`);

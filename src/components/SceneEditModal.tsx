@@ -31,8 +31,10 @@ export default function SceneEditModal({
   const [durationSeconds, setDurationSeconds] = useState(scene?.durationSeconds ?? 4);
   const [notes, setNotes] = useState(scene?.notes ?? '');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isDirty = isInsert
     ? description.trim().length > 0 || positivePrompt.trim().length > 0
@@ -110,6 +112,36 @@ export default function SceneEditModal({
       setError('Network error');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (isInsert || !scene) return;
+    setDeleting(true);
+    setError(null);
+    const updatedScenes = storyboard.scenes
+      .filter((s) => s.id !== scene.id)
+      .map((s, idx) => ({ ...s, position: idx }));
+    const updatedStoryboard: Storyboard = { ...storyboard, scenes: updatedScenes };
+    try {
+      const res = await fetch(`/api/storyboards/${storyboard.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storyboard: updatedStoryboard }),
+      });
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        setError(data.error ?? 'Delete failed');
+        setShowDeleteConfirm(false);
+        return;
+      }
+      onSaved(updatedStoryboard);
+      onClose();
+    } catch {
+      setError('Network error');
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -234,6 +266,16 @@ export default function SceneEditModal({
 
           {/* Actions */}
           <div className="flex gap-3 pt-1">
+            {!isInsert && (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={saving || deleting}
+                className="min-h-12 px-4 rounded-xl bg-red-900/40 hover:bg-red-800/60 text-red-400 hover:text-red-300 text-sm font-medium transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              >
+                Delete
+              </button>
+            )}
             <button
               type="button"
               onClick={handleCancel}
@@ -244,7 +286,7 @@ export default function SceneEditModal({
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={!canSave || saving}
+              disabled={!canSave || saving || deleting}
               className="flex-1 min-h-12 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors disabled:opacity-50 disabled:pointer-events-none"
             >
               {saving ? 'Saving…' : isInsert ? 'Insert scene' : 'Save'}
@@ -252,6 +294,40 @@ export default function SceneEditModal({
           </div>
         </div>
       </div>
+
+      {/* Delete confirm */}
+      {showDeleteConfirm && (
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/60 z-60"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-sm w-full mx-4 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-zinc-100">Delete scene?</h3>
+            <p className="text-sm text-zinc-400">
+              This scene will be removed from the storyboard. Clips generated for it will remain in
+              the project.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+              >
+                Keep scene
+              </button>
+              <button
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+                className="flex-1 min-h-12 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Discard confirm */}
       {showDiscardConfirm && (

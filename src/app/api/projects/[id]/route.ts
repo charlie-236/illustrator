@@ -127,6 +127,7 @@ export async function GET(
         defaultWidth: project.defaultWidth,
         defaultHeight: project.defaultHeight,
         defaultLightning: project.defaultLightning,
+        defaultCheckpoint: project.defaultCheckpoint ?? null,
         defaultVideoLoras: project.defaultVideoLoras
           ? (() => { try { return JSON.parse(project.defaultVideoLoras); } catch { return null; } })()
           : null,
@@ -217,6 +218,11 @@ export async function PATCH(
       data.defaultVideoLoras = JSON.stringify(body.defaultVideoLoras);
     }
   }
+  if ('defaultCheckpoint' in body) {
+    data.defaultCheckpoint = typeof body.defaultCheckpoint === 'string' && body.defaultCheckpoint.trim()
+      ? body.defaultCheckpoint.trim()
+      : null;
+  }
 
   try {
     const project = await prisma.project.update({
@@ -235,6 +241,7 @@ export async function PATCH(
       defaultWidth: project.defaultWidth,
       defaultHeight: project.defaultHeight,
       defaultLightning: project.defaultLightning,
+      defaultCheckpoint: project.defaultCheckpoint ?? null,
       defaultVideoLoras: project.defaultVideoLoras
         ? (() => { try { return JSON.parse(project.defaultVideoLoras); } catch { return null; } })()
         : null,

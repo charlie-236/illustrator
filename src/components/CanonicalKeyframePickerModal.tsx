@@ -52,6 +52,7 @@ function keyframeToRecord(kf: ProjectClip, projectId: string, projectName: strin
     videoLorasJson: null,
     lightning: null,
     sceneId: kf.sceneId,
+    storyboardId: null,
     createdAt: kf.createdAt,
   };
 }

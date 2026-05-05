@@ -41,7 +41,7 @@ export async function POST(
 
   const { id: projectId } = await params;
 
-  let body: { transition?: string; clipIds?: string[] };
+  let body: { transition?: string; clipIds?: string[]; storyboardId?: string };
   try {
     body = await req.json();
   } catch {
@@ -59,6 +59,22 @@ export async function POST(
   });
   if (!project) {
     return new Response(JSON.stringify({ error: 'Project not found' }), { status: 404 });
+  }
+
+  // Validate storyboardId if provided, and resolve storyboard name for filename
+  let storyboardName: string | null = null;
+  if (body.storyboardId) {
+    const sb = await prisma.storyboard.findFirst({
+      where: { id: body.storyboardId, projectId },
+      select: { name: true },
+    });
+    if (!sb) {
+      return new Response(
+        JSON.stringify({ error: 'Storyboard not found or does not belong to this project' }),
+        { status: 400 },
+      );
+    }
+    storyboardName = sb.name;
   }
 
   const allVideoClips = await prisma.generation.findMany({
@@ -130,11 +146,15 @@ export async function POST(
 
   const generationId = uuidv4();
   const promptId = uuidv4();
-  const slug = slugify(`stitched ${project.name}`);
+  const label = storyboardName ? `${project.name} — ${storyboardName}` : `stitched ${project.name}`;
+  const slug = slugify(label);
   const filename = `${slug}_${Date.now()}.mp4`;
   const outputPath = path.join(outputDir, filename);
   const filePath = `/api/images/${filename}`;
-  const promptSummary = `Stitched: ${project.name}`.slice(0, 60);
+  const promptSummary = (storyboardName
+    ? `Stitched: ${storyboardName}`
+    : `Stitched: ${project.name}`
+  ).slice(0, 60);
 
   // ─── create pending Generation row ───────────────────────────────────────
 
@@ -142,7 +162,7 @@ export async function POST(
     data: {
       id: generationId,
       filePath,
-      promptPos: `Stitched: ${project.name}`,
+      promptPos: storyboardName ? `Stitched: ${storyboardName}` : `Stitched: ${project.name}`,
       promptNeg: '',
       model: 'stitch',
       seed: BigInt(0),
@@ -156,6 +176,7 @@ export async function POST(
       mediaType: 'video',
       isStitched: true,
       parentProjectId: projectId,
+      storyboardId: body.storyboardId ?? null,
       // Store selection + total so gallery can show "X of N from project Y"
       stitchedClipIds: JSON.stringify({ selected: clips.map((c) => c.id), total: totalVideoCount }),
     },

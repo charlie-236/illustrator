@@ -93,6 +93,7 @@ export interface GenerationRecord {
   videoLorasJson: WanLoraSpec[] | null;
   lightning: boolean | null;
   sceneId: string | null;
+  storyboardId: string | null;
   createdAt: string;
 }
 
@@ -117,6 +118,7 @@ export interface ProjectStitchedExport {
   height: number;
   createdAt: string;
   promptPos: string;
+  storyboardId: string | null;
 }
 
 export interface ProjectClip {
@@ -171,6 +173,7 @@ export interface ProjectDetail {
   defaultHeight: number | null;
   defaultLightning: boolean | null;
   defaultVideoLoras: WanLoraSpec[] | null;
+  defaultCheckpoint: string | null;
   storyboards: Storyboard[];
   createdAt: string;
   updatedAt: string;

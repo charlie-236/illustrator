@@ -39,6 +39,7 @@ model Generation {
   videoLorasJson   Json?                        // WanLoraSpec[] for video; null for image and legacy
   lightning        Boolean?                     // true for Wan 2.2 Lightning; null for image and legacy
   sceneId          String?                      // soft ref to StoryboardScene.id within a Storyboard row's scenesJson; null for non-storyboard clips
+  storyboardId     String?                      // soft ref to Storyboard.id; set on stitched outputs created from a storyboard's canonicals
   createdAt        DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
@@ -57,6 +58,7 @@ model Project {
   defaultHeight   Int?
   defaultLightning  Boolean?
   defaultVideoLoras String?      // JSON-encoded WanLoraSpec[]
+  defaultCheckpoint String?      // image checkpoint name used for keyframe generation
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   generations       Generation[] @relation("ProjectClips")
