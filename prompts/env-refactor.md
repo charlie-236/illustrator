@@ -18,9 +18,9 @@ Re-read CLAUDE.md before starting. Use `project_knowledge_search` to verify ever
 **New:**
 
 ```
-IMAGE_OUTPUT_DIR=/home/charlie/illustrator-output/images       # PNG outputs from image generation
-VIDEO_OUTPUT_DIR=/home/charlie/illustrator-output/clips        # webm outputs from video generation (raw clips)
-STITCH_OUTPUT_DIR=/home/charlie/illustrator-output/videos      # mp4 outputs from project stitching (composed videos)
+IMAGE_OUTPUT_DIR=/home/<your-user>/illustrator-output/images       # PNG outputs from image generation
+VIDEO_OUTPUT_DIR=/home/<your-user>/illustrator-output/clips        # webm outputs from video generation (raw clips)
+STITCH_OUTPUT_DIR=/home/<your-user>/illustrator-output/videos      # mp4 outputs from project stitching (composed videos)
 ```
 
 The default values shown above are illustrative — the user will set their own absolute paths. The point is that three separate variables exist, and code paths for each media type read the appropriate one.
@@ -170,17 +170,17 @@ DATABASE_URL="postgresql://postgres:password@localhost:5432/illustrator"
 # Absolute path on mint-pc where image generations are written.
 # Must exist and be writable. App throws on any image generation if unset.
 # Outside the repo — files are large and shouldn't pollute git.
-IMAGE_OUTPUT_DIR=/home/charlie/illustrator-output/images
+IMAGE_OUTPUT_DIR=/home/<your-user>/illustrator-output/images
 
 # Absolute path where raw video clips (.webm) from Wan 2.2 generation land.
 # Must exist and be writable. May be the same as IMAGE_OUTPUT_DIR if you don't
 # want them split. App throws on video generation if unset.
-VIDEO_OUTPUT_DIR=/home/charlie/illustrator-output/clips
+VIDEO_OUTPUT_DIR=/home/<your-user>/illustrator-output/clips
 
 # Absolute path where project stitch outputs (.mp4) land.
 # Must exist and be writable. May overlap with VIDEO_OUTPUT_DIR if desired.
 # App throws on stitch start if unset.
-STITCH_OUTPUT_DIR=/home/charlie/illustrator-output/videos
+STITCH_OUTPUT_DIR=/home/<your-user>/illustrator-output/videos
 
 # Number of items per page for gallery infinite-scroll pagination.
 # Default 30. Cap of 100 enforced server-side regardless.
@@ -204,9 +204,9 @@ CIVITAI_TOKEN="paste-token-from-civitai-account-settings"
 # SSH credentials for the A100 VM. Used for model downloads, embeddings list,
 # model deletion, and SSH cleanup of orphan video files.
 # All three are required for any SSH-using route; they fail with 500 if missing.
-A100_VM_USER=charlie
-A100_VM_IP=100.96.99.94
-A100_SSH_KEY_PATH=/home/charlie/.ssh/a100-key.pem
+A100_VM_USER=<your-vm-user>
+A100_VM_IP=<gpu-vm-ip>
+A100_SSH_KEY_PATH=/home/<your-user>/.ssh/gpu-key.pem
 
 # Root directory of ComfyUI's models on the VM. Used for checkpoint/LoRA/embedding paths.
 # If missing, defaults to /models/ComfyUI/models (standard install location).
@@ -280,8 +280,8 @@ The agent should arrive at this shape from the inventory above. Adjust formattin
 Manual smoke test (deferred to user):
 
 1. Start with the existing `.env`. Confirm app still works end-to-end (image gen, video gen, stitch).
-2. In `.env`, set `VIDEO_OUTPUT_DIR=/home/charlie/illustrator-output/clips` (different from `IMAGE_OUTPUT_DIR`). Restart pm2. Generate a video. Confirm the .webm file lands in the new directory and is playable in the gallery.
-3. Set `STITCH_OUTPUT_DIR=/home/charlie/illustrator-output/videos`. Restart. Stitch a project. Confirm the .mp4 lands in the new directory and is playable.
+2. In `.env`, set `VIDEO_OUTPUT_DIR=/home/<your-user>/illustrator-output/clips` (different from `IMAGE_OUTPUT_DIR`). Restart pm2. Generate a video. Confirm the .webm file lands in the new directory and is playable in the gallery.
+3. Set `STITCH_OUTPUT_DIR=/home/<your-user>/illustrator-output/videos`. Restart. Stitch a project. Confirm the .mp4 lands in the new directory and is playable.
 4. Comment out `VIDEO_OUTPUT_DIR`. Restart. Try to generate a video — confirm 500 with the documented error.
 5. Set `POLISH_TIMEOUT_MS=1000` (1 second). Restart. Click Polish. Confirm timeout fires (the LLM won't respond in 1s) and the UI shows a graceful timeout message.
 6. Read `.env.example` cold. Confirm comments are clear enough that a hypothetical new user could fill in the file without reading source code.

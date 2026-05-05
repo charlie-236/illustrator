@@ -1,36 +1,17 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
-type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-cinematographer';
+interface ServiceMeta {
+  key: string;
+  label: string;
+}
+
 type ActionState = 'idle' | 'pending' | 'sent' | 'error';
 type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
 
-const SERVICE_LABELS: Record<ServiceName, string> = {
-  'comfy-illustrator': 'Image Generation',
-  'aphrodite-writer': 'Writer',
-  'aphrodite-cinematographer': 'Prompt Polisher',
-};
-
-const ALL_SERVICES: ServiceName[] = [
-  'comfy-illustrator',
-  'aphrodite-writer',
-  'aphrodite-cinematographer',
-];
-
-const STACK_ORDER_START: ServiceName[] = [
-  'comfy-illustrator',
-  'aphrodite-writer',
-  'aphrodite-cinematographer',
-];
-const STACK_ORDER_STOP: ServiceName[] = [
-  'aphrodite-cinematographer',
-  'aphrodite-writer',
-  'comfy-illustrator',
-];
-
 type StackProgressEntry = {
-  service: ServiceName;
+  service: string;
   status: 'pending' | 'running' | 'ok' | 'error';
   error?: string;
 };
@@ -40,33 +21,51 @@ type StackOp = {
   progress: StackProgressEntry[];
 };
 
-const BLANK_ACTIONS: Record<ServiceName, ActionState> = {
-  'comfy-illustrator': 'idle',
-  'aphrodite-writer': 'idle',
-  'aphrodite-cinematographer': 'idle',
-};
-
-const BLANK_STATUSES: Record<ServiceName, ServiceStatus> = {
-  'comfy-illustrator': 'unknown',
-  'aphrodite-writer': 'unknown',
-  'aphrodite-cinematographer': 'unknown',
-};
-
 export default function ServerBay() {
-  const [actionStates, setActionStates] = useState<Record<ServiceName, ActionState>>({ ...BLANK_ACTIONS });
-  const [statusMap, setStatusMap] = useState<Record<ServiceName, ServiceStatus>>({ ...BLANK_STATUSES });
+  const [services, setServices] = useState<ServiceMeta[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+
+  const [actionStates, setActionStates] = useState<Record<string, ActionState>>({});
+  const [statusMap, setStatusMap] = useState<Record<string, ServiceStatus>>({});
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [stackOp, setStackOp] = useState<StackOp | null>(null);
 
   const stackBusy = stackOp !== null && stackOp.action !== null;
 
+  // Load services list on mount
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/services/list');
+        const data = await res.json() as { services: ServiceMeta[] };
+        if (cancelled) return;
+        setServices(data.services);
+        const initActions: Record<string, ActionState> = {};
+        const initStatuses: Record<string, ServiceStatus> = {};
+        for (const s of data.services) {
+          initActions[s.key] = 'idle';
+          initStatuses[s.key] = 'unknown';
+        }
+        setActionStates(initActions);
+        setStatusMap(initStatuses);
+      } catch (err) {
+        if (!cancelled) setServicesError(String(err));
+      } finally {
+        if (!cancelled) setServicesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const checkStatus = useCallback(async () => {
     setCheckingStatus(true);
     setStatusError(null);
     try {
       const res = await fetch('/api/services/status');
-      const data = await res.json() as { statuses?: Record<ServiceName, ServiceStatus>; error?: string };
+      const data = await res.json() as { statuses?: Record<string, ServiceStatus>; error?: string };
       if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
       setStatusMap(data.statuses!);
     } catch (err) {
@@ -76,30 +75,30 @@ export default function ServerBay() {
     }
   }, []);
 
-  const sendControl = useCallback(async (serviceName: ServiceName, action: 'start' | 'stop') => {
-    setActionStates((prev) => ({ ...prev, [serviceName]: 'pending' }));
+  const sendControl = useCallback(async (serviceKey: string, action: 'start' | 'stop') => {
+    setActionStates((prev) => ({ ...prev, [serviceKey]: 'pending' }));
     try {
       const res = await fetch('/api/services/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName, action }),
+        body: JSON.stringify({ serviceName: serviceKey, action }),
       });
       const data = await res.json() as { ok?: boolean; error?: string };
       setActionStates((prev) => ({
         ...prev,
-        [serviceName]: data.ok ? 'sent' : 'error',
+        [serviceKey]: data.ok ? 'sent' : 'error',
       }));
       setTimeout(() => { void checkStatus(); }, 2500);
     } catch {
-      setActionStates((prev) => ({ ...prev, [serviceName]: 'error' }));
+      setActionStates((prev) => ({ ...prev, [serviceKey]: 'error' }));
     }
   }, [checkStatus]);
 
   const runStackSequence = useCallback(async (action: 'start' | 'stop') => {
-    const order = action === 'start' ? STACK_ORDER_START : STACK_ORDER_STOP;
+    const order = action === 'start' ? services : [...services].reverse();
     setStackOp({
       action,
-      progress: order.map((service) => ({ service, status: 'pending' })),
+      progress: order.map((s) => ({ service: s.key, status: 'pending' })),
     });
 
     for (let i = 0; i < order.length; i++) {
@@ -113,7 +112,7 @@ export default function ServerBay() {
         const res = await fetch('/api/services/control', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serviceName: svc, action }),
+          body: JSON.stringify({ serviceName: svc.key, action }),
         });
         const data = await res.json() as { ok?: boolean; error?: string };
         if (!data.ok) {
@@ -139,7 +138,11 @@ export default function ServerBay() {
 
     setStackOp((prev) => prev ? { ...prev, action: null } : prev);
     setTimeout(() => { void checkStatus(); }, 2500);
-  }, [checkStatus]);
+  }, [services, checkStatus]);
+
+  const serviceLabel = useCallback((key: string): string => {
+    return services.find((s) => s.key === key)?.label ?? key;
+  }, [services]);
 
   return (
     <div className="p-4 space-y-4">
@@ -148,71 +151,87 @@ export default function ServerBay() {
         <div>
           <h3 className="text-sm font-semibold text-zinc-200">Illustrator Stack</h3>
           <p className="text-xs text-zinc-400 mt-0.5">
-            ComfyUI + Writer LLM + Prompt Polisher. Start and stop as a group, or control individually below.
+            Start and stop all configured services as a group, or control individually below.
           </p>
         </div>
 
-        {/* Stack-level controls */}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => void runStackSequence('start')}
-            disabled={stackBusy}
-            className="flex-1 min-h-12 rounded-lg text-sm font-medium
-                       bg-emerald-700/20 hover:bg-emerald-700/40 text-emerald-300
-                       border border-emerald-700/40 hover:border-emerald-600/60
-                       transition-colors disabled:opacity-40"
-          >
-            Start All
-          </button>
-          <button
-            type="button"
-            onClick={() => void runStackSequence('stop')}
-            disabled={stackBusy}
-            className="flex-1 min-h-12 rounded-lg text-sm font-medium
-                       bg-red-700/20 hover:bg-red-700/40 text-red-300
-                       border border-red-700/40 hover:border-red-600/60
-                       transition-colors disabled:opacity-40"
-          >
-            Stop All
-          </button>
-        </div>
-
-        {/* Stack operation progress */}
-        {stackOp && (
-          <div className="space-y-1.5 pt-0.5">
-            {stackOp.progress.map((entry) => (
-              <div key={entry.service} className="flex items-start gap-2 text-sm">
-                <StackProgressIcon status={entry.status} />
-                <div className="flex-1 min-w-0">
-                  <span className={entry.status === 'error' ? 'text-red-300' : 'text-zinc-300'}>
-                    {SERVICE_LABELS[entry.service]}
-                  </span>
-                  {entry.error && (
-                    <p className="text-xs text-red-400 mt-0.5 break-words">{entry.error}</p>
-                  )}
-                </div>
-              </div>
-            ))}
+        {servicesLoading ? (
+          <p className="text-sm text-zinc-500">Loading services…</p>
+        ) : servicesError ? (
+          <p className="text-sm text-red-400">Failed to load services: {servicesError}</p>
+        ) : services.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center">
+            <p className="text-sm text-zinc-400">No services configured.</p>
+            <p className="text-xs text-zinc-500 mt-2">
+              Add SERVICE_1_KEY (and the other SERVICE_1_* vars) to your .env file
+              to populate this panel.
+            </p>
           </div>
+        ) : (
+          <>
+            {/* Stack-level controls */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void runStackSequence('start')}
+                disabled={stackBusy}
+                className="flex-1 min-h-12 rounded-lg text-sm font-medium
+                           bg-emerald-700/20 hover:bg-emerald-700/40 text-emerald-300
+                           border border-emerald-700/40 hover:border-emerald-600/60
+                           transition-colors disabled:opacity-40"
+              >
+                Start All
+              </button>
+              <button
+                type="button"
+                onClick={() => void runStackSequence('stop')}
+                disabled={stackBusy}
+                className="flex-1 min-h-12 rounded-lg text-sm font-medium
+                           bg-red-700/20 hover:bg-red-700/40 text-red-300
+                           border border-red-700/40 hover:border-red-600/60
+                           transition-colors disabled:opacity-40"
+              >
+                Stop All
+              </button>
+            </div>
+
+            {/* Stack operation progress */}
+            {stackOp && (
+              <div className="space-y-1.5 pt-0.5">
+                {stackOp.progress.map((entry) => (
+                  <div key={entry.service} className="flex items-start gap-2 text-sm">
+                    <StackProgressIcon status={entry.status} />
+                    <div className="flex-1 min-w-0">
+                      <span className={`truncate block ${entry.status === 'error' ? 'text-red-300' : 'text-zinc-300'}`}>
+                        {serviceLabel(entry.service)}
+                      </span>
+                      {entry.error && (
+                        <p className="text-xs text-red-400 mt-0.5 break-words">{entry.error}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="border-t border-zinc-800" />
+
+            {/* Individual service rows */}
+            <div className="space-y-2 divide-y divide-zinc-800">
+              {services.map((svc) => (
+                <ServiceRow
+                  key={svc.key}
+                  label={svc.label}
+                  status={statusMap[svc.key] ?? 'unknown'}
+                  actionState={actionStates[svc.key] ?? 'idle'}
+                  disabled={stackBusy}
+                  onStart={() => void sendControl(svc.key, 'start')}
+                  onStop={() => void sendControl(svc.key, 'stop')}
+                />
+              ))}
+            </div>
+          </>
         )}
-
-        <div className="border-t border-zinc-800" />
-
-        {/* Individual service rows */}
-        <div className="space-y-2 divide-y divide-zinc-800">
-          {ALL_SERVICES.map((name) => (
-            <ServiceRow
-              key={name}
-              label={SERVICE_LABELS[name]}
-              status={statusMap[name]}
-              actionState={actionStates[name]}
-              disabled={stackBusy}
-              onStart={() => void sendControl(name, 'start')}
-              onStop={() => void sendControl(name, 'stop')}
-            />
-          ))}
-        </div>
       </div>
 
       {/* Status check card */}

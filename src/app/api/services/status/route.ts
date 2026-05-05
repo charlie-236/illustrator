@@ -1,4 +1,5 @@
 import { NodeSSH } from 'node-ssh';
+import { loadServicesConfig, type ServiceConfig } from '@/lib/servicesConfig';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,29 +8,7 @@ const VM_USER = process.env.GPU_VM_USER ?? '';
 const VM_IP = process.env.GPU_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 
-type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-cinematographer';
 type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
-
-const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = {
-  'comfy-illustrator': {
-    unit: 'comfy-illustrator.service',
-    probeUrl: 'http://127.0.0.1:8188/system_stats',
-  },
-  'aphrodite-writer': {
-    unit: 'aphrodite-writer',
-    probeUrl: 'http://127.0.0.1:21434/health',
-  },
-  'aphrodite-cinematographer': {
-    unit: 'aphrodite-cinematographer',
-    probeUrl: 'http://127.0.0.1:11438/health',
-  },
-};
-
-const SERVICES: ServiceName[] = [
-  'comfy-illustrator',
-  'aphrodite-writer',
-  'aphrodite-cinematographer',
-];
 
 async function probe(url: string): Promise<boolean> {
   try {
@@ -40,24 +19,26 @@ async function probe(url: string): Promise<boolean> {
   }
 }
 
-async function runSystemctlChecks(ssh: NodeSSH): Promise<Record<ServiceName, number>> {
-  const cmd = SERVICES
-    .map((name) => `systemctl is-active ${SERVICE_CONFIG[name].unit} >/dev/null 2>&1; echo "${name}:$?"`)
+async function runSystemctlChecks(
+  ssh: NodeSSH,
+  services: ServiceConfig[],
+): Promise<Record<string, number>> {
+  const cmd = services
+    .map((s) => `systemctl is-active ${s.unit} >/dev/null 2>&1; echo "${s.key}:$?"`)
     .join('; ');
 
   const result = await ssh.execCommand(cmd);
 
-  const exitCodes: Record<ServiceName, number> = {
-    'comfy-illustrator': 1,
-    'aphrodite-writer': 1,
-    'aphrodite-cinematographer': 1,
-  };
+  const exitCodes: Record<string, number> = {};
+  for (const s of services) {
+    exitCodes[s.key] = 1; // default: not active
+  }
 
   for (const line of result.stdout.split('\n')) {
-    for (const name of SERVICES) {
-      if (line.startsWith(`${name}:`)) {
-        const code = parseInt(line.slice(name.length + 1).trim(), 10);
-        exitCodes[name] = isNaN(code) ? 1 : code;
+    for (const s of services) {
+      if (line.startsWith(`${s.key}:`)) {
+        const code = parseInt(line.slice(s.key.length + 1).trim(), 10);
+        exitCodes[s.key] = isNaN(code) ? 1 : code;
       }
     }
   }
@@ -76,27 +57,27 @@ export async function GET() {
     return Response.json({ error: 'GPU_VM_IP not configured' }, { status: 500 });
   }
 
+  const services = loadServicesConfig();
+  if (services.length === 0) {
+    return Response.json({ statuses: {} });
+  }
+
   const ssh = new NodeSSH();
   try {
     await ssh.connect({ host: VM_IP, username: VM_USER, privateKeyPath: SSH_KEY_PATH });
 
     const [systemdResults, probeResults] = await Promise.all([
-      runSystemctlChecks(ssh),
-      Promise.all(SERVICES.map((s) => probe(SERVICE_CONFIG[s].probeUrl))),
+      runSystemctlChecks(ssh, services),
+      Promise.all(services.map((s) => probe(s.probeUrl))),
     ]);
 
-    const statuses: Record<ServiceName, ServiceStatus> = {
-      'comfy-illustrator': 'unknown',
-      'aphrodite-writer': 'unknown',
-      'aphrodite-cinematographer': 'unknown',
-    };
-
-    SERVICES.forEach((name, i) => {
-      const systemdActive = systemdResults[name] === 0;
+    const statuses: Record<string, ServiceStatus> = {};
+    services.forEach((s, i) => {
+      const systemdActive = systemdResults[s.key] === 0;
       const probeOk = probeResults[i];
-      if (!systemdActive) statuses[name] = 'inactive';
-      else if (probeOk) statuses[name] = 'ready';
-      else statuses[name] = 'loading';
+      if (!systemdActive) statuses[s.key] = 'inactive';
+      else if (probeOk) statuses[s.key] = 'ready';
+      else statuses[s.key] = 'loading';
     });
 
     return Response.json({ statuses });

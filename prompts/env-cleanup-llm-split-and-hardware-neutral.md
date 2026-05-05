@@ -137,7 +137,7 @@ Also: **drop the hardware-specific Infrastructure section content** that names t
 | Machine | Role |
 |---------|------|
 | `mint-pc` | Local Linux desktop. Hosts Next.js (port 3001), PostgreSQL, and the PM2 SSH tunnel. Reachable from the tablet over Wi-Fi. |
-| `a100-core` | Azure VM, 4× A100 GPUs. Runs ComfyUI on port 8188. Bound to Tailscale only — no public internet exposure. Tailscale IP: `100.96.99.94`. |
+| `a100-core` | Azure VM, 4× A100 GPUs. Runs ComfyUI on port 8188. Bound to Tailscale only — no public internet exposure. Tailscale IP: `<gpu-vm-ip>`. |
 ```
 
 With:
@@ -157,7 +157,7 @@ ssh -N -L 0.0.0.0:8188:<gpu-vm-ip>:8188 <user>@<gpu-vm-ip>
 
 Also drop the literal Tailscale IP from the source layout description in `civitaiIngest.ts`'s entry — change "SSH-driven CivitAI metadata fetch + download to A100 VM" to "SSH-driven CivitAI metadata fetch + download to the GPU VM".
 
-`grep -n "A100\|a100\|100.96.99.94" CLAUDE.md` should return nothing after this.
+`grep -n "A100\|a100\|<gpu-vm-ip>" CLAUDE.md` should return nothing after this.
 
 ---
 
@@ -168,7 +168,7 @@ Also drop the literal Tailscale IP from the source layout description in `civita
 - `grep -rn "class_type.*['\"]LoadImage['\"]" src/` returns only ETN_LoadImageBase64 / ETN_LoadMaskBase64.
 - `grep -rn "A100_" src/` returns nothing.
 - `grep -rn "LLM_ENDPOINT" src/` returns only `POLISH_LLM_ENDPOINT` and `STORYBOARD_LLM_ENDPOINT` matches — no bare `LLM_ENDPOINT`.
-- `grep -n "A100\|a100\|100.96.99.94" CLAUDE.md` returns nothing.
+- `grep -n "A100\|a100\|<gpu-vm-ip>" CLAUDE.md` returns nothing.
 - `grep -n "A100\|a100" .env.example` returns nothing.
 - `grep -n "POLISH_LLM_ENDPOINT\|STORYBOARD_LLM_ENDPOINT" .env.example` returns matches for both.
 - `grep -n "GPU_VM_USER\|GPU_VM_IP\|GPU_VM_SSH_KEY_PATH" .env.example` returns matches for all three.
