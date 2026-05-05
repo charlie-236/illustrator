@@ -1312,6 +1312,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [renameValue, setRenameValue] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
   const [tabMenuStoryboardId, setTabMenuStoryboardId] = useState<string | null>(null);
+  const [tabMenuPos, setTabMenuPos] = useState<{top: number; right: number} | null>(null);
   // Scene edit state
   const [editingScene, setEditingScene] = useState<StoryboardScene | null>(null);
   const [insertAtPosition, setInsertAtPosition] = useState<number | null>(null);
@@ -1327,6 +1328,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
   // Derived: selected storyboard
   const storyboard = storyboards.find((s) => s.id === selectedStoryboardId) ?? null;
+  const tabMenuStoryboard = storyboards.find((s) => s.id === tabMenuStoryboardId) ?? null;
 
   // Phase 5c: Quick-generate state
   const [inFlightScenes, setInFlightScenes] = useState<Map<string, { startedAt: number; promptId: string }>>(new Map());
@@ -1658,7 +1660,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   async function handleRenameStoryboard() {
     if (!renamingStoryboardId || renameSaving) return;
     const name = renameValue.trim();
-    if (!name || name.length > 100) return;
+    if (!name) { setRenamingStoryboardId(null); return; }
+    if (name.length > 100) return;
     const sb = storyboards.find((s) => s.id === renamingStoryboardId);
     if (!sb || name === sb.name) { setRenamingStoryboardId(null); return; }
     setRenameSaving(true);
@@ -2313,32 +2316,23 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                       {selectedStoryboardId === sb.id && (
                         <button
                           type="button"
-                          onClick={() => setTabMenuStoryboardId(tabMenuStoryboardId === sb.id ? null : sb.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (tabMenuStoryboardId === sb.id) {
+                              setTabMenuStoryboardId(null);
+                              setTabMenuPos(null);
+                            } else {
+                              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                              setTabMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                              setTabMenuStoryboardId(sb.id);
+                            }
+                          }}
                           className="min-h-10 min-w-8 flex items-center justify-center rounded-lg rounded-l-none bg-violet-600/20 border border-violet-600/40 border-l-0 text-violet-400 hover:text-violet-200 transition-colors"
                           title="Storyboard options"
                         >
                           ⋮
                         </button>
                       )}
-                    </div>
-                  )}
-                  {/* Tab context menu */}
-                  {tabMenuStoryboardId === sb.id && (
-                    <div className="absolute top-full left-0 mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl overflow-hidden min-w-32">
-                      <button
-                        type="button"
-                        onClick={() => { setTabMenuStoryboardId(null); setRenamingStoryboardId(sb.id); setRenameValue(sb.name); }}
-                        className="w-full text-left px-4 py-3 text-sm text-zinc-300 hover:bg-zinc-800 min-h-12"
-                      >Rename</button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTabMenuStoryboardId(null);
-                          setSelectedStoryboardId(sb.id);
-                          setShowStoryboardDeleteConfirm(true);
-                        }}
-                        className="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-zinc-800 min-h-12"
-                      >Delete</button>
                     </div>
                   )}
                 </div>
@@ -2354,9 +2348,27 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
               </button>
             </div>
 
+            {/* Storyboard tab context menu — fixed to avoid overflow-x-auto clipping */}
+            {tabMenuStoryboardId && tabMenuPos && tabMenuStoryboard && (
+              <div
+                className="fixed z-50 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl overflow-hidden min-w-40"
+                style={{ top: tabMenuPos.top, right: tabMenuPos.right }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { setTabMenuStoryboardId(null); setTabMenuPos(null); setRenamingStoryboardId(tabMenuStoryboard.id); setRenameValue(tabMenuStoryboard.name); }}
+                  className="w-full text-left px-4 py-3 text-sm text-zinc-300 hover:bg-zinc-800 min-h-12"
+                >Rename</button>
+                <button
+                  type="button"
+                  onClick={() => { setTabMenuStoryboardId(null); setTabMenuPos(null); setSelectedStoryboardId(tabMenuStoryboard.id); setShowStoryboardDeleteConfirm(true); }}
+                  className="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-zinc-800 min-h-12"
+                >Delete</button>
+              </div>
+            )}
             {/* Close tab menu on outside click */}
             {tabMenuStoryboardId && (
-              <div className="fixed inset-0 z-10" onClick={() => setTabMenuStoryboardId(null)} />
+              <div className="fixed inset-0 z-40" onClick={() => { setTabMenuStoryboardId(null); setTabMenuPos(null); }} />
             )}
 
             {/* Content area */}

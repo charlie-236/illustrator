@@ -1193,9 +1193,10 @@ One-shot migration script: `scripts/migrate-storyboard-to-relational.ts`. Reads 
 
 - Tab per storyboard, ordered by `position`. Active tab highlighted. Tap to switch.
 - "+" tab at the right end opens a "New storyboard" flow (generates via LLM or creates blank).
-- Right-tap / long-press on a tab opens a context menu: Rename, Delete.
-- Rename: inline text input replacing the tab label; confirmed with Enter.
-- Delete: `DELETE /api/storyboards/[id]`, removes from local state.
+- The active tab has a ⋮ overflow button that opens a fixed-position popover with Rename and Delete entries.
+- Rename: puts the tab into inline-edit mode (Enter/blur saves, Escape cancels, empty input cancels). PUTs the updated storyboard.
+- Delete: routes to the same confirm dialog as the section-bottom "Delete storyboard" button — both surfaces converge on a single delete handler.
+- The ⋮ popover is rendered as `position: fixed` (not absolutely inside the overflow-x-auto tab strip) to avoid clipping.
 - Selected tab ID persisted to `sessionStorage` per project (`storyboard-tab-${projectId}`).
 - Derived: `const storyboard = storyboards.find(s => s.id === selectedStoryboardId) ?? null`.
 
