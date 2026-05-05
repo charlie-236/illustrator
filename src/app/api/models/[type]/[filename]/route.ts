@@ -30,18 +30,18 @@ export async function DELETE(
 
   const modelType = type as ModelType;
 
-  const VM_USER = process.env.A100_VM_USER ?? '';
-  const VM_IP = process.env.A100_VM_IP ?? '';
-  const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
+  const VM_USER = process.env.GPU_VM_USER ?? '';
+  const VM_IP = process.env.GPU_VM_IP ?? '';
+  const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 
   if (!VM_USER) {
-    return NextResponse.json({ error: 'A100_VM_USER not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'GPU_VM_USER not configured' }, { status: 500 });
   }
   if (!VM_IP) {
-    return NextResponse.json({ error: 'A100_VM_IP not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'GPU_VM_IP not configured' }, { status: 500 });
   }
   if (!SSH_KEY_PATH) {
-    return NextResponse.json({ error: 'A100_SSH_KEY_PATH not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'GPU_VM_SSH_KEY_PATH not configured' }, { status: 500 });
   }
 
   const modelsRoot = process.env.COMFYUI_MODELS_ROOT ?? '/models/ComfyUI/models';

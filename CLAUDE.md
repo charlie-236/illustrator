@@ -7,7 +7,7 @@ Mobile-first ComfyUI generation frontend. Next.js 14 App Router, Tailwind CSS, P
 ## 🛑 CRITICAL ARCHITECTURE RULES
 
 ### 1. The Disk-Avoidance Constraint (was "WebSocket Constraint")
-The remote A100 VM has severely limited disk space. ComfyUI must NEVER write generation files to local storage in either direction.
+The remote GPU VM has severely limited disk space. ComfyUI must NEVER write generation files to local storage in either direction.
 
 Outputs: Use SaveImageWebsocket only. Never SaveImage.
 Inputs (reference images): Use ETN_LoadImageBase64 only. Never LoadImage (requires prior upload to disk) or /upload/image API (writes to disk).
@@ -29,16 +29,17 @@ This is a tablet-first application. Every interactive element MUST have a minimu
 Model filenames (LoRAs, checkpoints, embeddings) are obfuscated at ingest time. `civitaiIngest.ts` generates a 6-byte hex stem via `randomBytes(6).toString('hex')`; the file lands on disk as `<hex>.safetensors`; `LoraConfig.loraName` (and equivalents for checkpoints/embeddings) stores that obfuscated string. The user-visible identifier everywhere — UI rows, picker labels, workflow `_meta.title`, logs, error messages — is `friendlyName`. The **only** place the obfuscated `loraName` appears observably is the `lora_name` field of `LoraLoader` / `LoraLoaderModelOnly` nodes in workflow JSON sent to ComfyUI, where it's required for ComfyUI to resolve the on-disk file. When `friendlyName` is unavailable (e.g., a LoraEntry assembled from a legacy record without metadata), the fallback display string is `'(unknown LoRA)'` — never the raw obfuscated `loraName`.
 
 ### 5. Network & API Routing Rules
-All communication between the Next.js frontend/backend and the A100 Core VM MUST route through the established local SSH tunnels. The Next.js API should NEVER attempt to contact `100.96.99.94` directly. 
+All communication between the Next.js frontend/backend and the GPU VM MUST route through the established local SSH tunnels. The Next.js API should NEVER attempt to contact the GPU VM directly by IP. 
 
 Use the following `localhost` / `127.0.0.1` ports for all fetch requests:
 * **ComfyUI (Image Generation):** `http://127.0.0.1:8188`
-* **LLM / Prompt Polish:** `LLM_ENDPOINT` env var (typically `http://127.0.0.1:11438/v1/chat/completions`)
+* **LLM / Prompt Polish:** `POLISH_LLM_ENDPOINT` env var (typically `http://127.0.0.1:11438/v1/chat/completions`)
+* **LLM / Storyboard:** `STORYBOARD_LLM_ENDPOINT` env var (typically `http://127.0.0.1:11438/v1/chat/completions`)
 ---
 
 ## Environment
 
-`.env` is the single source of truth for operational config. Every var has a comment in `.env.example` explaining its purpose, format, default, and missing-value behavior. The general pattern: SSH-related vars (`A100_*`, `A100_SSH_KEY_PATH`) fail closed with a 500 if missing; HTTP endpoint vars have sensible localhost defaults; numeric tuning vars (timeouts, page sizes) have documented defaults that match historical hardcoded values.
+`.env` is the single source of truth for operational config. Every var has a comment in `.env.example` explaining its purpose, format, default, and missing-value behavior. The general pattern: SSH-related vars (`GPU_VM_*`) fail closed with a 500 if missing; HTTP endpoint vars have sensible localhost defaults; numeric tuning vars (timeouts, page sizes) have documented defaults that match historical hardcoded values.
 
 ```
 DATABASE_URL=postgresql://...              # local Postgres — required, no default
@@ -54,15 +55,16 @@ COMFYUI_URL=http://127.0.0.1:8188          # ComfyUI HTTP API (default: 127.0.0.
 COMFYUI_WS_URL=ws://127.0.0.1:8188         # ComfyUI WebSocket (default: 127.0.0.1:8188)
 
 CIVITAI_TOKEN=...                          # CivitAI API token — required for model ingest
-A100_VM_USER=charlie                       # SSH username for the Azure VM — fail-closed
-A100_VM_IP=100.96.99.94                    # Tailscale IP of the Azure VM — fail-closed
-A100_SSH_KEY_PATH=/home/charlie/.ssh/a100-key.pem  # Private key for VM SSH — fail-closed
+GPU_VM_USER=<user>                         # SSH username for the GPU VM — fail-closed
+GPU_VM_IP=<ip>                             # Reachable IP of the GPU VM — fail-closed
+GPU_VM_SSH_KEY_PATH=/path/to/key.pem       # Private key for VM SSH — fail-closed
 
 COMFYUI_MODELS_ROOT=/models/ComfyUI/models # Base path for model files on the VM (default shown)
 COMFYUI_OUTPUT_PATH=/models/ComfyUI/output # VM output dir for SSH cleanup glob (default shown)
 
-LLM_ENDPOINT=http://127.0.0.1:11438/v1/chat/completions  # Polish LLM endpoint
-POLISH_LLM_MODEL=/path/to/model.gguf       # Model identifier for the LLM endpoint
+POLISH_LLM_ENDPOINT=http://127.0.0.1:11438/v1/chat/completions  # Polish LLM endpoint
+POLISH_LLM_MODEL=/path/to/model.gguf       # Model identifier for the polish LLM endpoint
+STORYBOARD_LLM_ENDPOINT=http://127.0.0.1:11438/v1/chat/completions  # Storyboard LLM endpoint
 
 # Polish tuning — all have defaults matching historical values
 POLISH_TIMEOUT_MS=30000                    # LLM call timeout (default 30 s)
@@ -108,15 +110,15 @@ ffmpeg is called server-side by `POST /api/extract-last-frame` via Node's `child
 | Machine | Role |
 |---------|------|
 | `mint-pc` | Local Linux desktop. Hosts Next.js (port 3001), PostgreSQL, and the PM2 SSH tunnel. Reachable from the tablet over Wi-Fi. |
-| `a100-core` | Azure VM, 4× A100 GPUs. Runs ComfyUI on port 8188. Bound to Tailscale only — no public internet exposure. Tailscale IP: `100.96.99.94`. |
+| `gpu-vm` | Remote VM running ComfyUI on port 8188. Reached only via the local SSH tunnel — never contacted directly from Next.js. |
 
 **The tunnel** is a PM2-managed process on `mint-pc`:
 ```bash
-ssh -N -L 0.0.0.0:8188:100.96.99.94:8188 charlie@100.96.99.94
+ssh -N -L 0.0.0.0:8188:<gpu-vm-ip>:8188 <user>@<gpu-vm-ip>
 ```
-This forwards `mint-pc:8188` → `a100-core:8188` over Tailscale, so the Next.js backend talks to ComfyUI via `127.0.0.1:8188` as if it were local.
+This forwards `mint-pc:8188` → `gpu-vm:8188`, so the Next.js backend talks to ComfyUI via `127.0.0.1:8188` as if it were local.
 
-**Do not suggest changes to the Azure VM or Tailscale setup.** Treat `127.0.0.1:8188` as a black-box API endpoint.
+**Do not suggest changes to the VM or network setup.** Treat `127.0.0.1:8188` as a black-box API endpoint.
 
 ## Architecture overview
 
@@ -278,7 +280,7 @@ Returns `{ checkpoints: string[], loras: string[], embeddings: string[] }`. Chec
 ### `POST /api/generate/polish`
 LLM-powered prompt expansion with frozen-token validation. Body: `{ positivePrompt: string, negativeAdditions?: string }` (max 500 chars on additions). Returns `{ positive: string, negative: string, polished: boolean, reason?: 'weight_drift' | 'llm_error' | 'timeout' | 'parse_error' }`.
 
-Calls `LLM_ENDPOINT` (set in `.env`; the local llama-server tunnel) with the model identifier from `POLISH_LLM_MODEL`. Uses a 30-second `AbortSignal` timeout.
+Calls `POLISH_LLM_ENDPOINT` (set in `.env`; the local llama-server tunnel) with the model identifier from `POLISH_LLM_MODEL`. Uses a 30-second `AbortSignal` timeout.
 
 The system prompt instructs the model to copy weighted tokens like `(eyes:1.5)`, `((rain))`, and `[[lora_name]]` byte-for-byte and append 15–20 new descriptive tags. After the LLM responds, `validatePreservation()` checks every frozen token from the user's input appears as an exact substring in the output. On weight drift the route retries once; on second failure it falls back to returning the user's original prompt with `polished: false` and a `reason` string explaining why.
 
@@ -291,7 +293,7 @@ The `✨ Polish` button in PromptArea (positive prompt only) calls this route. S
 ### `POST /api/services/control`
 SSH-based remote service control. Body: `{ serviceName: string, action: 'start' | 'stop' }`.
 
-Opens a NodeSSH connection to `A100_VM_IP` using `A100_SSH_KEY_PATH`, then runs `sudo systemctl {action} {unit}`. Returns `{ ok: true }` on success or `{ ok: false, error: string }` if systemctl fails. Returns HTTP 500 on SSH connection failure.
+Opens a NodeSSH connection to `GPU_VM_IP` using `GPU_VM_SSH_KEY_PATH`, then runs `sudo systemctl {action} {unit}`. Returns `{ ok: true }` on success or `{ ok: false, error: string }` if systemctl fails. Returns HTTP 500 on SSH connection failure.
 
 Service name → systemctl unit mapping:
 | serviceName | systemctl unit |
@@ -354,7 +356,7 @@ Each checkpoint config can store recommended generation defaults: steps, CFG, sa
 Default resolution is a single value drawn from the canonical `RESOLUTIONS` list shared with Studio's image form. Width and height are persisted as separate columns but are saved and validated as a pair. Selecting "— No default —" sets both to null; the Studio resolution dropdown is then left unchanged when this checkpoint is selected.
 
 ### `POST /api/models/ingest`
-SSE-streamed single-model ingestion. Body: `{ type: 'checkpoint' | 'lora', modelId: number, parentUrlId: number }`. Performs metadata fetch + download to A100 VM + size validation + DB upsert via SSH, emitting per-phase progress events. Used by the in-app ingestion UI; `add_model.sh` remains as a desktop fallback that posts to `/api/models/register` directly.
+SSE-streamed single-model ingestion. Body: `{ type: 'checkpoint' | 'lora', modelId: number, parentUrlId: number }`. Performs metadata fetch + download to the GPU VM + size validation + DB upsert via SSH, emitting per-phase progress events. Used by the in-app ingestion UI; `add_model.sh` remains as a desktop fallback that posts to `/api/models/register` directly.
 
 Phase events: `metadata`, `download`, `validate`, `register`, `done`, `error`. Error events may include an `orphanPath` field pointing to a file that exists on the VM but has no DB entry.
 
@@ -362,7 +364,7 @@ Phase events: `metadata`, `download`, `validate`, `register`, `done`, `error`. E
 Same as `/ingest` but accepts `{ items: [...] }` with up to 20 items. Each item extends the single-item body with a caller-supplied `clientId` string. Processes items sequentially and emits `item` events tagged with `clientId`, plus a final `summary` event with `{ succeeded, failed, total }`.
 
 ### `DELETE /api/models/[type]/[filename]`
-Removes a checkpoint, LoRA, or embedding by filename. `type` is `'checkpoint' | 'lora' | 'embedding'`; filename is the on-disk filename including extension. SSH-deletes the file from the A100 VM via `rm -f` (idempotent) and removes any matching DB row via Prisma `deleteMany` (also idempotent). Used by ModelConfig's delete buttons. Works whether or not a DB row exists for the filename, so orphan files are deletable from the UI.
+Removes a checkpoint, LoRA, or embedding by filename. `type` is `'checkpoint' | 'lora' | 'embedding'`; filename is the on-disk filename including extension. SSH-deletes the file from the GPU VM via `rm -f` (idempotent) and removes any matching DB row via Prisma `deleteMany` (also idempotent). Used by ModelConfig's delete buttons. Works whether or not a DB row exists for the filename, so orphan files are deletable from the UI.
 
 ### `GET /api/projects`
 Returns `{ projects: ProjectSummary[] }` ordered by `updatedAt DESC`. Each entry includes `clipCount` (via `_count`) and `coverFrame` (most-recent video clip's `filePath`).
@@ -447,7 +449,7 @@ src/
     wan22-templates/    wan22-t2v.json, wan22-i2v.json — API-format ComfyUI workflow templates (runtime data; do not reference prompts/ at runtime)
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
-    civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to A100 VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/
+    civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to the GPU VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/
     civitaiUrl.ts       parseCivitaiInput(input) — accepts CivitAI URLs and Air strings (urn:air:...); alias parseCivitaiUrl kept for backwards compat; returns canonicalUrl, type, baseModel; type now includes 'embedding'
     registerModel.ts    DB upsert logic shared by /api/models/register and ingest; handles checkpoint, lora, and embedding types; calls extractCategoryFromTags() in all three branches (lora, checkpoint, embedding)
     systemLoraFilter.ts isSystemLora() / filterSystemLoras() — hides system-managed LoRAs (IP-Adapter companion weights) from user-facing API responses
@@ -495,7 +497,7 @@ src/app/
 3. On `polished: true`, replaces the textarea with the expanded prompt that preserves all weighted tokens (`(word:N)`, `((word))`, `[[word]]`) byte-for-byte.
 4. On `polished: false`, leaves the textarea unchanged and shows a brief reason indicator (timeout, weight drift, parse error, etc.) — the user's prompt is never lost.
 
-The endpoint is configured via `LLM_ENDPOINT` (typically `http://127.0.0.1:11438/v1/chat/completions` when llama-server is tunnelled to mint-pc:11438) and `POLISH_LLM_MODEL` (the model identifier or path). See the `POST /api/generate/polish` API entry above for full request/response shape.
+The endpoint is configured via `POLISH_LLM_ENDPOINT` (typically `http://127.0.0.1:11438/v1/chat/completions` when llama-server is tunnelled to mint-pc:11438) and `POLISH_LLM_MODEL` (the model identifier or path). See the `POST /api/generate/polish` API entry above for full request/response shape.
 
 ## Workflow node graph
 
@@ -575,9 +577,9 @@ Fields:
 The header row (`TYPE|…`), blank lines, and lines starting with `#` are silently skipped.
 
 **What each line does:**
-1. SSHes into `a100-core` and runs `curl -4` to fetch `https://civitai.com/api/v1/model-versions/{MODEL_ID}` (the VM is in Poland and is not geoblocked; the local Mint PC in the UK gets HTTP 451). Validates the response is a JSON object.
+1. SSHes into the GPU VM and runs `curl -4` to fetch `https://civitai.com/api/v1/model-versions/{MODEL_ID}` (the VM is not geoblocked; the local Mint PC in the UK gets HTTP 451). Validates the response is a JSON object.
 2. Generates a random 12-char hex filename (e.g., `a3f9bc12d04e.safetensors`) to obfuscate the origin.
-3. SSHes into `a100-core` again and runs `wget` to download from `https://civitai.red/api/download/models/{MODEL_ID}?token=…` directly to `/models/ComfyUI/models/checkpoints/` or `/models/ComfyUI/models/loras/`. After download, runs a remote `stat` to verify the file is at least 1 MB — if smaller, treats it as a failed download (likely an HTML error page) and skips the item.
+3. SSHes into the GPU VM again and runs `wget` to download from `https://civitai.red/api/download/models/{MODEL_ID}?token=…` directly to `/models/ComfyUI/models/checkpoints/` or `/models/ComfyUI/models/loras/`. After download, runs a remote `stat` to verify the file is at least 1 MB — if smaller, treats it as a failed download (likely an HTML error page) and skips the item.
 4. Uses `jq` to wrap the raw CivitAI JSON as `civitaiMetadata` in the request body and `curl`s it to `POST /api/models/register`.
 5. Prints a per-model status line and a final summary (`N succeeded, N failed`).
 
@@ -1020,7 +1022,7 @@ Storyboards live as `Project.storyboardJson` (Json column). They're scene-by-sce
 - `PUT /api/projects/[id]/storyboard` — atomically saves a storyboard to a project, replacing any existing.
 - `DELETE /api/projects/[id]/storyboard` — clears the storyboard.
 
-**LLM integration:** mirrors the polisher's pattern. Uses shared `LLM_ENDPOINT` (one local LLM tunnel) with separate `STORYBOARD_LLM_MODEL` and sampling env vars (`STORYBOARD_TIMEOUT_MS`, `STORYBOARD_TEMPERATURE`, `STORYBOARD_TOP_P`, `STORYBOARD_MAX_TOKENS`). Output uses a structured `[SCENE N]` block format rather than JSON — local LLMs are more reliable with key:value blocks.
+**LLM integration:** mirrors the polisher's pattern. Uses `STORYBOARD_LLM_ENDPOINT` (independent from the polish endpoint) with `STORYBOARD_LLM_MODEL` and sampling env vars (`STORYBOARD_TIMEOUT_MS`, `STORYBOARD_TEMPERATURE`, `STORYBOARD_TOP_P`, `STORYBOARD_MAX_TOKENS`). Output uses a structured `[SCENE N]` block format rather than JSON — local LLMs are more reliable with key:value blocks.
 
 **UI:** Project Detail has a new collapsible Storyboard section above the Generate buttons. Empty state offers "Plan with AI"; populated state shows scene cards (read-only in 5a, editable in 5b).
 

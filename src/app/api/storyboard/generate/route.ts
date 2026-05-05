@@ -19,10 +19,10 @@ interface ChatCompletion {
 }
 
 async function callLLM(userPrompt: string): Promise<string> {
-  const endpoint = process.env.LLM_ENDPOINT;
+  const endpoint = process.env.STORYBOARD_LLM_ENDPOINT;
   const model = process.env.STORYBOARD_LLM_MODEL;
   if (!endpoint || !model) {
-    throw new Error('LLM_ENDPOINT or STORYBOARD_LLM_MODEL not set');
+    throw new Error('STORYBOARD_LLM_ENDPOINT or STORYBOARD_LLM_MODEL not set');
   }
 
   const timeoutMs = parseInt(process.env.STORYBOARD_TIMEOUT_MS ?? '60000', 10);

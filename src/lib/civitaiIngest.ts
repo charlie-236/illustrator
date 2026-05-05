@@ -2,9 +2,9 @@ import { NodeSSH } from 'node-ssh';
 import { randomBytes } from 'crypto';
 import { registerModel, type CivitAIMetadata } from '@/lib/registerModel';
 
-const VM_USER = process.env.A100_VM_USER ?? '';
-const VM_IP = process.env.A100_VM_IP ?? '';
-const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
+const VM_USER = process.env.GPU_VM_USER ?? '';
+const VM_IP = process.env.GPU_VM_IP ?? '';
+const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN ?? '';
 const COMFYUI_MODELS_ROOT = process.env.COMFYUI_MODELS_ROOT ?? '/models/ComfyUI/models';
 const MIN_FILE_SIZE = 1024 * 1024;
@@ -30,15 +30,15 @@ export interface IngestRequest {
 
 export async function* ingestModel(req: IngestRequest): AsyncGenerator<IngestPhase> {
   if (!SSH_KEY_PATH) {
-    yield { phase: 'error', message: 'A100_SSH_KEY_PATH not configured' };
+    yield { phase: 'error', message: 'GPU_VM_SSH_KEY_PATH not configured' };
     return;
   }
   if (!VM_USER) {
-    yield { phase: 'error', message: 'A100_VM_USER not configured' };
+    yield { phase: 'error', message: 'GPU_VM_USER not configured' };
     return;
   }
   if (!VM_IP) {
-    yield { phase: 'error', message: 'A100_VM_IP not configured' };
+    yield { phase: 'error', message: 'GPU_VM_IP not configured' };
     return;
   }
   if (!CIVITAI_TOKEN) {
