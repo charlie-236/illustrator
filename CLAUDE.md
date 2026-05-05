@@ -73,7 +73,9 @@ POLISH_TOP_P=0.9
 POLISH_REPEAT_PENALTY=1.05
 POLISH_MAX_TOKENS=600
 
-# Job watchdog timeouts — default to historical hardcoded values
+# Job watchdog timeouts — timer resets when ComfyUI starts executing the job;
+# queue-wait time does not count against the budget. Set any to 0 to disable
+# that type's watchdog entirely.
 IMAGE_JOB_TIMEOUT_MS=600000                # 10 min
 VIDEO_JOB_TIMEOUT_MS=900000                # 15 min
 STITCH_JOB_TIMEOUT_MS=300000               # 5 min
@@ -144,7 +146,7 @@ Browser → POST /api/generate (SSE stream)
 
 - Connects to ComfyUI WS with a stable `clientId` (UUID generated once at startup). The `client_id` is passed in every `/prompt` POST so ComfyUI routes events back to this client only.
 - Reconnects automatically after 4 s on drop; increments `reconnectAttempts`.
-- On reconnect (`reconnectAttempts > 0`), calls `flushJobsOnReconnect()` (async, fire-and-forget). For each pending job it fetches `/history/{promptId}` from ComfyUI (5 s timeout): `status_str === 'success'` → the prompt finished but the binary frame was lost into the dead socket — send a "completed but image lost, please retry" error SSE; `status_str === 'error'` → send a "failed on GPU server" error SSE; anything else (empty response, still running, fetch failure) → **leave the job in place** so events can resume on the new connection. A 10-minute per-job watchdog (`expireJob`) reaps any job that goes permanently silent.
+- On reconnect (`reconnectAttempts > 0`), calls `flushJobsOnReconnect()` (async, fire-and-forget). For each pending job it fetches `/history/{promptId}` from ComfyUI (5 s timeout): `status_str === 'success'` → the prompt finished but the binary frame was lost into the dead socket — send a "completed but image lost, please retry" error SSE; `status_str === 'error'` → send a "failed on GPU server" error SSE; anything else (empty response, still running, fetch failure) → **leave the job in place** so events can resume on the new connection. A per-job watchdog (`expireJob`) reaps any job that goes permanently silent. Watchdog timers are queue-aware: the `execution_start` event resets the timer so jobs sitting in ComfyUI's queue don't burn their budget. The sentinel value 0 disables the watchdog for that job type.
 - `execution_success` **and** `executing` with `node === null` are both treated as end-of-prompt terminators, so older ComfyUI builds that omit `execution_success` still finalize correctly. A `finalized` flag on each job prevents double-finalization if both arrive.
 - Binary image frames are routed to the active job via the manager's `activePromptId` field, which is set from `executing` events (non-null node → set to that prompt_id; null node → clear). The per-job `activeNode` field is still used by the `executing` handler to distinguish progress events from terminators, but no longer drives binary routing.
 

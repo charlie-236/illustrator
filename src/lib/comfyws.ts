@@ -43,6 +43,8 @@ interface BaseJob {
   activeNode: string | null;
   finalized: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
+  /** Watchdog budget in ms. 0 = disabled. Written by addJob; reset on execution_start. */
+  timeoutMs: number;
   /** First ~60 chars of the positive prompt, for the queue tray display. */
   promptSummary: string;
   /** Unix ms timestamp when the job was registered (submitted to ComfyUI). */
@@ -111,9 +113,11 @@ export interface ActiveJobInfo {
 
 const COMFYUI_WS = process.env.COMFYUI_WS_URL ?? 'ws://127.0.0.1:8188';
 const COMFYUI_HTTP = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
-const IMAGE_JOB_TIMEOUT_MS = Number(process.env.IMAGE_JOB_TIMEOUT_MS) || 10 * 60 * 1000;
-const VIDEO_JOB_TIMEOUT_MS = Number(process.env.VIDEO_JOB_TIMEOUT_MS) || 15 * 60 * 1000;
-const STITCH_JOB_TIMEOUT_MS = Number(process.env.STITCH_JOB_TIMEOUT_MS) || 5 * 60 * 1000;
+// Use explicit undefined check so that setting the var to 0 (sentinel = disable watchdog)
+// is not swallowed by the || fallback (Number('0') is falsy).
+const IMAGE_JOB_TIMEOUT_MS = process.env.IMAGE_JOB_TIMEOUT_MS !== undefined ? Number(process.env.IMAGE_JOB_TIMEOUT_MS) : 10 * 60 * 1000;
+const VIDEO_JOB_TIMEOUT_MS = process.env.VIDEO_JOB_TIMEOUT_MS !== undefined ? Number(process.env.VIDEO_JOB_TIMEOUT_MS) : 15 * 60 * 1000;
+const STITCH_JOB_TIMEOUT_MS = process.env.STITCH_JOB_TIMEOUT_MS !== undefined ? Number(process.env.STITCH_JOB_TIMEOUT_MS) : 5 * 60 * 1000;
 const RECENT_COMPLETED_TTL_MS = Number(process.env.RECENT_COMPLETED_TTL_MS) || 5 * 60 * 1000;
 const COMFYUI_OUTPUT_PATH = process.env.COMFYUI_OUTPUT_PATH ?? '/models/ComfyUI/output';
 const VM_USER = process.env.GPU_VM_USER ?? '';
@@ -349,11 +353,15 @@ class ComfyWSManager {
   }
 
   /** Shared bookkeeping for all register* methods: sets the watchdog timer and
-   *  inserts the job into the active map. Pass timeoutId: null in the job literal;
-   *  this method overwrites it with the real timer handle. */
+   *  inserts the job into the active map. Pass timeoutId: null / timeoutMs: 0 in
+   *  the job literal; this method overwrites both with the real values.
+   *  timeoutMs === 0 disables the watchdog entirely (sentinel). */
   private addJob(job: Job, timeoutMs: number): void {
-    const timeoutId = setTimeout(() => this.expireJob(job.promptId), timeoutMs);
+    const timeoutId = timeoutMs > 0
+      ? setTimeout(() => this.expireJob(job.promptId), timeoutMs)
+      : null;
     job.timeoutId = timeoutId;
+    job.timeoutMs = timeoutMs;
     this.jobs.set(job.promptId, job);
   }
 
@@ -471,6 +479,18 @@ class ComfyWSManager {
     const { type, data } = msg;
 
     if (type === 'status') return; // ignore heartbeats
+
+    if (type === 'execution_start') {
+      // ComfyUI dequeued this prompt and is about to begin GPU work.
+      // Reset the watchdog so queue-wait time doesn't count against the budget.
+      const promptId = data.prompt_id as string;
+      const job = this.jobs.get(promptId);
+      if (job && job.timeoutMs > 0) {
+        if (job.timeoutId) clearTimeout(job.timeoutId);
+        job.timeoutId = setTimeout(() => this.expireJob(promptId), job.timeoutMs);
+      }
+      return;
+    }
 
     if (type === 'progress') {
       const job = this.jobs.get(data.prompt_id as string);
@@ -812,6 +832,7 @@ class ComfyWSManager {
       activeNode: null,
       finalized: false,
       timeoutId: null,
+      timeoutMs: 0,
       promptSummary,
       startedAt: Date.now(),
       runningSince: null,
@@ -835,6 +856,7 @@ class ComfyWSManager {
       activeNode: null,
       finalized: false,
       timeoutId: null,
+      timeoutMs: 0,
       promptSummary,
       startedAt: Date.now(),
       runningSince: null,
@@ -953,6 +975,7 @@ class ComfyWSManager {
       activeNode: null,
       finalized: false,
       timeoutId: null,
+      timeoutMs: 0,
       promptSummary,
       startedAt: Date.now(),
       runningSince: Date.now(), // ffmpeg starts immediately; no ComfyUI queue
