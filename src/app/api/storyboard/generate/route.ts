@@ -3,7 +3,14 @@ import { randomBytes } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { STORYBOARD_SYSTEM_PROMPT, buildUserMessage } from './prompt';
 import { parseStoryboard } from './parse';
-import type { Storyboard } from '@/types';
+import type { StoryboardScene } from '@/types';
+
+/** Partial storyboard returned by the LLM generate route — not yet persisted to a DB row */
+interface LLMStoryboard {
+  scenes: StoryboardScene[];
+  generatedAt: string;
+  storyIdea: string;
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -132,8 +139,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, reason: 'no_scenes' });
   }
 
-  // Build full storyboard (assign ids and positions — don't persist yet)
-  const storyboard: Storyboard = {
+  // Build storyboard shape (assign ids and positions — not persisted here; client PUTs to /api/storyboards/[id])
+  const storyboard: LLMStoryboard = {
     scenes: partialScenes.map((s, i) => ({
       id: randomBytes(8).toString('hex'),
       position: i,

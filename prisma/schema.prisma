@@ -38,7 +38,7 @@ model Generation {
   stitchedClipIds  String?                      // JSON array of source generation IDs
   videoLorasJson   Json?                        // WanLoraSpec[] for video; null for image and legacy
   lightning        Boolean?                     // true for Wan 2.2 Lightning; null for image and legacy
-  sceneId          String?                      // soft ref to StoryboardScene.id within Project.storyboardJson; null for non-storyboard clips
+  sceneId          String?                      // soft ref to StoryboardScene.id within a Storyboard row's scenesJson; null for non-storyboard clips
   createdAt        DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
@@ -57,11 +57,27 @@ model Project {
   defaultHeight   Int?
   defaultLightning  Boolean?
   defaultVideoLoras String?      // JSON-encoded WanLoraSpec[]
-  storyboardJson    Json?        // null = no storyboard. Object: { scenes: StoryboardScene[], generatedAt: string, storyIdea: string }
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   generations       Generation[] @relation("ProjectClips")
   stitchedExports   Generation[] @relation("StitchedFromProject")
+  storyboards       Storyboard[]
+}
+
+model Storyboard {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String   @default("Untitled storyboard")
+  scenesJson    Json                              // StoryboardScene[]
+  storyIdea     String
+  generatedAt   DateTime
+  quickGenerate Boolean  @default(false)
+  position      Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([projectId, position])
 }
 
 model CheckpointConfig {

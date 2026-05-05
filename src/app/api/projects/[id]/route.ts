@@ -105,6 +105,9 @@ export async function GET(
             promptPos: true,
           },
         },
+        storyboards: {
+          orderBy: { position: 'asc' },
+        },
       },
     });
 
@@ -127,7 +130,16 @@ export async function GET(
         defaultVideoLoras: project.defaultVideoLoras
           ? (() => { try { return JSON.parse(project.defaultVideoLoras); } catch { return null; } })()
           : null,
-        storyboard: project.storyboardJson ?? null,
+        storyboards: project.storyboards.map((sb) => ({
+          id: sb.id,
+          projectId: sb.projectId,
+          name: sb.name,
+          scenes: (sb.scenesJson as unknown[]) ?? [],
+          storyIdea: sb.storyIdea,
+          generatedAt: sb.generatedAt.toISOString(),
+          quickGenerate: sb.quickGenerate,
+          position: sb.position,
+        })),
         createdAt: project.createdAt.toISOString(),
         updatedAt: project.updatedAt.toISOString(),
       },

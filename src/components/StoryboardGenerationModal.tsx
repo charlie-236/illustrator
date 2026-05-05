@@ -6,6 +6,13 @@ import type { Storyboard } from '@/types';
 interface Props {
   projectId: string;
   initialStoryIdea?: string;
+  /**
+   * null = create a new storyboard row.
+   * non-null = replace scenes on the existing storyboard with this id.
+   */
+  targetStoryboardId: string | null;
+  /** The existing storyboard (for name/position when updating) */
+  targetStoryboard?: Storyboard;
   onClose: () => void;
   onSaved: (storyboard: Storyboard) => void;
 }
@@ -18,7 +25,21 @@ interface GenerateError {
   rawOutput?: string;
 }
 
-export default function StoryboardGenerationModal({ projectId, initialStoryIdea = '', onClose, onSaved }: Props) {
+/** Shape returned by the LLM generate route */
+interface LLMStoryboard {
+  scenes: Storyboard['scenes'];
+  storyIdea: string;
+  generatedAt: string;
+}
+
+export default function StoryboardGenerationModal({
+  projectId,
+  initialStoryIdea = '',
+  targetStoryboardId,
+  targetStoryboard,
+  onClose,
+  onSaved,
+}: Props) {
   const [storyIdea, setStoryIdea] = useState(initialStoryIdea);
   const [sceneCount, setSceneCount] = useState(5);
   const [status, setStatus] = useState<Status>('idle');
@@ -37,7 +58,7 @@ export default function StoryboardGenerationModal({ projectId, initialStoryIdea 
     abortRef.current = ac;
 
     try {
-      // Step 1: Generate storyboard
+      // Step 1: LLM storyboard generation (stateless)
       const genRes = await fetch('/api/storyboard/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -45,7 +66,7 @@ export default function StoryboardGenerationModal({ projectId, initialStoryIdea 
         signal: ac.signal,
       });
 
-      const genData = await genRes.json() as { ok: boolean; storyboard?: Storyboard; reason?: ErrorReason; rawOutput?: string };
+      const genData = await genRes.json() as { ok: boolean; storyboard?: LLMStoryboard; reason?: ErrorReason; rawOutput?: string };
 
       if (!genData.ok || !genData.storyboard) {
         setError({ reason: genData.reason ?? 'llm_error', rawOutput: genData.rawOutput });
@@ -53,21 +74,67 @@ export default function StoryboardGenerationModal({ projectId, initialStoryIdea 
         return;
       }
 
-      // Step 2: Save storyboard
-      const saveRes = await fetch(`/api/projects/${projectId}/storyboard`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storyboard: genData.storyboard }),
-        signal: ac.signal,
-      });
+      let savedStoryboard: Storyboard;
 
-      if (!saveRes.ok) {
-        setError({ reason: 'llm_error' });
-        setStatus('error');
-        return;
+      if (targetStoryboardId && targetStoryboard) {
+        // Update existing storyboard
+        const updatedSb: Storyboard = {
+          ...targetStoryboard,
+          scenes: genData.storyboard.scenes,
+          storyIdea: genData.storyboard.storyIdea,
+          generatedAt: genData.storyboard.generatedAt,
+        };
+        const saveRes = await fetch(`/api/storyboards/${targetStoryboardId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storyboard: updatedSb }),
+          signal: ac.signal,
+        });
+        if (!saveRes.ok) {
+          setError({ reason: 'llm_error' });
+          setStatus('error');
+          return;
+        }
+        const saveData = await saveRes.json() as { storyboard: Storyboard };
+        savedStoryboard = saveData.storyboard;
+      } else {
+        // Create new storyboard row, then populate it
+        const createRes = await fetch(`/api/projects/${projectId}/storyboards`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Storyboard' }),
+          signal: ac.signal,
+        });
+        if (!createRes.ok) {
+          setError({ reason: 'llm_error' });
+          setStatus('error');
+          return;
+        }
+        const createData = await createRes.json() as { storyboard: Storyboard };
+        const newSb = createData.storyboard;
+
+        const populatedSb: Storyboard = {
+          ...newSb,
+          scenes: genData.storyboard.scenes,
+          storyIdea: genData.storyboard.storyIdea,
+          generatedAt: genData.storyboard.generatedAt,
+        };
+        const saveRes = await fetch(`/api/storyboards/${newSb.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storyboard: populatedSb }),
+          signal: ac.signal,
+        });
+        if (!saveRes.ok) {
+          setError({ reason: 'llm_error' });
+          setStatus('error');
+          return;
+        }
+        const saveData = await saveRes.json() as { storyboard: Storyboard };
+        savedStoryboard = saveData.storyboard;
       }
 
-      onSaved(genData.storyboard);
+      onSaved(savedStoryboard);
       onClose();
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
@@ -119,7 +186,9 @@ export default function StoryboardGenerationModal({ projectId, initialStoryIdea 
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800">
-          <h2 className="text-base font-semibold text-zinc-100">Plan with AI</h2>
+          <h2 className="text-base font-semibold text-zinc-100">
+            {targetStoryboardId ? 'Regenerate storyboard' : 'Plan with AI'}
+          </h2>
           {status !== 'loading' && (
             <button
               onClick={onClose}
@@ -230,7 +299,6 @@ export default function StoryboardGenerationModal({ projectId, initialStoryIdea 
             <div className="space-y-4 py-2">
               <p className="text-sm text-red-400">{getErrorMessage(error.reason)}</p>
 
-              {/* Show raw output for parse errors */}
               {error.reason === 'parse_error' && error.rawOutput && (
                 <div>
                   <button
@@ -248,7 +316,6 @@ export default function StoryboardGenerationModal({ projectId, initialStoryIdea 
                 </div>
               )}
 
-              {/* Preserve the story idea for retry */}
               <div className="bg-zinc-800/60 rounded-lg p-3">
                 <p className="text-xs text-zinc-500 mb-1">Your story idea (preserved):</p>
                 <p className="text-sm text-zinc-300 line-clamp-3">{storyIdea}</p>
