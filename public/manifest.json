@@ -1,7 +1,7 @@
 {
-  "name": "Illustrator",
-  "short_name": "Illustrator",
-  "description": "ComfyUI Generation Studio",
+  "name": "Loom",
+  "short_name": "Loom",
+  "description": "Multi-modal creative workspace for stories.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -9,7 +9,13 @@
   "theme_color": "#09090b",
   "icons": [
     {
-      "src": "/icon",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

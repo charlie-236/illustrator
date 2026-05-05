@@ -146,10 +146,10 @@ export default function ServerBay() {
 
   return (
     <div className="p-4 space-y-4">
-      {/* Illustrator Stack card */}
+      {/* Loom Stack card */}
       <div className="card space-y-3">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-200">Illustrator Stack</h3>
+          <h3 className="text-sm font-semibold text-zinc-200">Loom Stack</h3>
           <p className="text-xs text-zinc-400 mt-0.5">
             Start and stop all configured services as a group, or control individually below.
           </p>

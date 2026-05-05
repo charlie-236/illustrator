@@ -1,6 +1,6 @@
-# Illustrator
+# Loom
 
-Mobile-first ComfyUI generation frontend. Next.js 14 App Router, Tailwind CSS, Prisma + PostgreSQL. Runs locally via PM2 on port **3001**. ComfyUI backend is tunneled to `localhost:8188`.
+Loom is a tablet-first multi-modal creative workspace. Single-user, local-first. Generates images and video clips via ComfyUI on a remote GPU VM, plans projects via storyboards driven by a local LLM, and is being extended toward long-form prose. Next.js 14 App Router, Tailwind CSS, Prisma + PostgreSQL. Runs locally via PM2 on port **3001**. ComfyUI backend is tunneled to `localhost:8188`.
 
 ---
 
