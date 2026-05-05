@@ -96,6 +96,64 @@ function resolveCanonicalClipId(scene: StoryboardScene, projectClips: ProjectCli
   return sceneClips[0]?.id ?? null;
 }
 
+// ── Phase 5c helpers ──────────────────────────────────────────────────────────
+
+const VALID_FRAME_COUNTS = [17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121] as const;
+
+function clampToValidFrameCount(n: number): number {
+  let best: number = VALID_FRAME_COUNTS[0];
+  let minDist = Math.abs(n - best);
+  for (const f of VALID_FRAME_COUNTS) {
+    const dist = Math.abs(n - f);
+    if (dist < minDist) { minDist = dist; best = f; }
+  }
+  return best;
+}
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+async function encodeImageToBase64(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
+  const buf = await res.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function readInitEvent(body: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error('Stream ended before init event');
+      buffer += decoder.decode(value, { stream: true });
+      const messages = buffer.split('\n\n');
+      buffer = messages.pop() ?? '';
+      for (const message of messages) {
+        if (!message.includes('event: init')) continue;
+        const dataLine = message.split('\n').find((l) => l.startsWith('data: '));
+        if (!dataLine) continue;
+        const data = JSON.parse(dataLine.slice(6)) as { promptId: string };
+        return data.promptId;
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => { /* ignore */ });
+  }
+}
+
 function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, projectName: string): GenerationRecord {
   return {
     id: e.id,
@@ -843,6 +901,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [editingScene, setEditingScene] = useState<StoryboardScene | null>(null);
   // Canonical clip picker state
   const [canonicalPickerScene, setCanonicalPickerScene] = useState<StoryboardScene | null>(null);
+
+  // Phase 5c: Quick-generate state
+  const [inFlightScenes, setInFlightScenes] = useState<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  const [quickGenerateError, setQuickGenerateError] = useState<{ sceneId: string; message: string } | null>(null);
+  const [nowTick, setNowTick] = useState(Date.now());
+
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [nameSaving, setNameSaving] = useState(false);
@@ -903,6 +967,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const { addJob } = useQueue();
+
+  // Ref so polling closures always read the latest inFlightScenes without re-creating the interval
+  const inFlightScenesRef = useRef<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  inFlightScenesRef.current = inFlightScenes;
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -935,6 +1005,59 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     return () => document.removeEventListener('mousedown', handler);
   }, [showOverflow]);
 
+  // Phase 5c: tick every second while any scenes are in-flight (drives elapsed display)
+  useEffect(() => {
+    if (inFlightScenes.size === 0) return;
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [inFlightScenes.size]);
+
+  // Phase 5c: poll for completion while any scenes are in-flight
+  useEffect(() => {
+    if (inFlightScenes.size === 0) return;
+    const STALE_INFLIGHT_MS = 30 * 60 * 1000;
+    const interval = setInterval(async () => {
+      const currentInFlight = inFlightScenesRef.current;
+      if (currentInFlight.size === 0) return;
+      try {
+        const res = await fetch(`/api/projects/${projectId}`);
+        if (!res.ok) return;
+        const data = await res.json() as { project: typeof project; clips: ProjectClip[]; stitchedExports: typeof stitchedExports };
+        const freshClips: ProjectClip[] = data.clips ?? [];
+        const now = Date.now();
+        const toRemove: string[] = [];
+        const staleIds: string[] = [];
+        for (const [sceneId, entry] of currentInFlight.entries()) {
+          const newClip = freshClips.find(
+            (c) => c.sceneId === sceneId && new Date(c.createdAt).getTime() > entry.startedAt,
+          );
+          if (newClip) {
+            toRemove.push(sceneId);
+          } else if (now - entry.startedAt > STALE_INFLIGHT_MS) {
+            toRemove.push(sceneId);
+            staleIds.push(sceneId);
+          }
+        }
+        if (toRemove.length > 0) {
+          setInFlightScenes((prev) => {
+            const next = new Map(prev);
+            for (const id of toRemove) next.delete(id);
+            return next;
+          });
+        }
+        if (staleIds.length > 0) {
+          setQuickGenerateError({ sceneId: staleIds[0], message: 'Generation appears to have timed out' });
+        }
+        // Refresh project data so scene cards update
+        setClips(freshClips);
+        if (data.project) setProject(data.project);
+        if (data.project?.storyboard !== undefined) setStoryboard(data.project.storyboard ?? null);
+        if (data.stitchedExports) setStitchedExports(data.stitchedExports);
+      } catch { /* ignore poll errors */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inFlightScenes.size, projectId]);
 
   async function saveName() {
     if (!project || nameValue.trim() === '' || nameValue.trim() === project.name) {
@@ -1001,7 +1124,123 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }
   }
 
+  async function handleQuickGenerateToggle() {
+    if (!storyboard) return;
+    const updated: Storyboard = { ...storyboard, quickGenerate: !storyboard.quickGenerate };
+    setStoryboard(updated); // optimistic
+    try {
+      await fetch(`/api/projects/${projectId}/storyboard`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storyboard: updated }),
+      });
+    } catch {
+      setStoryboard(storyboard); // revert on failure
+    }
+  }
+
+  async function handleQuickGenerateScene(scene: StoryboardScene) {
+    if (!project) return;
+    if (inFlightScenes.has(scene.id)) return;
+
+    const sceneIndex = scene.position;
+    let suggestedStartingClipId: string | null = null;
+    if (storyboard && sceneIndex > 0) {
+      const prevScene = storyboard.scenes[sceneIndex - 1];
+      if (prevScene) {
+        suggestedStartingClipId = resolveCanonicalClipId(prevScene, clips);
+      }
+    }
+
+    // Resolve starting frame for i2v chaining
+    let startImageB64: string | undefined;
+    let mode: 't2v' | 'i2v' = 't2v';
+
+    if (suggestedStartingClipId) {
+      const startClip = clips.find((c) => c.id === suggestedStartingClipId);
+      if (startClip) {
+        try {
+          if (startClip.mediaType === 'image') {
+            startImageB64 = await encodeImageToBase64(imgSrc(startClip.filePath));
+            mode = 'i2v';
+          } else {
+            const extractRes = await fetch('/api/extract-last-frame', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ generationId: suggestedStartingClipId }),
+            });
+            if (extractRes.ok) {
+              const { frameB64 } = await extractRes.json() as { frameB64: string };
+              startImageB64 = frameB64;
+              mode = 'i2v';
+            } else {
+              console.warn('[quick-generate] extract-last-frame failed, falling back to t2v');
+              setQuickGenerateError({ sceneId: scene.id, message: "Starting frame couldn't load, generating without it" });
+            }
+          }
+        } catch (err) {
+          console.warn('[quick-generate] starting frame extraction failed:', err);
+          setQuickGenerateError({ sceneId: scene.id, message: "Starting frame couldn't load, generating without it" });
+        }
+      }
+    }
+
+    const frames = clampToValidFrameCount(scene.durationSeconds * 16);
+    const requestBody: Record<string, unknown> = {
+      mode,
+      prompt: scene.positivePrompt,
+      width: project.defaultWidth ?? 1280,
+      height: project.defaultHeight ?? 704,
+      frames,
+      steps: 4,
+      cfg: 1,
+      seed: -1,
+      lightning: true,
+      loras: project.defaultVideoLoras ?? [],
+      projectId: project.id,
+      sceneId: scene.id,
+      batchSize: 1,
+    };
+    if (startImageB64) requestBody.startImageB64 = startImageB64;
+
+    let promptId: string;
+    try {
+      const res = await fetch('/api/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error((errBody as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error('No SSE body');
+      promptId = await readInitEvent(res.body);
+    } catch (err) {
+      setQuickGenerateError({ sceneId: scene.id, message: String(err) });
+      return;
+    }
+
+    const startedAt = Date.now();
+    addJob({
+      promptId,
+      generationId: '',
+      mediaType: 'video',
+      promptSummary: `Scene ${scene.position + 1}: ${scene.description.slice(0, 40)}`,
+      startedAt,
+      runningSince: null,
+      progress: null,
+      status: 'queued',
+    });
+    setInFlightScenes((prev) => new Map(prev).set(scene.id, { startedAt, promptId }));
+  }
+
   function handleGenerateScene(scene: StoryboardScene) {
+    if (storyboard?.quickGenerate) {
+      void handleQuickGenerateScene(scene);
+      return;
+    }
+    // Studio bounce path (Phase 5b behavior)
     if (!project) return;
     const sceneIndex = scene.position;
 
@@ -1201,11 +1440,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
       {/* ── Storyboard section ── */}
       <div className="px-4 pt-4 border-b border-zinc-800 pb-4">
-        <button
-          onClick={() => setStoryboardExpanded((v) => !v)}
-          className="w-full flex items-center justify-between gap-2 group min-h-10"
-        >
-          <div className="flex items-center gap-2">
+        <div className="w-full flex items-center justify-between gap-2 min-h-10">
+          {/* Left: expand/collapse trigger */}
+          <button
+            onClick={() => setStoryboardExpanded((v) => !v)}
+            className="flex items-center gap-2 group flex-1 text-left py-1"
+          >
             <span className="text-base">📓</span>
             <span className="text-sm font-semibold text-zinc-200">Storyboard</span>
             {storyboard && (
@@ -1215,14 +1455,40 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                 {new Date(storyboard.generatedAt).toLocaleDateString()}
               </span>
             )}
+          </button>
+
+          {/* Right: quick-generate toggle + chevron */}
+          <div className="flex items-center gap-1">
+            {storyboard && (
+              <button
+                type="button"
+                onClick={() => { void handleQuickGenerateToggle(); }}
+                className="flex items-center gap-1.5 min-h-12 px-2 rounded-lg hover:bg-zinc-800 transition-colors"
+                title="Generate scenes inline with Lightning defaults. Toggle off to fine-tune in Studio."
+              >
+                <span className="text-xs text-zinc-400">⚡ Quick</span>
+                <div className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+                  storyboard.quickGenerate ? 'bg-amber-500' : 'bg-zinc-600'
+                }`}>
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                    storyboard.quickGenerate ? 'translate-x-4' : 'translate-x-0.5'
+                  }`} />
+                </div>
+              </button>
+            )}
+            <button
+              onClick={() => setStoryboardExpanded((v) => !v)}
+              className="min-h-12 min-w-10 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
+            >
+              <svg
+                className={`w-4 h-4 text-zinc-500 transition-transform ${storyboardExpanded ? '' : '-rotate-90'}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
           </div>
-          <svg
-            className={`w-4 h-4 text-zinc-500 transition-transform ${storyboardExpanded ? '' : '-rotate-90'}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+        </div>
 
         {storyboardExpanded && (
           <div className="mt-3 space-y-3">
@@ -1311,18 +1577,49 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                       </button>
                     )}
 
+                    {/* Quick-generate error banner */}
+                    {quickGenerateError?.sceneId === scene.id && (
+                      <div className="flex items-start gap-2 bg-red-900/30 border border-red-700/40 rounded-lg px-3 py-2">
+                        <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span className="flex-1 text-xs text-red-300 leading-relaxed">
+                          {quickGenerateError.message}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setQuickGenerateError(null)}
+                          className="min-w-8 min-h-8 flex items-center justify-center rounded text-red-400 hover:text-red-200 flex-shrink-0"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+
                     {/* Generate / Edit buttons */}
                     <div className="flex gap-2 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => handleGenerateScene(scene)}
-                        className="flex-1 min-h-12 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 hover:border-violet-600/50 text-violet-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        Generate this scene
-                      </button>
+                      {inFlightScenes.has(scene.id) ? (
+                        <div className="flex-1 min-h-12 rounded-xl bg-zinc-700/60 border border-zinc-600/40 text-zinc-400 text-sm flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                          <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Generating... {formatElapsed(nowTick - (inFlightScenes.get(scene.id)?.startedAt ?? nowTick))}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateScene(scene)}
+                          className="flex-1 min-h-12 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 hover:border-violet-600/50 text-violet-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Generate this scene
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setEditingScene(scene)}

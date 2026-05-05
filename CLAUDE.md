@@ -1111,6 +1111,37 @@ Source layout additions (Phase 5b):
 
 ---
 
+## Phase 5c — Storyboard quick-generate
+
+Storyboards gain a `quickGenerate` boolean toggle (stored on the `Storyboard` object inside `Project.storyboardJson`). When ON, the per-scene Generate button skips Studio and submits directly to `/api/generate-video` with Lightning forced ON, project defaults, the scene's prompt + duration, and the chained suggested starting frame. The user stays in `ProjectDetail`; the queue tray (existing, already polling) shows progress; `ProjectDetail` polls `/api/projects/[id]` while any scenes are in-flight and refreshes the clip list when new clips land.
+
+The toggle defaults OFF — preserves Phase 5b's Studio-bounce behavior for users who want full parameter control. Toggle is per-storyboard (stored in `quickGenerate` on the `Storyboard` JSON object), not per-project or per-scene.
+
+**Toggle UI:** rendered in the storyboard section header (right side), a labeled switch with amber accent when active. Tap target ≥48px. Persists via PUT to `/api/projects/[id]/storyboard` on each toggle.
+
+**Quick-generate flow:**
+1. Resolve previous scene's canonical clip → extract last frame (ffmpeg via `/api/extract-last-frame` for video clips; direct image fetch for image clips) → i2v if available, t2v if extraction fails (graceful degradation).
+2. Build request: scene.positivePrompt, project defaults for width/height, `clampToValidFrameCount(scene.durationSeconds * 16)`, `lightning: true`, `steps: 4`, `cfg: 1`, project's defaultVideoLoras.
+3. POST to `/api/generate-video`; read only the `init` SSE event for `promptId` then cancel the stream (generation continues server-side independently).
+4. Register job with `QueueContext.addJob` so the queue tray tracks it.
+5. Track `sceneId → { startedAt, promptId }` in `inFlightScenes` state.
+
+**In-flight UI:** the scene card replaces its Generate button with a disabled "Generating... M:SS" pill while a job for that `sceneId` is active. A per-second ticker (`nowTick` state) drives the elapsed display.
+
+**Completion detection:** a `setInterval` effect polls `/api/projects/[id]` every 5 s while `inFlightScenes.size > 0`. When a new clip with `sceneId === <in-flight sceneId>` and `createdAt > entry.startedAt` appears, the scene is removed from `inFlightScenes` and the project state is refreshed inline (no page reload). Stale entries (> 30 min) are also evicted and surface an error banner.
+
+**Lightning enforcement:** quick-generate always forces `lightning: true` regardless of `Project.defaultLightning`. To generate without Lightning, toggle Quick generate OFF and use Studio.
+
+**Error handling:** pre-stream errors surface as a per-scene dismissible error banner inline on the scene card. Post-`init` failures (GPU error) appear in the queue tray (existing behavior). Starting-frame extract failures fall back to t2v and optionally show a note.
+
+**Source layout additions (Phase 5c):**
+- `quickGenerate?: boolean` on `Storyboard` interface in `src/types/index.ts`.
+- `validateStoryboard()` in `src/app/api/projects/[id]/storyboard/route.ts` accepts the new field.
+- `src/components/ProjectDetail.tsx` hosts: quick-generate toggle, `handleQuickGenerateToggle`, `handleQuickGenerateScene`, branching `handleGenerateScene`, `inFlightScenes` tracking Map, `nowTick` ticker, polling effect, in-flight scene card UI, and error banner.
+- Helper functions defined at module level in `ProjectDetail.tsx`: `clampToValidFrameCount`, `formatElapsed`, `encodeImageToBase64`, `readInitEvent`.
+
+---
+
 ## Not yet implemented (planned features)
 
 **Live step previews.** The architecture spec calls for catching the intermediate base64 preview images ComfyUI streams during sampling and displaying them in the UI as a live preview (updating every N steps). Currently `GenerationProgress` only shows a progress bar during generation and the final image on completion.
