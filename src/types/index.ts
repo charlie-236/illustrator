@@ -144,12 +144,16 @@ export interface StoryboardScene {
   canonicalClipId?: string | null; // explicit canonical clip choice; null = fallback to earliest-created
 }
 
-/** A storyboard belongs to a project. Stored as Project.storyboardJson. */
+/** A storyboard row — belongs to a project. One project can have many storyboards. */
 export interface Storyboard {
+  id: string;            // row id
+  projectId: string;
+  name: string;          // user-editable tab label
   scenes: StoryboardScene[];
-  generatedAt: string;        // ISO timestamp
-  storyIdea: string;          // user's original input — preserved for display and regeneration prefill
-  quickGenerate?: boolean;    // Phase 5c: when true, per-scene Generate runs inline (Lightning) without Studio bounce
+  generatedAt: string;   // ISO timestamp
+  storyIdea: string;     // user's original input — preserved for display and regeneration prefill
+  quickGenerate: boolean; // Phase 5c: when true, per-scene Generate runs inline (Lightning) without Studio bounce
+  position: number;      // tab order within the project
 }
 
 export interface ProjectDetail {
@@ -164,7 +168,7 @@ export interface ProjectDetail {
   defaultHeight: number | null;
   defaultLightning: boolean | null;
   defaultVideoLoras: WanLoraSpec[] | null;
-  storyboard: Storyboard | null;
+  storyboards: Storyboard[];
   createdAt: string;
   updatedAt: string;
 }

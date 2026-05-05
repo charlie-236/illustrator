@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react';
 import type { StoryboardScene, Storyboard } from '@/types';
 
 interface Props {
-  scene: StoryboardScene;
+  /** null = create/insert mode; non-null = edit existing scene */
+  scene: StoryboardScene | null;
+  /** Required when scene is null (insert mode) — 0-indexed insertion position */
+  insertAtPosition?: number;
   sceneIndex: number;
   totalScenes: number;
-  projectId: string;
   storyboard: Storyboard;
   onClose: () => void;
   onSaved: (updated: Storyboard) => void;
@@ -15,28 +17,30 @@ interface Props {
 
 export default function SceneEditModal({
   scene,
+  insertAtPosition,
   sceneIndex,
   totalScenes,
-  projectId,
   storyboard,
   onClose,
   onSaved,
 }: Props) {
-  const [description, setDescription] = useState(scene.description);
-  const [positivePrompt, setPositivePrompt] = useState(scene.positivePrompt);
-  const [durationSeconds, setDurationSeconds] = useState(scene.durationSeconds);
-  const [notes, setNotes] = useState(scene.notes ?? '');
+  const isInsert = scene === null;
+
+  const [description, setDescription] = useState(scene?.description ?? '');
+  const [positivePrompt, setPositivePrompt] = useState(scene?.positivePrompt ?? '');
+  const [durationSeconds, setDurationSeconds] = useState(scene?.durationSeconds ?? 4);
+  const [notes, setNotes] = useState(scene?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
-  const isDirty =
-    description !== scene.description ||
-    positivePrompt !== scene.positivePrompt ||
-    durationSeconds !== scene.durationSeconds ||
-    notes !== (scene.notes ?? '');
+  const isDirty = isInsert
+    ? description.trim().length > 0 || positivePrompt.trim().length > 0
+    : (description !== scene.description ||
+       positivePrompt !== scene.positivePrompt ||
+       durationSeconds !== scene.durationSeconds ||
+       notes !== (scene.notes ?? ''));
 
-  // Validate inputs
   const descTrimmed = description.trim();
   const promptTrimmed = positivePrompt.trim();
   const descValid = descTrimmed.length >= 1 && descTrimmed.length <= 2000;
@@ -48,11 +52,8 @@ export default function SceneEditModal({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        if (isDirty) {
-          setShowDiscardConfirm(true);
-        } else {
-          onClose();
-        }
+        if (isDirty) setShowDiscardConfirm(true);
+        else onClose();
       }
     }
     document.addEventListener('keydown', onKey);
@@ -64,22 +65,36 @@ export default function SceneEditModal({
     setSaving(true);
     setError(null);
 
-    // Build the updated storyboard with the edited scene merged in
-    const updatedScenes = storyboard.scenes.map((s) =>
-      s.id === scene.id
-        ? {
-            ...s,
-            description: descTrimmed,
-            positivePrompt: promptTrimmed,
-            durationSeconds,
-            notes: notes.trim() || null,
-          }
-        : s,
-    );
+    let updatedScenes: StoryboardScene[];
+
+    if (isInsert) {
+      const pos = insertAtPosition ?? storyboard.scenes.length;
+      const newScene: StoryboardScene = {
+        id: crypto.randomUUID(),
+        position: pos,
+        description: descTrimmed,
+        positivePrompt: promptTrimmed,
+        durationSeconds,
+        notes: notes.trim() || null,
+        canonicalClipId: null,
+      };
+      updatedScenes = [
+        ...storyboard.scenes.slice(0, pos),
+        newScene,
+        ...storyboard.scenes.slice(pos),
+      ].map((s, idx) => ({ ...s, position: idx }));
+    } else {
+      updatedScenes = storyboard.scenes.map((s) =>
+        s.id === scene.id
+          ? { ...s, description: descTrimmed, positivePrompt: promptTrimmed, durationSeconds, notes: notes.trim() || null }
+          : s,
+      );
+    }
+
     const updatedStoryboard: Storyboard = { ...storyboard, scenes: updatedScenes };
 
     try {
-      const res = await fetch(`/api/projects/${projectId}/storyboard`, {
+      const res = await fetch(`/api/storyboards/${storyboard.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storyboard: updatedStoryboard }),
@@ -99,17 +114,14 @@ export default function SceneEditModal({
   }
 
   function handleCancel() {
-    if (isDirty) {
-      setShowDiscardConfirm(true);
-    } else {
-      onClose();
-    }
+    if (isDirty) setShowDiscardConfirm(true);
+    else onClose();
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={() => handleCancel()}
+      onClick={handleCancel}
     >
       <div
         className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
@@ -118,8 +130,14 @@ export default function SceneEditModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
           <div>
-            <h2 className="text-base font-semibold text-zinc-100">Edit Scene {sceneIndex + 1}</h2>
-            <p className="text-xs text-zinc-500">of {totalScenes} scenes</p>
+            <h2 className="text-base font-semibold text-zinc-100">
+              {isInsert ? 'Insert scene' : `Edit Scene ${sceneIndex + 1}`}
+            </h2>
+            <p className="text-xs text-zinc-500">
+              {isInsert
+                ? `Inserting at position ${(insertAtPosition ?? totalScenes) + 1} of ${totalScenes + 1}`
+                : `of ${totalScenes} scenes`}
+            </p>
           </div>
           <button
             onClick={handleCancel}
@@ -229,7 +247,7 @@ export default function SceneEditModal({
               disabled={!canSave || saving}
               className="flex-1 min-h-12 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors disabled:opacity-50 disabled:pointer-events-none"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : isInsert ? 'Insert scene' : 'Save'}
             </button>
           </div>
         </div>

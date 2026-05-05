@@ -15,6 +15,7 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
   rectSortingStrategy,
+  verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -191,6 +192,249 @@ function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, pro
 }
 
 // ─────────────────────────────────────────────
+// Sortable scene card (for scene reordering)
+// ─────────────────────────────────────────────
+
+interface SortableSceneCardProps {
+  scene: StoryboardScene;
+  sceneIndex: number;
+  sceneClips: ProjectClip[];
+  canonicalClip: ProjectClip | null;
+  canonicalId: string | null;
+  compactMode: boolean;
+  showFull: boolean;
+  isInFlight: boolean;
+  inFlightEntry: { startedAt: number; promptId: string } | undefined;
+  nowTick: number;
+  quickGenerateError: { sceneId: string; message: string } | null;
+  onExpand: () => void;
+  onEdit: () => void;
+  onGenerate: () => void;
+  onOpenClips: () => void;
+  onOpenCanonical: () => void;
+  onDismissError: () => void;
+}
+
+function SortableSceneCard({
+  scene,
+  sceneIndex,
+  sceneClips,
+  canonicalClip,
+  compactMode,
+  showFull,
+  isInFlight,
+  inFlightEntry,
+  nowTick,
+  quickGenerateError,
+  onExpand,
+  onEdit,
+  onGenerate,
+  onOpenClips,
+  onOpenCanonical,
+  onDismissError,
+}: SortableSceneCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: scene.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 50 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="bg-zinc-800/60 rounded-xl overflow-hidden">
+      {compactMode ? (
+        /* Compact row */
+        <div className="flex items-center gap-2 px-3 py-2">
+          {/* Drag handle */}
+          <button
+            type="button"
+            className="flex-shrink-0 min-h-8 min-w-6 flex items-center justify-center text-zinc-600 hover:text-zinc-400 cursor-grab active:cursor-grabbing touch-none"
+            {...attributes}
+            {...listeners}
+            aria-label="Drag to reorder"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8h16M4 16h16" />
+            </svg>
+          </button>
+          <span className="flex-shrink-0 text-xs font-bold text-zinc-400 w-5 text-center">{sceneIndex + 1}</span>
+          <button
+            type="button"
+            onClick={onExpand}
+            className="flex-1 min-h-10 text-left text-sm text-zinc-300 truncate"
+          >
+            {scene.description}
+          </button>
+          <span className="flex-shrink-0 text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">{scene.durationSeconds}s</span>
+          {sceneClips.length > 0 && (
+            <button type="button" onClick={onOpenClips} className="flex-shrink-0 text-xs text-violet-400 hover:text-violet-300 min-h-8 px-1">
+              {sceneClips.length}
+            </button>
+          )}
+          {isInFlight ? (
+            <div className="flex-shrink-0 flex items-center gap-1 text-xs text-zinc-400">
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              {formatElapsed(nowTick - (inFlightEntry?.startedAt ?? nowTick))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onGenerate}
+              className="flex-shrink-0 min-h-10 min-w-10 flex items-center justify-center rounded-lg bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 text-violet-300 transition-colors"
+              title="Generate this scene"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+              </svg>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex-shrink-0 min-h-10 min-w-10 flex items-center justify-center rounded-lg bg-zinc-700/60 hover:bg-zinc-700 border border-zinc-600/40 text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Edit scene"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        /* Full card */
+        <div className="p-3 space-y-2">
+          {/* Scene header row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Drag handle */}
+            <button
+              type="button"
+              className="flex-shrink-0 min-h-8 min-w-6 flex items-center justify-center text-zinc-600 hover:text-zinc-400 cursor-grab active:cursor-grabbing touch-none"
+              {...attributes}
+              {...listeners}
+              aria-label="Drag to reorder"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8h16M4 16h16" />
+              </svg>
+            </button>
+            <span className="text-xs font-bold text-zinc-300">Scene {sceneIndex + 1}</span>
+            <span className="text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">
+              {scene.durationSeconds}s
+            </span>
+            {sceneClips.length > 0 && (
+              <button
+                type="button"
+                onClick={onOpenClips}
+                className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2"
+              >
+                {sceneClips.length} clip{sceneClips.length !== 1 ? 's' : ''}
+              </button>
+            )}
+          </div>
+
+          {/* Description */}
+          <p className="text-sm text-zinc-200 leading-relaxed">{scene.description}</p>
+          {/* Prompt */}
+          <p className="text-xs font-mono text-zinc-500 leading-relaxed break-words">
+            {scene.positivePrompt}
+          </p>
+          {/* Notes */}
+          {scene.notes && (
+            <p className="text-xs text-zinc-400 italic leading-relaxed">{scene.notes}</p>
+          )}
+
+          {/* Canonical clip thumbnail */}
+          {canonicalClip && (
+            <button
+              type="button"
+              onClick={onOpenCanonical}
+              className="block w-1/2 rounded-lg overflow-hidden border border-zinc-700 hover:border-violet-500 transition-colors"
+            >
+              {canonicalClip.mediaType === 'image' ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imgSrc(canonicalClip.filePath)}
+                  alt=""
+                  className="w-full aspect-video object-cover bg-zinc-800"
+                />
+              ) : (
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video
+                  src={imgSrc(canonicalClip.filePath)}
+                  preload="metadata"
+                  muted
+                  playsInline
+                  className="w-full aspect-video object-cover bg-zinc-800"
+                />
+              )}
+            </button>
+          )}
+
+          {/* Quick-generate error banner */}
+          {quickGenerateError?.sceneId === scene.id && (
+            <div className="flex items-start gap-2 bg-red-900/30 border border-red-700/40 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className="flex-1 text-xs text-red-300 leading-relaxed">
+                {quickGenerateError.message}
+              </span>
+              <button
+                type="button"
+                onClick={onDismissError}
+                className="min-w-8 min-h-8 flex items-center justify-center rounded text-red-400 hover:text-red-200 flex-shrink-0"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* Generate / Edit buttons */}
+          <div className="flex gap-2 pt-0.5">
+            {isInFlight ? (
+              <div className="flex-1 min-h-12 rounded-xl bg-zinc-700/60 border border-zinc-600/40 text-zinc-400 text-sm flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Generating... {formatElapsed(nowTick - (inFlightEntry?.startedAt ?? nowTick))}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onGenerate}
+                className="flex-1 min-h-12 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 hover:border-violet-600/50 text-violet-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                Generate this scene
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onEdit}
+              className="min-h-12 min-w-12 rounded-xl bg-zinc-700/60 hover:bg-zinc-700 border border-zinc-600/40 text-zinc-400 hover:text-zinc-200 text-sm transition-colors flex items-center justify-center"
+              title="Edit scene"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Stitch modal
 // ─────────────────────────────────────────────
 
@@ -201,13 +445,15 @@ interface StitchModalProps {
   videoClips: ProjectClip[];
   /** All clips (video + image) — used to compute each video clip's project-wide position number. */
   allClips: ProjectClip[];
+  /** If provided, only these clip IDs are pre-selected. */
+  initialClipIds?: string[];
   onClose: () => void;
   onStitched: (export_: ProjectStitchedExport) => void;
 }
 
-function StitchModal({ projectId, projectName, videoClips, allClips, onClose, onStitched }: StitchModalProps) {
+function StitchModal({ projectId, projectName, videoClips, allClips, initialClipIds, onClose, onStitched }: StitchModalProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(videoClips.map((c) => c.id)),
+    () => new Set(initialClipIds ?? videoClips.map((c) => c.id)),
   );
   const [transition, setTransition] = useState<'hard-cut' | 'crossfade'>('hard-cut');
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
@@ -892,15 +1138,35 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [loading, setLoading] = useState(true);
 
   // Storyboard state
-  const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
+  const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
+  const [selectedStoryboardId, setSelectedStoryboardId] = useState<string | null>(null);
   const [storyboardExpanded, setStoryboardExpanded] = useState(true);
+  const [compactMode, setCompactMode] = useState(false);
+  const [expandedSceneIds, setExpandedSceneIds] = useState<Set<string>>(new Set());
   const [showStoryboardModal, setShowStoryboardModal] = useState(false);
+  const [showCreateStoryboardModal, setShowCreateStoryboardModal] = useState(false);
+  const [newStoryboardName, setNewStoryboardName] = useState('');
+  const [creatingStoryboard, setCreatingStoryboard] = useState(false);
   const [showStoryboardRegenConfirm, setShowStoryboardRegenConfirm] = useState(false);
   const [showStoryboardDeleteConfirm, setShowStoryboardDeleteConfirm] = useState(false);
+  const [renamingStoryboardId, setRenamingStoryboardId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [tabMenuStoryboardId, setTabMenuStoryboardId] = useState<string | null>(null);
   // Scene edit state
   const [editingScene, setEditingScene] = useState<StoryboardScene | null>(null);
+  const [insertAtPosition, setInsertAtPosition] = useState<number | null>(null);
   // Canonical clip picker state
   const [canonicalPickerScene, setCanonicalPickerScene] = useState<StoryboardScene | null>(null);
+  // Canonical play/stitch state
+  const [canonicalStitchClipIds, setCanonicalStitchClipIds] = useState<string[]>([]);
+  const [playCanonical, setPlayCanonical] = useState(false);
+  const [playingCanonicalIdx, setPlayingCanonicalIdx] = useState(0);
+  const [playCanonicalDone, setPlayCanonicalDone] = useState(false);
+  const canonicalPlayerRef = useRef<HTMLVideoElement>(null);
+
+  // Derived: selected storyboard
+  const storyboard = storyboards.find((s) => s.id === selectedStoryboardId) ?? null;
 
   // Phase 5c: Quick-generate state
   const [inFlightScenes, setInFlightScenes] = useState<Map<string, { startedAt: number; promptId: string }>>(new Map());
@@ -962,6 +1228,34 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     void playerRef.current.play().catch(() => { /* autoplay blocked — user can tap play */ });
   }, [playingIdx, playThrough]);
 
+  // Persist selected storyboard tab to sessionStorage
+  useEffect(() => {
+    if (selectedStoryboardId && project) {
+      sessionStorage.setItem(`storyboard-tab-${project.id}`, selectedStoryboardId);
+    }
+  }, [selectedStoryboardId, project?.id]);
+
+  // Load compactMode from sessionStorage when selected storyboard changes
+  useEffect(() => {
+    if (!selectedStoryboardId) return;
+    const saved = sessionStorage.getItem(`storyboard-compact-${selectedStoryboardId}`);
+    setCompactMode(saved === 'true');
+  }, [selectedStoryboardId]);
+
+  // Persist compactMode to sessionStorage
+  useEffect(() => {
+    if (selectedStoryboardId) {
+      sessionStorage.setItem(`storyboard-compact-${selectedStoryboardId}`, String(compactMode));
+    }
+  }, [compactMode, selectedStoryboardId]);
+
+  // Canonical player: load and play when playingCanonicalIdx changes
+  useEffect(() => {
+    if (!playCanonical || !canonicalPlayerRef.current) return;
+    canonicalPlayerRef.current.load();
+    void canonicalPlayerRef.current.play().catch(() => {});
+  }, [playingCanonicalIdx, playCanonical]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -982,8 +1276,16 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       setProject(data.project);
       setClips(data.clips ?? []);
       setStitchedExports(data.stitchedExports ?? []);
-      setStoryboard(data.project.storyboard ?? null);
-      setStoryboardExpanded(!!data.project.storyboard);
+      const sbs: Storyboard[] = data.project.storyboards ?? [];
+      setStoryboards(sbs);
+      if (sbs.length > 0) {
+        setStoryboardExpanded(true);
+        const savedId = typeof window !== 'undefined' ? sessionStorage.getItem(`storyboard-tab-${data.project.id}`) : null;
+        setSelectedStoryboardId(savedId && sbs.some((s: Storyboard) => s.id === savedId) ? savedId : sbs[0].id);
+      } else {
+        setStoryboardExpanded(false);
+        setSelectedStoryboardId(null);
+      }
       setNameValue(data.project.name);
       setDescValue(data.project.description ?? '');
     } finally {
@@ -1051,7 +1353,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         // Refresh project data so scene cards update
         setClips(freshClips);
         if (data.project) setProject(data.project);
-        if (data.project?.storyboard !== undefined) setStoryboard(data.project.storyboard ?? null);
+        if (data.project?.storyboards) setStoryboards(data.project.storyboards);
         if (data.stitchedExports) setStitchedExports(data.stitchedExports);
       } catch { /* ignore poll errors */ }
     }, 5000);
@@ -1116,26 +1418,102 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
   async function confirmDeleteStoryboard() {
     setShowStoryboardDeleteConfirm(false);
+    if (!selectedStoryboardId) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/storyboard`, { method: 'DELETE' });
-      if (res.ok) setStoryboard(null);
+      const res = await fetch(`/api/storyboards/${selectedStoryboardId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setStoryboards((prev) => {
+          const next = prev.filter((s) => s.id !== selectedStoryboardId);
+          setSelectedStoryboardId(next[0]?.id ?? null);
+          return next;
+        });
+      }
     } catch {
-      // silently ignore — storyboard stays rendered
+      // silently ignore
     }
   }
 
   async function handleQuickGenerateToggle() {
     if (!storyboard) return;
     const updated: Storyboard = { ...storyboard, quickGenerate: !storyboard.quickGenerate };
-    setStoryboard(updated); // optimistic
+    setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s));
     try {
-      await fetch(`/api/projects/${projectId}/storyboard`, {
+      await fetch(`/api/storyboards/${storyboard.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storyboard: updated }),
       });
     } catch {
-      setStoryboard(storyboard); // revert on failure
+      setStoryboards((prev) => prev.map((s) => s.id === storyboard.id ? storyboard : s));
+    }
+  }
+
+  async function handleRenameStoryboard() {
+    if (!renamingStoryboardId || renameSaving) return;
+    const name = renameValue.trim();
+    if (!name || name.length > 100) return;
+    const sb = storyboards.find((s) => s.id === renamingStoryboardId);
+    if (!sb || name === sb.name) { setRenamingStoryboardId(null); return; }
+    setRenameSaving(true);
+    const updated: Storyboard = { ...sb, name };
+    try {
+      const res = await fetch(`/api/storyboards/${renamingStoryboardId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storyboard: updated }),
+      });
+      if (res.ok) {
+        setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s));
+        setRenamingStoryboardId(null);
+      }
+    } finally {
+      setRenameSaving(false);
+    }
+  }
+
+  async function handleCreateStoryboard() {
+    if (!project || creatingStoryboard) return;
+    const name = newStoryboardName.trim() || `Storyboard ${storyboards.length + 1}`;
+    setCreatingStoryboard(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/storyboards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { storyboard: Storyboard };
+        setStoryboards((prev) => [...prev, data.storyboard]);
+        setSelectedStoryboardId(data.storyboard.id);
+        setShowCreateStoryboardModal(false);
+        setNewStoryboardName('');
+      }
+    } finally {
+      setCreatingStoryboard(false);
+    }
+  }
+
+  async function handleSceneDragEnd(event: DragEndEvent) {
+    if (!storyboard) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = storyboard.scenes.findIndex((s) => s.id === active.id);
+    const newIdx = storyboard.scenes.findIndex((s) => s.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(storyboard.scenes, oldIdx, newIdx).map((s, idx) => ({ ...s, position: idx }));
+    const updated: Storyboard = { ...storyboard, scenes: reordered };
+    setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s));
+    try {
+      const res = await fetch(`/api/storyboards/${storyboard.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storyboard: updated }),
+      });
+      if (!res.ok) {
+        setStoryboards((prev) => prev.map((s) => s.id === storyboard.id ? storyboard : s));
+      }
+    } catch {
+      setStoryboards((prev) => prev.map((s) => s.id === storyboard.id ? storyboard : s));
     }
   }
 
@@ -1294,6 +1672,17 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }
   }
 
+  // Canonical clips in scene order (for Play canonical / Stitch canonical)
+  const canonicalClipsInSceneOrder = storyboard
+    ? storyboard.scenes
+        .map((s) => resolveCanonicalClipId(s, clips))
+        .filter((id): id is string => id !== null)
+        .map((id) => clips.find((c) => c.id === id))
+        .filter((c): c is ProjectClip => c !== undefined && c.mediaType === 'video')
+    : [];
+  const canPlayCanonical = canonicalClipsInSceneOrder.length >= 2;
+  const canStitchCanonical = canonicalClipsInSceneOrder.length >= 2;
+
   // Modal records: all source clips + stitched exports
   const modalRecords = [
     ...clips.map((c) => clipToRecord(c, projectId, project?.name ?? '')),
@@ -1440,8 +1829,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
       {/* ── Storyboard section ── */}
       <div className="px-4 pt-4 border-b border-zinc-800 pb-4">
+        {/* Collapsible header row */}
         <div className="w-full flex items-center justify-between gap-2 min-h-10">
-          {/* Left: expand/collapse trigger */}
           <button
             onClick={() => setStoryboardExpanded((v) => !v)}
             className="flex items-center gap-2 group flex-1 text-left py-1"
@@ -1456,34 +1845,40 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
               </span>
             )}
           </button>
-
-          {/* Right: quick-generate toggle + chevron */}
           <div className="flex items-center gap-1">
             {storyboard && (
-              <button
-                type="button"
-                onClick={() => { void handleQuickGenerateToggle(); }}
-                className="flex items-center gap-1.5 min-h-12 px-2 rounded-lg hover:bg-zinc-800 transition-colors"
-                title="Generate scenes inline with Lightning defaults. Toggle off to fine-tune in Studio."
-              >
-                <span className="text-xs text-zinc-400">⚡ Quick</span>
-                <div className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
-                  storyboard.quickGenerate ? 'bg-amber-500' : 'bg-zinc-600'
-                }`}>
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                    storyboard.quickGenerate ? 'translate-x-4' : 'translate-x-0.5'
-                  }`} />
-                </div>
-              </button>
+              <>
+                {/* Quick generate toggle */}
+                <button
+                  type="button"
+                  onClick={() => { void handleQuickGenerateToggle(); }}
+                  className="flex items-center gap-1.5 min-h-12 px-2 rounded-lg hover:bg-zinc-800 transition-colors"
+                  title="Generate scenes inline with Lightning. Toggle off to fine-tune in Studio."
+                >
+                  <span className="text-xs text-zinc-400">⚡ Quick</span>
+                  <div className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${storyboard.quickGenerate ? 'bg-amber-500' : 'bg-zinc-600'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${storyboard.quickGenerate ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  </div>
+                </button>
+                {/* Compact toggle */}
+                <button
+                  type="button"
+                  onClick={() => setCompactMode((v) => !v)}
+                  className="flex items-center gap-1.5 min-h-12 px-2 rounded-lg hover:bg-zinc-800 transition-colors"
+                  title="Compact view — description only"
+                >
+                  <span className="text-xs text-zinc-400">📋 Compact</span>
+                  <div className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${compactMode ? 'bg-violet-500' : 'bg-zinc-600'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${compactMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  </div>
+                </button>
+              </>
             )}
             <button
               onClick={() => setStoryboardExpanded((v) => !v)}
               className="min-h-12 min-w-10 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
             >
-              <svg
-                className={`w-4 h-4 text-zinc-500 transition-transform ${storyboardExpanded ? '' : '-rotate-90'}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-              >
+              <svg className={`w-4 h-4 text-zinc-500 transition-transform ${storyboardExpanded ? '' : '-rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
@@ -1492,11 +1887,80 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
         {storyboardExpanded && (
           <div className="mt-3 space-y-3">
-            {!storyboard ? (
-              /* Empty state */
+            {/* Tab strip */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-1">
+              {storyboards.map((sb) => (
+                <div key={sb.id} className="relative flex-shrink-0">
+                  {renamingStoryboardId === sb.id ? (
+                    <input
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => void handleRenameStoryboard()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); void handleRenameStoryboard(); }
+                        if (e.key === 'Escape') { setRenamingStoryboardId(null); }
+                      }}
+                      className="min-h-10 px-3 rounded-lg bg-zinc-800 border border-violet-500 text-sm text-zinc-100 outline-none w-36"
+                      autoFocus
+                      disabled={renameSaving}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedStoryboardId(sb.id); setTabMenuStoryboardId(null); }}
+                      onContextMenu={(e) => { e.preventDefault(); setTabMenuStoryboardId(sb.id); }}
+                      className={`min-h-10 px-3 rounded-lg text-sm font-medium transition-colors whitespace-nowrap
+                        ${selectedStoryboardId === sb.id
+                          ? 'bg-violet-600/20 border border-violet-600/40 text-violet-300'
+                          : 'bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
+                    >
+                      {sb.name}
+                    </button>
+                  )}
+                  {/* Tab context menu */}
+                  {tabMenuStoryboardId === sb.id && (
+                    <div className="absolute top-full left-0 mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl overflow-hidden min-w-32">
+                      <button
+                        type="button"
+                        onClick={() => { setTabMenuStoryboardId(null); setRenamingStoryboardId(sb.id); setRenameValue(sb.name); }}
+                        className="w-full text-left px-4 py-3 text-sm text-zinc-300 hover:bg-zinc-800 min-h-12"
+                      >Rename</button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTabMenuStoryboardId(null);
+                          setSelectedStoryboardId(sb.id);
+                          setShowStoryboardDeleteConfirm(true);
+                        }}
+                        className="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-zinc-800 min-h-12"
+                      >Delete</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {/* + tab */}
+              <button
+                type="button"
+                onClick={() => { setNewStoryboardName(''); setShowCreateStoryboardModal(true); }}
+                className="min-h-10 min-w-10 flex items-center justify-center rounded-lg bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors flex-shrink-0"
+                title="Create new storyboard"
+              >
+                +
+              </button>
+            </div>
+
+            {/* Close tab menu on outside click */}
+            {tabMenuStoryboardId && (
+              <div className="fixed inset-0 z-10" onClick={() => setTabMenuStoryboardId(null)} />
+            )}
+
+            {/* Content area */}
+            {storyboards.length === 0 ? (
+              /* No storyboards at all */
               <div className="rounded-xl border border-dashed border-zinc-700 p-5 text-center space-y-3">
                 <p className="text-sm text-zinc-400 leading-relaxed">
-                  Plan your project with AI. Describe a story idea and generate a scene-by-scene outline you can use to guide your clips.
+                  Plan your project with AI. Describe a story idea and generate a scene-by-scene outline.
                 </p>
                 <button
                   type="button"
@@ -1506,136 +1970,211 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                   + Plan with AI
                 </button>
               </div>
-            ) : (
-              /* Populated state */
-              <div className="space-y-3">
-                {storyboard.scenes.map((scene, i) => {
-                  const sceneClips = clips.filter((c) => c.sceneId === scene.id);
-                  const canonicalId = resolveCanonicalClipId(scene, clips);
-                  const canonicalClip = canonicalId ? clips.find((c) => c.id === canonicalId) ?? null : null;
-
-                  return (
-                  <div
-                    key={scene.id}
-                    className="bg-zinc-800/60 rounded-xl p-3 space-y-2"
+            ) : !storyboard ? null : storyboard.scenes.length === 0 ? (
+              /* Have a storyboard but no scenes yet */
+              <div className="rounded-xl border border-dashed border-zinc-700 p-5 text-center space-y-3">
+                <p className="text-sm text-zinc-400">This storyboard has no scenes yet.</p>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowStoryboardModal(true)}
+                    className="min-h-12 px-4 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 text-violet-300 text-sm font-medium transition-colors"
                   >
-                    {/* Scene header row */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-bold text-zinc-300">Scene {i + 1}</span>
-                      <span className="text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">
-                        {scene.durationSeconds}s
-                      </span>
-                      {sceneClips.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (sceneClips.length === 1) {
-                              // Single clip: open ImageModal directly
-                              const clipIdx = clips.findIndex((c) => c.id === sceneClips[0].id);
-                              if (clipIdx !== -1) setModalIdx(getModalIndexById(sceneClips[0].id));
-                            } else {
-                              // Multiple clips: open canonical picker
-                              setCanonicalPickerScene(scene);
-                            }
-                          }}
-                          className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2"
-                        >
-                          {sceneClips.length} clip{sceneClips.length !== 1 ? 's' : ''}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Description */}
-                    <p className="text-sm text-zinc-200 leading-relaxed">{scene.description}</p>
-                    {/* Prompt */}
-                    <p className="text-xs font-mono text-zinc-500 leading-relaxed break-words">
-                      {scene.positivePrompt}
-                    </p>
-                    {/* Notes */}
-                    {scene.notes && (
-                      <p className="text-xs text-zinc-400 italic leading-relaxed">{scene.notes}</p>
-                    )}
-
-                    {/* Canonical clip thumbnail */}
-                    {canonicalClip && (
+                    Plan with AI
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setInsertAtPosition(0); setEditingScene(null); }}
+                    className="min-h-12 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+                  >
+                    + Add scene manually
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Populated scenes */
+              <div className="space-y-2">
+                {/* Play canonical / Stitch canonical buttons */}
+                {(canPlayCanonical || canStitchCanonical) && (
+                  <div className="flex gap-2 pb-1">
+                    {canPlayCanonical && (
                       <button
                         type="button"
                         onClick={() => {
-                          const idx = getModalIndexById(canonicalClip.id);
-                          if (idx !== -1) setModalIdx(idx);
+                          setPlayThrough(false);
+                          setPlayCanonical((v) => !v);
+                          if (!playCanonical) { setPlayingCanonicalIdx(0); setPlayCanonicalDone(false); }
                         }}
-                        className="block w-1/2 rounded-lg overflow-hidden border border-zinc-700 hover:border-violet-500 transition-colors"
+                        className={`flex-1 min-h-12 rounded-xl text-sm font-medium border transition-colors flex items-center justify-center gap-2
+                          ${playCanonical
+                            ? 'bg-violet-600/20 border-violet-600/30 text-violet-300'
+                            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'}`}
                       >
-                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                        <video
-                          src={imgSrc(canonicalClip.filePath)}
-                          preload="metadata"
-                          muted
-                          playsInline
-                          className="w-full aspect-video object-cover bg-zinc-800"
-                        />
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                        </svg>
+                        {playCanonical ? 'Stop' : '▶ Play canonical'}
                       </button>
                     )}
+                    {canStitchCanonical && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCanonicalStitchClipIds(canonicalClipsInSceneOrder.map((c) => c.id));
+                          setShowStitch(true);
+                        }}
+                        className="flex-1 min-h-12 rounded-xl border border-emerald-600/30 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-300 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        🪡 Stitch canonical
+                      </button>
+                    )}
+                  </div>
+                )}
 
-                    {/* Quick-generate error banner */}
-                    {quickGenerateError?.sceneId === scene.id && (
-                      <div className="flex items-start gap-2 bg-red-900/30 border border-red-700/40 rounded-lg px-3 py-2">
-                        <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <span className="flex-1 text-xs text-red-300 leading-relaxed">
-                          {quickGenerateError.message}
-                        </span>
+                {/* Play canonical view */}
+                {playCanonical && (
+                  <div className="rounded-xl bg-zinc-800/60 overflow-hidden">
+                    {!playCanonicalDone ? (
+                      /* eslint-disable-next-line jsx-a11y/media-has-caption */
+                      <video
+                        ref={canonicalPlayerRef}
+                        src={imgSrc(canonicalClipsInSceneOrder[playingCanonicalIdx]?.filePath ?? '')}
+                        autoPlay
+                        playsInline
+                        controls
+                        onEnded={() => {
+                          if (playingCanonicalIdx < canonicalClipsInSceneOrder.length - 1) {
+                            setPlayingCanonicalIdx((i) => i + 1);
+                          } else {
+                            setPlayCanonicalDone(true);
+                          }
+                        }}
+                        className="w-full aspect-video bg-black"
+                      />
+                    ) : (
+                      <div className="aspect-video flex flex-col items-center justify-center gap-3">
+                        <p className="text-sm text-zinc-400">All scenes played</p>
                         <button
-                          type="button"
-                          onClick={() => setQuickGenerateError(null)}
-                          className="min-w-8 min-h-8 flex items-center justify-center rounded text-red-400 hover:text-red-200 flex-shrink-0"
+                          onClick={() => { setPlayingCanonicalIdx(0); setPlayCanonicalDone(false); }}
+                          className="min-h-12 px-4 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-medium"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
+                          Play again
                         </button>
                       </div>
                     )}
-
-                    {/* Generate / Edit buttons */}
-                    <div className="flex gap-2 pt-0.5">
-                      {inFlightScenes.has(scene.id) ? (
-                        <div className="flex-1 min-h-12 rounded-xl bg-zinc-700/60 border border-zinc-600/40 text-zinc-400 text-sm flex items-center justify-center gap-2 cursor-not-allowed select-none">
-                          <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                          Generating... {formatElapsed(nowTick - (inFlightScenes.get(scene.id)?.startedAt ?? nowTick))}
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleGenerateScene(scene)}
-                          className="flex-1 min-h-12 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 hover:border-violet-600/50 text-violet-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                          </svg>
-                          Generate this scene
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setEditingScene(scene)}
-                        className="min-h-12 min-w-12 rounded-xl bg-zinc-700/60 hover:bg-zinc-700 border border-zinc-600/40 text-zinc-400 hover:text-zinc-200 text-sm transition-colors flex items-center justify-center"
-                        title="Edit scene"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
+                    {/* Scene chips */}
+                    <div className="flex gap-1.5 px-3 py-2 overflow-x-auto">
+                      {canonicalClipsInSceneOrder.map((_, idx) => {
+                        const scenesWithCanonical = storyboard.scenes.filter((s) => resolveCanonicalClipId(s, clips) !== null);
+                        const sceneForChip = scenesWithCanonical[idx];
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => { setPlayingCanonicalIdx(idx); setPlayCanonicalDone(false); }}
+                            className={`flex-shrink-0 min-h-8 px-2.5 rounded-lg text-xs font-medium transition-colors
+                              ${playingCanonicalIdx === idx
+                                ? 'bg-violet-600 text-white'
+                                : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'}`}
+                          >
+                            Scene {sceneForChip ? storyboard.scenes.indexOf(sceneForChip) + 1 : idx + 1}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                  );
-                })}
+                )}
 
-                {/* Regenerate / Delete actions */}
+                {/* Scene list with drag-to-reorder */}
+                {!playCanonical && (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleSceneDragEnd}
+                  >
+                    <SortableContext
+                      items={storyboard.scenes.map((s) => s.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-1.5">
+                        {/* Insert above first scene (non-compact only) */}
+                        {!compactMode && (
+                          <button
+                            type="button"
+                            onClick={() => { setInsertAtPosition(0); setEditingScene(null); }}
+                            className="w-full h-6 flex items-center justify-center rounded-lg border border-dashed border-zinc-700/50 text-zinc-600 hover:text-zinc-400 hover:border-zinc-600 text-xs transition-colors"
+                          >
+                            + Insert scene here
+                          </button>
+                        )}
+                        {storyboard.scenes.map((scene, i) => {
+                          const sceneClips = clips.filter((c) => c.sceneId === scene.id);
+                          const canonicalId = resolveCanonicalClipId(scene, clips);
+                          const canonicalClip = canonicalId ? clips.find((c) => c.id === canonicalId) ?? null : null;
+
+                          return (
+                            <div key={scene.id}>
+                              <SortableSceneCard
+                                scene={scene}
+                                sceneIndex={i}
+                                sceneClips={sceneClips}
+                                canonicalClip={canonicalClip}
+                                canonicalId={canonicalId}
+                                compactMode={compactMode}
+                                showFull={!compactMode || expandedSceneIds.has(scene.id)}
+                                isInFlight={inFlightScenes.has(scene.id)}
+                                inFlightEntry={inFlightScenes.get(scene.id)}
+                                nowTick={nowTick}
+                                quickGenerateError={quickGenerateError}
+                                onExpand={() => setExpandedSceneIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(scene.id)) next.delete(scene.id); else next.add(scene.id);
+                                  return next;
+                                })}
+                                onEdit={() => { setInsertAtPosition(null); setEditingScene(scene); }}
+                                onGenerate={() => handleGenerateScene(scene)}
+                                onOpenClips={() => {
+                                  if (sceneClips.length === 1) {
+                                    setModalIdx(getModalIndexById(sceneClips[0].id));
+                                  } else {
+                                    setCanonicalPickerScene(scene);
+                                  }
+                                }}
+                                onOpenCanonical={() => {
+                                  if (canonicalClip) setModalIdx(getModalIndexById(canonicalClip.id));
+                                }}
+                                onDismissError={() => setQuickGenerateError(null)}
+                              />
+                              {/* Insert between scenes (non-compact only) */}
+                              {!compactMode && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setInsertAtPosition(i + 1); setEditingScene(null); }}
+                                  className="w-full h-6 flex items-center justify-center rounded-lg border border-dashed border-zinc-700/50 text-zinc-600 hover:text-zinc-400 hover:border-zinc-600 text-xs transition-colors mt-1.5"
+                                >
+                                  + Insert scene here
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* Add scene at end (compact mode) */}
+                        {compactMode && (
+                          <button
+                            type="button"
+                            onClick={() => { setInsertAtPosition(storyboard.scenes.length); setEditingScene(null); }}
+                            className="w-full min-h-12 rounded-xl bg-zinc-800/40 border border-dashed border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 text-sm transition-colors"
+                          >
+                            + Add scene
+                          </button>
+                        )}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                )}
+
+                {/* Storyboard actions */}
                 <div className="flex gap-2 pt-1">
                   <button
                     type="button"
@@ -1904,11 +2443,13 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           projectName={project.name}
           videoClips={videoClips}
           allClips={clips}
-          onClose={() => setShowStitch(false)}
+          initialClipIds={canonicalStitchClipIds.length > 0 ? canonicalStitchClipIds : undefined}
+          onClose={() => { setShowStitch(false); setCanonicalStitchClipIds([]); }}
           onStitched={(export_) => {
             // Prepend to stitchedExports — the new stitch becomes the most recent
             setStitchedExports((prev) => [export_, ...prev]);
             setShowStitch(false);
+            setCanonicalStitchClipIds([]);
           }}
         />
       )}
@@ -1928,8 +2469,18 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         <StoryboardGenerationModal
           projectId={projectId}
           initialStoryIdea={storyboard?.storyIdea ?? ''}
+          targetStoryboardId={storyboard?.id ?? null}
+          targetStoryboard={storyboard ?? undefined}
           onClose={() => setShowStoryboardModal(false)}
-          onSaved={(sb) => { setStoryboard(sb); setStoryboardExpanded(true); }}
+          onSaved={(sb) => {
+            setStoryboards((prev) => {
+              const exists = prev.find((s) => s.id === sb.id);
+              if (exists) return prev.map((s) => s.id === sb.id ? sb : s);
+              return [...prev, sb];
+            });
+            setSelectedStoryboardId(sb.id);
+            setStoryboardExpanded(true);
+          }}
         />
       )}
 
@@ -2005,30 +2556,57 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       )}
 
       {/* ── Scene edit modal ── */}
-      {editingScene && storyboard && (
+      {(editingScene !== null || insertAtPosition !== null) && storyboard && (
         <SceneEditModal
           scene={editingScene}
-          sceneIndex={editingScene.position}
+          insertAtPosition={insertAtPosition ?? undefined}
+          sceneIndex={editingScene ? storyboard.scenes.indexOf(editingScene) : (insertAtPosition ?? storyboard.scenes.length)}
           totalScenes={storyboard.scenes.length}
-          projectId={projectId}
           storyboard={storyboard}
-          onClose={() => setEditingScene(null)}
-          onSaved={(updated) => { setStoryboard(updated); setEditingScene(null); }}
+          onClose={() => { setEditingScene(null); setInsertAtPosition(null); }}
+          onSaved={(updated) => {
+            setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s));
+            setEditingScene(null);
+            setInsertAtPosition(null);
+          }}
         />
+      )}
+
+      {/* ── Create storyboard modal ── */}
+      {showCreateStoryboardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowCreateStoryboardModal(false)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 max-w-sm w-full mx-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-zinc-100">New storyboard</h3>
+            <input
+              type="text"
+              value={newStoryboardName}
+              onChange={(e) => setNewStoryboardName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateStoryboard(); if (e.key === 'Escape') setShowCreateStoryboardModal(false); }}
+              className="input-base w-full"
+              placeholder={`Storyboard ${storyboards.length + 1}`}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setShowCreateStoryboardModal(false)} className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors">Cancel</button>
+              <button onClick={() => void handleCreateStoryboard()} disabled={creatingStoryboard} className="flex-1 min-h-12 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors disabled:opacity-50">Create</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Canonical clip picker ── */}
       {canonicalPickerScene && storyboard && (
         <CanonicalClipPickerModal
           scene={canonicalPickerScene}
-          sceneIndex={canonicalPickerScene.position}
+          sceneIndex={storyboard.scenes.indexOf(canonicalPickerScene)}
           sceneClips={clips.filter((c) => c.sceneId === canonicalPickerScene.id)}
+          allProjectClips={clips}
           canonicalClipId={resolveCanonicalClipId(canonicalPickerScene, clips)}
           projectId={projectId}
           projectName={project?.name ?? ''}
           storyboard={storyboard}
           onClose={() => setCanonicalPickerScene(null)}
-          onCanonicalChanged={(updated) => setStoryboard(updated)}
+          onCanonicalChanged={(updated) => setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
         />
       )}
     </div>
