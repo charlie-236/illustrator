@@ -26,12 +26,6 @@ VM_IP=$(read_env A100_VM_IP)
 SSH_KEY=$(read_env A100_SSH_KEY_PATH)
 COMFYUI_MODELS_ROOT=$(read_env COMFYUI_MODELS_ROOT)
 
-# Apply defaults for values that have them
-VM_USER="${VM_USER:-charlie}"
-VM_IP="${VM_IP:-100.96.99.94}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/a100-key.pem}"
-COMFYUI_MODELS_ROOT="${COMFYUI_MODELS_ROOT:-/models/ComfyUI/models}"
-
 if [ -z "$CIVIT_TOKEN" ]; then
   echo "Error: CIVITAI_TOKEN not set in $ENV_FILE" >&2
   exit 1
