@@ -73,6 +73,10 @@ function validateStoryboard(storyboard: unknown): string | null {
       return `scene[${i}].canonicalClipId must be a string or null`;
     }
   }
+  // Optional Phase 5c field on the storyboard object itself
+  if ('quickGenerate' in sb && sb.quickGenerate !== null && sb.quickGenerate !== undefined && typeof sb.quickGenerate !== 'boolean') {
+    return 'storyboard.quickGenerate must be a boolean or undefined';
+  }
   return null;
 }
 
