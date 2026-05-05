@@ -126,6 +126,7 @@ export async function GET(
         defaultVideoLoras: project.defaultVideoLoras
           ? (() => { try { return JSON.parse(project.defaultVideoLoras); } catch { return null; } })()
           : null,
+        storyboard: project.storyboardJson ?? null,
         createdAt: project.createdAt.toISOString(),
         updatedAt: project.updatedAt.toISOString(),
       },

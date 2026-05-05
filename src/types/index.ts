@@ -131,6 +131,22 @@ export interface ProjectClip {
   isStitched: boolean;
 }
 
+/** A single scene within a storyboard. LLM-generated; user-editable in Phase 5b. */
+export interface StoryboardScene {
+  id: string;                 // cuid; generated server-side
+  position: number;           // 0-indexed
+  description: string;        // LLM-generated; human-readable narrative summary
+  positivePrompt: string;     // LLM-generated; Wan 2.2-friendly prose for video generation
+  durationSeconds: number;    // LLM-suggested; integer 2-7 typically
+}
+
+/** A storyboard belongs to a project. Stored as Project.storyboardJson. */
+export interface Storyboard {
+  scenes: StoryboardScene[];
+  generatedAt: string;        // ISO timestamp
+  storyIdea: string;          // user's original input — preserved for display and regeneration prefill
+}
+
 export interface ProjectDetail {
   id: string;
   name: string;
@@ -143,6 +159,7 @@ export interface ProjectDetail {
   defaultHeight: number | null;
   defaultLightning: boolean | null;
   defaultVideoLoras: WanLoraSpec[] | null;
+  storyboard: Storyboard | null;
   createdAt: string;
   updatedAt: string;
 }
