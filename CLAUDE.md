@@ -301,8 +301,8 @@ Service name → systemctl unit mapping:
 | serviceName | systemctl unit |
 |---|---|
 | `comfy-illustrator` | `comfy-illustrator.service` |
-| `aphrodite-writer` | `aphrodite-writer` |
-| `aphrodite-illustrator-polisher` | `aphrodite-illustrator-polisher` |
+| `aphrodite-writer` | `aphrodite-writer.service` |
+| `aphrodite-cinematographer` | `aphrodite-cinematographer.service` |
 
 ### `GET /api/services/status`
 Combines two checks per service, run in parallel: (1) SSH `systemctl is-active <unit>` (process running) and (2) HTTP probe of the service's endpoint via the localhost SSH tunnel (process actually answering). Returns:
@@ -323,9 +323,9 @@ Probe endpoints:
 |---|---|
 | `comfy-illustrator` | `http://127.0.0.1:8188/system_stats` |
 | `aphrodite-writer` | `http://127.0.0.1:21434/health` |
-| `aphrodite-illustrator-polisher` | `http://127.0.0.1:11438/health` |
+| `aphrodite-cinematographer` | `http://127.0.0.1:11438/health` |
 
-All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by `/api/generate`. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher'`.
+All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by `/api/generate`. `ServiceName` is `'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-cinematographer'`.
 
 ### `GET /api/gallery?page=1&limit=20`
 Paginated. `limit` capped at 50. Returns:

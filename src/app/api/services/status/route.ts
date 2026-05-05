@@ -7,7 +7,7 @@ const VM_USER = process.env.GPU_VM_USER ?? '';
 const VM_IP = process.env.GPU_VM_IP ?? '';
 const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 
-type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher';
+type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-cinematographer';
 type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
 
 const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = {
@@ -19,8 +19,8 @@ const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = 
     unit: 'aphrodite-writer',
     probeUrl: 'http://127.0.0.1:21434/health',
   },
-  'aphrodite-illustrator-polisher': {
-    unit: 'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer': {
+    unit: 'aphrodite-cinematographer',
     probeUrl: 'http://127.0.0.1:11438/health',
   },
 };
@@ -28,7 +28,7 @@ const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = 
 const SERVICES: ServiceName[] = [
   'comfy-illustrator',
   'aphrodite-writer',
-  'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer',
 ];
 
 async function probe(url: string): Promise<boolean> {
@@ -50,7 +50,7 @@ async function runSystemctlChecks(ssh: NodeSSH): Promise<Record<ServiceName, num
   const exitCodes: Record<ServiceName, number> = {
     'comfy-illustrator': 1,
     'aphrodite-writer': 1,
-    'aphrodite-illustrator-polisher': 1,
+    'aphrodite-cinematographer': 1,
   };
 
   for (const line of result.stdout.split('\n')) {
@@ -88,7 +88,7 @@ export async function GET() {
     const statuses: Record<ServiceName, ServiceStatus> = {
       'comfy-illustrator': 'unknown',
       'aphrodite-writer': 'unknown',
-      'aphrodite-illustrator-polisher': 'unknown',
+      'aphrodite-cinematographer': 'unknown',
     };
 
     SERVICES.forEach((name, i) => {

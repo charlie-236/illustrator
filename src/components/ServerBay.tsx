@@ -2,29 +2,29 @@
 
 import { useState, useCallback } from 'react';
 
-type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher';
+type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-cinematographer';
 type ActionState = 'idle' | 'pending' | 'sent' | 'error';
 type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
 
 const SERVICE_LABELS: Record<ServiceName, string> = {
   'comfy-illustrator': 'Image Generation',
   'aphrodite-writer': 'Writer',
-  'aphrodite-illustrator-polisher': 'Prompt Polisher',
+  'aphrodite-cinematographer': 'Prompt Polisher',
 };
 
 const ALL_SERVICES: ServiceName[] = [
   'comfy-illustrator',
   'aphrodite-writer',
-  'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer',
 ];
 
 const STACK_ORDER_START: ServiceName[] = [
   'comfy-illustrator',
   'aphrodite-writer',
-  'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer',
 ];
 const STACK_ORDER_STOP: ServiceName[] = [
-  'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer',
   'aphrodite-writer',
   'comfy-illustrator',
 ];
@@ -43,13 +43,13 @@ type StackOp = {
 const BLANK_ACTIONS: Record<ServiceName, ActionState> = {
   'comfy-illustrator': 'idle',
   'aphrodite-writer': 'idle',
-  'aphrodite-illustrator-polisher': 'idle',
+  'aphrodite-cinematographer': 'idle',
 };
 
 const BLANK_STATUSES: Record<ServiceName, ServiceStatus> = {
   'comfy-illustrator': 'unknown',
   'aphrodite-writer': 'unknown',
-  'aphrodite-illustrator-polisher': 'unknown',
+  'aphrodite-cinematographer': 'unknown',
 };
 
 export default function ServerBay() {
