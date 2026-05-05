@@ -76,4 +76,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 6 — Storyboard keyframes (cheap previews + promote to video) — `batch/phase-6-storyboard-keyframes` (PR #70)
 - [x] Fix bundle — Phase 5d / Phase 6 issues (keyframe checkpoint, deletes, attach/detach, stitch storyboard naming) — `batch/fix-5d-and-phase6-issues` (PR #72)
 - [x] Fix storyboard tab ⋮ menu + add rename — `batch/fix-storyboard-tab-menu-and-rename` (PR #73)
-- [ ] Strip hardcoded service identities and username from public repo — see prompts/strip-hardcoded-service-identities.md
+- [x] Strip hardcoded service identities and username from public repo — see prompts/strip-hardcoded-service-identities.md
+- [ ] Rename app to Loom + install new logo — see prompts/rename-to-loom.md
