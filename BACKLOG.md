@@ -66,5 +66,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — see prompts/claude-md-schema-category-docs.md
 - [x] Unify dirForItem with dirForGeneration (M3 cleanup) — see prompts/unify-dirforitem.md
 - [x] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
-- [~] Phase 5a — Storyboard data model + LLM generation — `batch/phase-5a-storyboard` (PR #63)
-- [~] Phase 5b — Storyboard scene execution + editing — `batch/phase-5b-storyboard-execution` (PR #64)
+- [x] Phase 5a — Storyboard data model + LLM generation — `batch/phase-5a-storyboard` (PR #63)
+- [x] Phase 5b — Storyboard scene execution + editing — `batch/phase-5b-storyboard-execution` (PR #64)
+- [ ] Env cleanup — split LLM endpoints, remove hardware-specific names — see prompts/env-cleanup-llm-split-and-hardware-neutral.md
