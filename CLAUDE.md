@@ -1248,6 +1248,78 @@ When ≥ 2 scenes have a resolved canonical clip, a "Stitch canonical" button al
 
 ---
 
+## Phase 6 — Storyboard keyframes
+
+Adds cheap image keyframe previews (~30s) per storyboard scene that can be reviewed and promoted to full Wan 2.2 video (~3min).
+
+### Economics / rationale
+
+Image generation (SD/Illustrious) is ~30× faster and costs nothing extra. Shooting 10 keyframes to pick the right composition before committing to 3-minute Wan 2.2 video is the intended workflow.
+
+### Data model
+
+No schema migration. `StoryboardScene` gains `canonicalKeyframeId?: string | null` (stored in `scenesJson`). Keyframes are `Generation` rows with `mediaType === 'image'` and `sceneId` set to the scene's ID. They appear in the project clip strip like any other image clip and in the Gallery. All existing `mediaType === 'video'` filtering for video clips is unchanged.
+
+### Chaining precedence (video generation from a scene)
+
+1. Scene's canonical keyframe (`resolveCanonicalKeyframeId`) → used as I2V starting frame
+2. Previous scene's canonical video clip (`resolveCanonicalClipId`) → used as I2V last-frame
+3. T2V (no starting frame)
+
+### Always-inline generation
+
+Keyframe generation never bounces to Studio — it fires directly against `/api/generate` (image endpoint) from `ProjectDetail`. This is the same pattern as Phase 5c's quick-generate for video. The user's last-used checkpoint is read from `sessionStorage` key `studio-checkpoint`; the positive prompt comes from `scene.positivePrompt`.
+
+### Per-scene UI
+
+Each scene card shows:
+- Left thumbnail: canonical keyframe (sky-border), or dashed placeholder
+- Right thumbnail: canonical video clip (existing Phase 5b/5c behaviour), or dashed placeholder
+- "🖼 Keyframe" inline button: fires `handleGenerateKeyframe(scene)` — always inline, never Studio bounce
+- Clip count / keyframe count badges (tap keyframe count to open `CanonicalKeyframePickerModal`)
+- In-flight pill while `inFlightKeyframeScenes` has an entry for this `sceneId`
+- Per-scene dismissible error banner for keyframe errors
+
+### Batch keyframe generation
+
+"🖼 Generate keyframes (N needed)" button in the storyboard header (N = scenes without a canonical keyframe). Tap opens a confirm dialog; confirm fires `handleGenerateAllKeyframes()` which calls `handleGenerateKeyframe()` for each scene in parallel. `batchKeyframeScenes` Set tracks which scenes are part of the batch (used by the polling effect to know when the batch completes).
+
+### `CanonicalKeyframePickerModal`
+
+Bottom-sheet (`src/components/CanonicalKeyframePickerModal.tsx`) listing all keyframes for a scene. Actions per keyframe: Set as canonical (PUTs storyboard), Promote to video, Regenerate. Nested `ImageModal` for full-screen view (z-50). Empty state with "Generate keyframe" CTA. "Generate another keyframe" at the bottom.
+
+### `resolveCanonicalClipId` — video-only
+
+Updated in Phase 6 to filter strictly by `mediaType === 'video'`. Previously didn't filter by media type, so an image keyframe could satisfy the canonical clip slot.
+
+### `resolveCanonicalKeyframeId`
+
+New function. Filters project clips by `sceneId === scene.id && mediaType === 'image'`. Priority: explicit `scene.canonicalKeyframeId` (if still present) → earliest-created keyframe.
+
+### `ImageModal` updates
+
+When `storyboard` prop is passed and `record.sceneId` is set:
+- **Image clips (keyframes):** Shows "Keyframe — Scene N of M · description" and a "Promote to video" button (calls `onPromoteToVideo` prop then closes modal).
+- **Video clips:** Shows "Scene N of M · description" (unchanged from Phase 5b).
+
+New optional prop: `onPromoteToVideo?: (record: GenerationRecord) => void`.
+
+### `SceneTriggerContext` addition
+
+`suggestedStartingKeyframeId: string | null` — set to the scene's own canonical keyframe when launching video generation from a scene. Studio's trigger `useEffect` prefers this over `suggestedStartingClipId` (`startingId = sc.suggestedStartingKeyframeId ?? sc.suggestedStartingClipId`).
+
+### Source layout additions (Phase 6)
+
+- `src/types/index.ts` — `StoryboardScene.canonicalKeyframeId`, `SceneTriggerContext.suggestedStartingKeyframeId`, `GenerationParams.sceneId`
+- `src/lib/comfyws.ts` — `finalizeImageJob` writes `sceneId` to DB
+- `src/app/api/generate/route.ts` — validates `sceneId` param
+- `src/components/CanonicalKeyframePickerModal.tsx` — new component
+- `src/components/ProjectDetail.tsx` — `resolveCanonicalClipId` (video-only), `resolveCanonicalKeyframeId`, keyframe state/handlers, dual thumbnails, batch button, batch confirm dialog
+- `src/components/ImageModal.tsx` — `onPromoteToVideo` prop, keyframe vs. clip scene row
+- `src/components/Studio.tsx` — keyframe priority in sceneContext starting-frame resolution
+
+---
+
 ## Not yet implemented (planned features)
 
 **Live step previews.** The architecture spec calls for catching the intermediate base64 preview images ComfyUI streams during sampling and displaying them in the UI as a live preview (updating every N steps). Currently `GenerationProgress` only shows a progress bar during generation and the final image on completion.

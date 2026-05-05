@@ -120,6 +120,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Validate sceneId if provided (soft reference — no DB lookup required)
+  if (params.sceneId !== undefined && params.sceneId !== null) {
+    if (typeof params.sceneId !== 'string' || params.sceneId.length === 0) {
+      return bad('sceneId must be a non-empty string when provided');
+    }
+  }
+
   // Assemble final prompts server-side; original user prompts go to DB/filename
   const positiveParts: string[] = [];
   const negativeParts: string[] = [];

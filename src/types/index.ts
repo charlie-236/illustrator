@@ -58,6 +58,8 @@ export interface GenerationParams {
   denoise?: number;
   referenceImages?: ReferenceImageSet;
   projectId?: string;
+  /** Soft reference to a StoryboardScene.id — written to Generation.sceneId for keyframe images. */
+  sceneId?: string;
 }
 
 export interface GenerationRecord {
@@ -141,7 +143,8 @@ export interface StoryboardScene {
   positivePrompt: string;     // LLM-generated; Wan 2.2-friendly prose for video generation
   durationSeconds: number;    // LLM-suggested; integer 2-7 typically
   notes?: string | null;      // user freeform notes; null/undefined for newly generated
-  canonicalClipId?: string | null; // explicit canonical clip choice; null = fallback to earliest-created
+  canonicalClipId?: string | null;     // explicit canonical video clip; null = fallback to earliest-created
+  canonicalKeyframeId?: string | null; // explicit canonical keyframe image; null = fallback to earliest-created
 }
 
 /** A storyboard row — belongs to a project. One project can have many storyboards. */
@@ -232,6 +235,8 @@ export interface SceneTriggerContext {
   durationSeconds: number;
   /** Canonical clip ID from the previous scene to use as i2v starting frame. Null when chaining is not applicable. */
   suggestedStartingClipId: string | null;
+  /** Canonical keyframe ID for THIS scene. Takes priority over suggestedStartingClipId as the i2v starting frame. */
+  suggestedStartingKeyframeId: string | null;
 }
 
 /** Project context passed from Projects tab to Studio when generating a new clip. */

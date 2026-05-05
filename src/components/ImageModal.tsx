@@ -21,6 +21,8 @@ interface Props {
   onProjectAssign?: (generationId: string, projectId: string | null) => void;
   /** When passed (from ProjectDetail), enables "Scene N" sidebar info for clips with sceneId. */
   storyboard?: Storyboard | null;
+  /** Called when the user taps "Promote to video" on a keyframe (image with sceneId). */
+  onPromoteToVideo?: (record: GenerationRecord) => void;
 }
 
 function HeartIcon({ filled }: { filled: boolean }) {
@@ -33,7 +35,7 @@ function HeartIcon({ filled }: { filled: boolean }) {
   );
 }
 
-export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject, onProjectAssign, storyboard }: Props) {
+export default function ImageModal({ items: initialItems, startIndex, onClose, onRemix, onDelete, onFavoriteToggle, onNavigateToProject, onProjectAssign, storyboard, onPromoteToVideo }: Props) {
   const [items, setItems] = useState(initialItems);
   const [idx, setIdx] = useState(Math.min(startIndex, Math.max(0, initialItems.length - 1)));
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -286,16 +288,31 @@ export default function ImageModal({ items: initialItems, startIndex, onClose, o
         </div>
         <p className="text-xs text-zinc-600">{date}</p>
 
-        {/* Scene row — shown when this clip has a sceneId and the storyboard is in scope */}
+        {/* Scene row — shown when this clip/keyframe has a sceneId and the storyboard is in scope */}
         {record.sceneId && storyboard && (() => {
           const sceneIdx = storyboard.scenes.findIndex((s) => s.id === record.sceneId);
           if (sceneIdx === -1) return null;
           const scene = storyboard.scenes[sceneIdx];
+          const isKeyframe = record.mediaType === 'image';
           return (
-            <p className="text-xs text-zinc-500">
-              Scene {sceneIdx + 1} of {storyboard.scenes.length}
-              {scene.description ? <span className="text-zinc-600"> · {scene.description}</span> : null}
-            </p>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-500">
+                {isKeyframe ? 'Keyframe — ' : ''}Scene {sceneIdx + 1} of {storyboard.scenes.length}
+                {scene.description ? <span className="text-zinc-600"> · {scene.description}</span> : null}
+              </p>
+              {isKeyframe && onPromoteToVideo && (
+                <button
+                  type="button"
+                  onClick={() => { onPromoteToVideo(record); onClose(); }}
+                  className="flex items-center gap-1.5 min-h-10 px-3 rounded-lg bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 text-violet-300 text-xs font-medium transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Promote to video
+                </button>
+              )}
+            </div>
           );
         })()}
 

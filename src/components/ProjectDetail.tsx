@@ -25,6 +25,7 @@ import DeleteConfirmDialog from './DeleteConfirmDialog';
 import StoryboardGenerationModal from './StoryboardGenerationModal';
 import SceneEditModal from './SceneEditModal';
 import CanonicalClipPickerModal from './CanonicalClipPickerModal';
+import CanonicalKeyframePickerModal from './CanonicalKeyframePickerModal';
 import { imgSrc } from '@/lib/imageSrc';
 import { useQueue } from '@/contexts/QueueContext';
 import { useModelLists } from '@/lib/useModelLists';
@@ -81,20 +82,31 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
 }
 
 /**
- * Resolves the canonical clip ID for a scene.
- * Uses scene.canonicalClipId if set and the clip still exists, otherwise falls back
- * to the earliest-created clip with matching sceneId.
+ * Resolves the canonical video clip ID for a scene.
+ * Uses scene.canonicalClipId if set and the clip still exists (must be video),
+ * otherwise falls back to the earliest-created video clip with matching sceneId.
  */
 function resolveCanonicalClipId(scene: StoryboardScene, projectClips: ProjectClip[]): string | null {
-  if (scene.canonicalClipId) {
-    if (projectClips.some((c) => c.id === scene.canonicalClipId)) {
-      return scene.canonicalClipId;
-    }
+  const videoClips = projectClips.filter((c) => c.sceneId === scene.id && c.mediaType === 'video');
+  if (scene.canonicalClipId && videoClips.some((c) => c.id === scene.canonicalClipId)) {
+    return scene.canonicalClipId;
   }
-  const sceneClips = projectClips
-    .filter((c) => c.sceneId === scene.id)
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  return sceneClips[0]?.id ?? null;
+  const earliest = videoClips.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+  return earliest?.id ?? null;
+}
+
+/**
+ * Resolves the canonical keyframe ID for a scene.
+ * Uses scene.canonicalKeyframeId if set and the keyframe still exists (must be image),
+ * otherwise falls back to the earliest-created image clip with matching sceneId.
+ */
+function resolveCanonicalKeyframeId(scene: StoryboardScene, projectClips: ProjectClip[]): string | null {
+  const keyframes = projectClips.filter((c) => c.sceneId === scene.id && c.mediaType === 'image');
+  if (scene.canonicalKeyframeId && keyframes.some((k) => k.id === scene.canonicalKeyframeId)) {
+    return scene.canonicalKeyframeId;
+  }
+  const earliest = keyframes.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+  return earliest?.id ?? null;
 }
 
 // ── Phase 5c helpers ──────────────────────────────────────────────────────────
@@ -129,6 +141,10 @@ async function encodeImageToBase64(url: string): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+function readLastUsedImageCheckpoint(): string | null {
+  try { return sessionStorage.getItem('studio-checkpoint'); } catch { return null; }
 }
 
 async function readInitEvent(body: ReadableStream<Uint8Array>): Promise<string> {
@@ -201,18 +217,28 @@ interface SortableSceneCardProps {
   sceneClips: ProjectClip[];
   canonicalClip: ProjectClip | null;
   canonicalId: string | null;
+  sceneKeyframes: ProjectClip[];
+  canonicalKeyframe: ProjectClip | null;
+  canonicalKeyframeId: string | null;
   compactMode: boolean;
   showFull: boolean;
   isInFlight: boolean;
   inFlightEntry: { startedAt: number; promptId: string } | undefined;
+  isKeyframeInFlight: boolean;
+  keyframeInFlightEntry: { startedAt: number; promptId: string } | undefined;
   nowTick: number;
   quickGenerateError: { sceneId: string; message: string } | null;
+  keyframeError: { sceneId: string; message: string } | null;
   onExpand: () => void;
   onEdit: () => void;
   onGenerate: () => void;
+  onGenerateKeyframe: () => void;
   onOpenClips: () => void;
   onOpenCanonical: () => void;
+  onOpenKeyframes: () => void;
+  onOpenCanonicalKeyframe: () => void;
   onDismissError: () => void;
+  onDismissKeyframeError: () => void;
 }
 
 function SortableSceneCard({
@@ -220,18 +246,27 @@ function SortableSceneCard({
   sceneIndex,
   sceneClips,
   canonicalClip,
+  sceneKeyframes,
+  canonicalKeyframe,
   compactMode,
   showFull,
   isInFlight,
   inFlightEntry,
+  isKeyframeInFlight,
+  keyframeInFlightEntry,
   nowTick,
   quickGenerateError,
+  keyframeError,
   onExpand,
   onEdit,
   onGenerate,
+  onGenerateKeyframe,
   onOpenClips,
   onOpenCanonical,
+  onOpenKeyframes,
+  onOpenCanonicalKeyframe,
   onDismissError,
+  onDismissKeyframeError,
 }: SortableSceneCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: scene.id });
 
@@ -268,9 +303,32 @@ function SortableSceneCard({
             {scene.description}
           </button>
           <span className="flex-shrink-0 text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">{scene.durationSeconds}s</span>
+          {sceneKeyframes.length > 0 && (
+            <button type="button" onClick={onOpenKeyframes} className="flex-shrink-0 text-xs text-sky-400 hover:text-sky-300 min-h-8 px-1" title="Keyframes">
+              🖼 {sceneKeyframes.length}
+            </button>
+          )}
           {sceneClips.length > 0 && (
-            <button type="button" onClick={onOpenClips} className="flex-shrink-0 text-xs text-violet-400 hover:text-violet-300 min-h-8 px-1">
-              {sceneClips.length}
+            <button type="button" onClick={onOpenClips} className="flex-shrink-0 text-xs text-violet-400 hover:text-violet-300 min-h-8 px-1" title="Clips">
+              🎬 {sceneClips.length}
+            </button>
+          )}
+          {isKeyframeInFlight ? (
+            <div className="flex-shrink-0 flex items-center gap-1 text-xs text-sky-400">
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              🖼 {formatElapsed(nowTick - (keyframeInFlightEntry?.startedAt ?? nowTick))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onGenerateKeyframe}
+              className="flex-shrink-0 min-h-10 min-w-10 flex items-center justify-center rounded-lg bg-sky-600/20 hover:bg-sky-600/30 border border-sky-600/30 text-sky-300 transition-colors"
+              title="Generate keyframe"
+            >
+              🖼
             </button>
           )}
           {isInFlight ? (
@@ -325,13 +383,22 @@ function SortableSceneCard({
             <span className="text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">
               {scene.durationSeconds}s
             </span>
+            {sceneKeyframes.length > 0 && (
+              <button
+                type="button"
+                onClick={onOpenKeyframes}
+                className="text-xs text-sky-400 hover:text-sky-300 underline underline-offset-2"
+              >
+                🖼 {sceneKeyframes.length} keyframe{sceneKeyframes.length !== 1 ? 's' : ''}
+              </button>
+            )}
             {sceneClips.length > 0 && (
               <button
                 type="button"
                 onClick={onOpenClips}
                 className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2"
               >
-                {sceneClips.length} clip{sceneClips.length !== 1 ? 's' : ''}
+                🎬 {sceneClips.length} clip{sceneClips.length !== 1 ? 's' : ''}
               </button>
             )}
           </div>
@@ -347,31 +414,54 @@ function SortableSceneCard({
             <p className="text-xs text-zinc-400 italic leading-relaxed">{scene.notes}</p>
           )}
 
-          {/* Canonical clip thumbnail */}
-          {canonicalClip && (
-            <button
-              type="button"
-              onClick={onOpenCanonical}
-              className="block w-1/2 rounded-lg overflow-hidden border border-zinc-700 hover:border-violet-500 transition-colors"
-            >
-              {canonicalClip.mediaType === 'image' ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={imgSrc(canonicalClip.filePath)}
-                  alt=""
-                  className="w-full aspect-video object-cover bg-zinc-800"
-                />
-              ) : (
-                // eslint-disable-next-line jsx-a11y/media-has-caption
-                <video
-                  src={imgSrc(canonicalClip.filePath)}
-                  preload="metadata"
-                  muted
-                  playsInline
-                  className="w-full aspect-video object-cover bg-zinc-800"
-                />
-              )}
-            </button>
+          {/* Dual thumbnails: keyframe (left) + clip (right) */}
+          {(canonicalKeyframe || canonicalClip) && (
+            <div className="flex gap-2">
+              {/* Keyframe thumbnail */}
+              <div className="flex-1">
+                {canonicalKeyframe ? (
+                  <button
+                    type="button"
+                    onClick={onOpenCanonicalKeyframe}
+                    className="block w-full rounded-lg overflow-hidden border border-sky-700/50 hover:border-sky-500 transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={imgSrc(canonicalKeyframe.filePath)}
+                      alt=""
+                      className="w-full aspect-video object-cover bg-zinc-800"
+                    />
+                  </button>
+                ) : (
+                  <div className="w-full aspect-video rounded-lg bg-zinc-800/40 border border-dashed border-zinc-700/40 flex items-center justify-center text-zinc-600 text-xs">
+                    🖼
+                  </div>
+                )}
+              </div>
+              {/* Clip thumbnail */}
+              <div className="flex-1">
+                {canonicalClip ? (
+                  <button
+                    type="button"
+                    onClick={onOpenCanonical}
+                    className="block w-full rounded-lg overflow-hidden border border-zinc-700 hover:border-violet-500 transition-colors"
+                  >
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                    <video
+                      src={imgSrc(canonicalClip.filePath)}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      className="w-full aspect-video object-cover bg-zinc-800"
+                    />
+                  </button>
+                ) : (
+                  <div className="w-full aspect-video rounded-lg bg-zinc-800/40 border border-dashed border-zinc-700/40 flex items-center justify-center text-zinc-600 text-xs">
+                    🎬
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Quick-generate error banner */}
@@ -395,8 +485,46 @@ function SortableSceneCard({
             </div>
           )}
 
-          {/* Generate / Edit buttons */}
+          {/* Keyframe error banner */}
+          {keyframeError?.sceneId === scene.id && (
+            <div className="flex items-start gap-2 bg-red-900/30 border border-red-700/40 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className="flex-1 text-xs text-red-300 leading-relaxed">
+                Keyframe: {keyframeError.message}
+              </span>
+              <button
+                type="button"
+                onClick={onDismissKeyframeError}
+                className="min-w-8 min-h-8 flex items-center justify-center rounded text-red-400 hover:text-red-200 flex-shrink-0"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* Generate keyframe + Generate scene + Edit buttons */}
           <div className="flex gap-2 pt-0.5">
+            {isKeyframeInFlight ? (
+              <div className="flex-1 min-h-12 rounded-xl bg-sky-900/30 border border-sky-700/40 text-sky-400 text-sm flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                🖼 {formatElapsed(nowTick - (keyframeInFlightEntry?.startedAt ?? nowTick))}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onGenerateKeyframe}
+                className="flex-1 min-h-12 rounded-xl bg-sky-600/15 hover:bg-sky-600/25 border border-sky-600/25 hover:border-sky-600/45 text-sky-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+              >
+                🖼 Keyframe
+              </button>
+            )}
             {isInFlight ? (
               <div className="flex-1 min-h-12 rounded-xl bg-zinc-700/60 border border-zinc-600/40 text-zinc-400 text-sm flex items-center justify-center gap-2 cursor-not-allowed select-none">
                 <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
@@ -414,7 +542,7 @@ function SortableSceneCard({
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                Generate this scene
+                Video
               </button>
             )}
             <button
@@ -1173,6 +1301,13 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [quickGenerateError, setQuickGenerateError] = useState<{ sceneId: string; message: string } | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
 
+  // Phase 6: Keyframe generation state
+  const [inFlightKeyframeScenes, setInFlightKeyframeScenes] = useState<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  const [keyframeError, setKeyframeError] = useState<{ sceneId: string; message: string } | null>(null);
+  const [batchKeyframeScenes, setBatchKeyframeScenes] = useState<Set<string>>(new Set());
+  const [canonicalKeyframePickerScene, setCanonicalKeyframePickerScene] = useState<StoryboardScene | null>(null);
+  const [showBatchKeyframeConfirm, setShowBatchKeyframeConfirm] = useState(false);
+
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [nameSaving, setNameSaving] = useState(false);
@@ -1266,6 +1401,8 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   // Ref so polling closures always read the latest inFlightScenes without re-creating the interval
   const inFlightScenesRef = useRef<Map<string, { startedAt: number; promptId: string }>>(new Map());
   inFlightScenesRef.current = inFlightScenes;
+  const inFlightKeyframeScenesRef = useRef<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  inFlightKeyframeScenesRef.current = inFlightKeyframeScenes;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1307,49 +1444,85 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     return () => document.removeEventListener('mousedown', handler);
   }, [showOverflow]);
 
-  // Phase 5c: tick every second while any scenes are in-flight (drives elapsed display)
+  // Phase 5c/6: tick every second while any scenes are in-flight (drives elapsed display)
   useEffect(() => {
-    if (inFlightScenes.size === 0) return;
+    if (inFlightScenes.size === 0 && inFlightKeyframeScenes.size === 0) return;
     const interval = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, [inFlightScenes.size]);
+  }, [inFlightScenes.size, inFlightKeyframeScenes.size]);
 
-  // Phase 5c: poll for completion while any scenes are in-flight
+  // Phase 5c/6: poll for completion while any scenes are in-flight (video or keyframe)
   useEffect(() => {
-    if (inFlightScenes.size === 0) return;
+    if (inFlightScenes.size === 0 && inFlightKeyframeScenes.size === 0) return;
     const STALE_INFLIGHT_MS = 30 * 60 * 1000;
     const interval = setInterval(async () => {
       const currentInFlight = inFlightScenesRef.current;
-      if (currentInFlight.size === 0) return;
+      const currentKeyframeInFlight = inFlightKeyframeScenesRef.current;
+      if (currentInFlight.size === 0 && currentKeyframeInFlight.size === 0) return;
       try {
         const res = await fetch(`/api/projects/${projectId}`);
         if (!res.ok) return;
         const data = await res.json() as { project: typeof project; clips: ProjectClip[]; stitchedExports: typeof stitchedExports };
         const freshClips: ProjectClip[] = data.clips ?? [];
         const now = Date.now();
-        const toRemove: string[] = [];
-        const staleIds: string[] = [];
+
+        // Handle video in-flight completions
+        const videoToRemove: string[] = [];
+        const videoStaleIds: string[] = [];
         for (const [sceneId, entry] of currentInFlight.entries()) {
           const newClip = freshClips.find(
-            (c) => c.sceneId === sceneId && new Date(c.createdAt).getTime() > entry.startedAt,
+            (c) => c.sceneId === sceneId && c.mediaType === 'video' && new Date(c.createdAt).getTime() > entry.startedAt,
           );
           if (newClip) {
-            toRemove.push(sceneId);
+            videoToRemove.push(sceneId);
           } else if (now - entry.startedAt > STALE_INFLIGHT_MS) {
-            toRemove.push(sceneId);
-            staleIds.push(sceneId);
+            videoToRemove.push(sceneId);
+            videoStaleIds.push(sceneId);
           }
         }
-        if (toRemove.length > 0) {
+        if (videoToRemove.length > 0) {
           setInFlightScenes((prev) => {
             const next = new Map(prev);
-            for (const id of toRemove) next.delete(id);
+            for (const id of videoToRemove) next.delete(id);
             return next;
           });
         }
-        if (staleIds.length > 0) {
-          setQuickGenerateError({ sceneId: staleIds[0], message: 'Generation appears to have timed out' });
+        if (videoStaleIds.length > 0) {
+          setQuickGenerateError({ sceneId: videoStaleIds[0], message: 'Generation appears to have timed out' });
         }
+
+        // Handle keyframe in-flight completions
+        const keyframeToRemove: string[] = [];
+        const keyframeStaleIds: string[] = [];
+        for (const [sceneId, entry] of currentKeyframeInFlight.entries()) {
+          const newKeyframe = freshClips.find(
+            (c) => c.sceneId === sceneId && c.mediaType === 'image' && new Date(c.createdAt).getTime() > entry.startedAt,
+          );
+          if (newKeyframe) {
+            keyframeToRemove.push(sceneId);
+          } else if (now - entry.startedAt > STALE_INFLIGHT_MS) {
+            keyframeToRemove.push(sceneId);
+            keyframeStaleIds.push(sceneId);
+          }
+        }
+        if (keyframeToRemove.length > 0) {
+          setInFlightKeyframeScenes((prev) => {
+            const next = new Map(prev);
+            for (const id of keyframeToRemove) next.delete(id);
+            return next;
+          });
+          // Update batch tracking: clear scenes that are no longer in-flight
+          setBatchKeyframeScenes((prev) => {
+            if (prev.size === 0) return prev;
+            const next = new Set(prev);
+            for (const id of keyframeToRemove) next.delete(id);
+            return next;
+          });
+        }
+        if (keyframeStaleIds.length > 0) {
+          setKeyframeError({ sceneId: keyframeStaleIds[0], message: 'Keyframe generation appears to have timed out' });
+        }
+
         // Refresh project data so scene cards update
         setClips(freshClips);
         if (data.project) setProject(data.project);
@@ -1359,7 +1532,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     }, 5000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inFlightScenes.size, projectId]);
+  }, [inFlightScenes.size, inFlightKeyframeScenes.size, projectId]);
 
   async function saveName() {
     if (!project || nameValue.trim() === '' || nameValue.trim() === project.name) {
@@ -1522,43 +1695,61 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     if (inFlightScenes.has(scene.id)) return;
 
     const sceneIndex = scene.position;
-    let suggestedStartingClipId: string | null = null;
-    if (storyboard && sceneIndex > 0) {
-      const prevScene = storyboard.scenes[sceneIndex - 1];
-      if (prevScene) {
-        suggestedStartingClipId = resolveCanonicalClipId(prevScene, clips);
-      }
-    }
 
-    // Resolve starting frame for i2v chaining
+    // Resolve starting frame: keyframe (this scene) > previous scene's canonical clip > t2v
     let startImageB64: string | undefined;
     let mode: 't2v' | 'i2v' = 't2v';
 
-    if (suggestedStartingClipId) {
-      const startClip = clips.find((c) => c.id === suggestedStartingClipId);
-      if (startClip) {
+    const canonicalKeyframeId = resolveCanonicalKeyframeId(scene, clips);
+    if (canonicalKeyframeId) {
+      // Priority: this scene's canonical keyframe
+      const keyframeClip = clips.find((c) => c.id === canonicalKeyframeId);
+      if (keyframeClip) {
         try {
-          if (startClip.mediaType === 'image') {
-            startImageB64 = await encodeImageToBase64(imgSrc(startClip.filePath));
-            mode = 'i2v';
-          } else {
-            const extractRes = await fetch('/api/extract-last-frame', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ generationId: suggestedStartingClipId }),
-            });
-            if (extractRes.ok) {
-              const { frameB64 } = await extractRes.json() as { frameB64: string };
-              startImageB64 = frameB64;
+          startImageB64 = await encodeImageToBase64(imgSrc(keyframeClip.filePath));
+          mode = 'i2v';
+        } catch (err) {
+          console.warn('[quick-generate] keyframe load failed, checking prev scene clip:', err);
+        }
+      }
+    }
+
+    if (!startImageB64) {
+      // Fallback: previous scene's canonical clip's last frame
+      let suggestedStartingClipId: string | null = null;
+      if (storyboard && sceneIndex > 0) {
+        const prevScene = storyboard.scenes[sceneIndex - 1];
+        if (prevScene) {
+          suggestedStartingClipId = resolveCanonicalClipId(prevScene, clips);
+        }
+      }
+
+      if (suggestedStartingClipId) {
+        const startClip = clips.find((c) => c.id === suggestedStartingClipId);
+        if (startClip) {
+          try {
+            if (startClip.mediaType === 'image') {
+              startImageB64 = await encodeImageToBase64(imgSrc(startClip.filePath));
               mode = 'i2v';
             } else {
-              console.warn('[quick-generate] extract-last-frame failed, falling back to t2v');
-              setQuickGenerateError({ sceneId: scene.id, message: "Starting frame couldn't load, generating without it" });
+              const extractRes = await fetch('/api/extract-last-frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ generationId: suggestedStartingClipId }),
+              });
+              if (extractRes.ok) {
+                const { frameB64 } = await extractRes.json() as { frameB64: string };
+                startImageB64 = frameB64;
+                mode = 'i2v';
+              } else {
+                console.warn('[quick-generate] extract-last-frame failed, falling back to t2v');
+                setQuickGenerateError({ sceneId: scene.id, message: "Starting frame couldn't load, generating without it" });
+              }
             }
+          } catch (err) {
+            console.warn('[quick-generate] starting frame extraction failed:', err);
+            setQuickGenerateError({ sceneId: scene.id, message: "Starting frame couldn't load, generating without it" });
           }
-        } catch (err) {
-          console.warn('[quick-generate] starting frame extraction failed:', err);
-          setQuickGenerateError({ sceneId: scene.id, message: "Starting frame couldn't load, generating without it" });
         }
       }
     }
@@ -1566,6 +1757,167 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     const frames = clampToValidFrameCount(scene.durationSeconds * 16);
     const requestBody: Record<string, unknown> = {
       mode,
+      prompt: scene.positivePrompt,
+      width: project.defaultWidth ?? 1280,
+      height: project.defaultHeight ?? 704,
+      frames,
+      steps: 4,
+      cfg: 1,
+      seed: -1,
+      lightning: true,
+      loras: project.defaultVideoLoras ?? [],
+      projectId: project.id,
+      sceneId: scene.id,
+      batchSize: 1,
+    };
+    if (startImageB64) requestBody.startImageB64 = startImageB64;
+
+    let promptId: string;
+    try {
+      const res = await fetch('/api/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error((errBody as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error('No SSE body');
+      promptId = await readInitEvent(res.body);
+    } catch (err) {
+      setQuickGenerateError({ sceneId: scene.id, message: String(err) });
+      return;
+    }
+
+    const startedAt = Date.now();
+    addJob({
+      promptId,
+      generationId: '',
+      mediaType: 'video',
+      promptSummary: `Scene ${scene.position + 1}: ${scene.description.slice(0, 40)}`,
+      startedAt,
+      runningSince: null,
+      progress: null,
+      status: 'queued',
+    });
+    setInFlightScenes((prev) => new Map(prev).set(scene.id, { startedAt, promptId }));
+  }
+
+  async function handleGenerateKeyframe(scene: StoryboardScene) {
+    if (!project) return;
+    if (inFlightKeyframeScenes.has(scene.id)) return;
+
+    const checkpoint = readLastUsedImageCheckpoint();
+    if (!checkpoint) {
+      setKeyframeError({ sceneId: scene.id, message: 'No image checkpoint available. Select one in Studio first.' });
+      return;
+    }
+
+    setInFlightKeyframeScenes((prev) => new Map(prev).set(scene.id, { startedAt: Date.now(), promptId: '' }));
+    setKeyframeError(null);
+
+    const params = {
+      checkpoint,
+      loras: [],
+      positivePrompt: scene.positivePrompt,
+      negativePrompt: '',
+      width: project.defaultWidth ?? 1280,
+      height: project.defaultHeight ?? 704,
+      steps: 25,
+      cfg: 7,
+      sampler: 'euler',
+      scheduler: 'normal',
+      seed: -1,
+      batchSize: 1,
+      highResFix: false,
+      projectId: project.id,
+      sceneId: scene.id,
+    };
+
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error((errBody as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error('No SSE body');
+
+      const promptId = await readInitEvent(res.body);
+      setInFlightKeyframeScenes((prev) => {
+        const next = new Map(prev);
+        next.set(scene.id, { startedAt: Date.now(), promptId });
+        return next;
+      });
+      addJob({
+        promptId,
+        generationId: '',
+        mediaType: 'image',
+        promptSummary: `Keyframe — Scene ${scene.position + 1}: ${scene.description.slice(0, 40)}`,
+        startedAt: Date.now(),
+        runningSince: null,
+        progress: null,
+        status: 'queued',
+      });
+    } catch (err) {
+      setInFlightKeyframeScenes((prev) => {
+        const next = new Map(prev);
+        next.delete(scene.id);
+        return next;
+      });
+      setKeyframeError({ sceneId: scene.id, message: String(err) });
+    }
+  }
+
+  async function handleGenerateAllKeyframes() {
+    if (!storyboard) return;
+    const scenesNeedingKeyframes = storyboard.scenes.filter(
+      (s) => resolveCanonicalKeyframeId(s, clips) === null,
+    );
+    if (scenesNeedingKeyframes.length === 0) return;
+
+    setShowBatchKeyframeConfirm(false);
+    setBatchKeyframeScenes(new Set(scenesNeedingKeyframes.map((s) => s.id)));
+
+    for (const scene of scenesNeedingKeyframes) {
+      void handleGenerateKeyframe(scene);
+    }
+  }
+
+  async function handlePromoteKeyframeToVideo(keyframe: ProjectClip, scene: StoryboardScene) {
+    if (!project) return;
+
+    if (!storyboard?.quickGenerate) {
+      // Studio bounce: set keyframe as the i2v starting frame
+      const sceneCtx: ProjectContext['sceneContext'] = {
+        sceneId: scene.id,
+        sceneIndex: scene.position,
+        prompt: scene.positivePrompt,
+        durationSeconds: scene.durationSeconds,
+        suggestedStartingClipId: null,
+        suggestedStartingKeyframeId: keyframe.id,
+      };
+      onGenerateInProject(project, clips[clips.length - 1] ?? null, 'video', sceneCtx);
+      return;
+    }
+
+    // Inline quick generate using this specific keyframe as starting frame
+    if (inFlightScenes.has(scene.id)) return;
+
+    let startImageB64: string | undefined;
+    try {
+      startImageB64 = await encodeImageToBase64(imgSrc(keyframe.filePath));
+    } catch (err) {
+      console.warn('[promote-keyframe] Failed to load keyframe image, falling back to t2v:', err);
+    }
+
+    const frames = clampToValidFrameCount(scene.durationSeconds * 16);
+    const requestBody: Record<string, unknown> = {
+      mode: startImageB64 ? 'i2v' : 't2v',
       prompt: scene.positivePrompt,
       width: project.defaultWidth ?? 1280,
       height: project.defaultHeight ?? 704,
@@ -1622,9 +1974,10 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     if (!project) return;
     const sceneIndex = scene.position;
 
-    // Resolve previous scene's canonical clip for i2v chaining suggestion
+    // Keyframe (this scene) takes priority; fall back to previous scene's canonical clip
+    const suggestedStartingKeyframeId = resolveCanonicalKeyframeId(scene, clips);
     let suggestedStartingClipId: string | null = null;
-    if (storyboard && sceneIndex > 0) {
+    if (!suggestedStartingKeyframeId && storyboard && sceneIndex > 0) {
       const prevScene = storyboard.scenes[sceneIndex - 1];
       if (prevScene) {
         suggestedStartingClipId = resolveCanonicalClipId(prevScene, clips);
@@ -1638,6 +1991,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       prompt: scene.positivePrompt,
       durationSeconds: scene.durationSeconds,
       suggestedStartingClipId,
+      suggestedStartingKeyframeId,
     };
 
     onGenerateInProject(project, latestClip, 'video', sceneCtx);
@@ -2108,9 +2462,13 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                           </button>
                         )}
                         {storyboard.scenes.map((scene, i) => {
-                          const sceneClips = clips.filter((c) => c.sceneId === scene.id);
+                          const sceneAllClips = clips.filter((c) => c.sceneId === scene.id);
+                          const sceneClips = sceneAllClips.filter((c) => c.mediaType === 'video');
+                          const sceneKeyframes = sceneAllClips.filter((c) => c.mediaType === 'image');
                           const canonicalId = resolveCanonicalClipId(scene, clips);
                           const canonicalClip = canonicalId ? clips.find((c) => c.id === canonicalId) ?? null : null;
+                          const canonicalKfId = resolveCanonicalKeyframeId(scene, clips);
+                          const canonicalKeyframe = canonicalKfId ? clips.find((c) => c.id === canonicalKfId) ?? null : null;
 
                           return (
                             <div key={scene.id}>
@@ -2120,12 +2478,18 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                                 sceneClips={sceneClips}
                                 canonicalClip={canonicalClip}
                                 canonicalId={canonicalId}
+                                sceneKeyframes={sceneKeyframes}
+                                canonicalKeyframe={canonicalKeyframe}
+                                canonicalKeyframeId={canonicalKfId}
                                 compactMode={compactMode}
                                 showFull={!compactMode || expandedSceneIds.has(scene.id)}
                                 isInFlight={inFlightScenes.has(scene.id)}
                                 inFlightEntry={inFlightScenes.get(scene.id)}
+                                isKeyframeInFlight={inFlightKeyframeScenes.has(scene.id)}
+                                keyframeInFlightEntry={inFlightKeyframeScenes.get(scene.id)}
                                 nowTick={nowTick}
                                 quickGenerateError={quickGenerateError}
+                                keyframeError={keyframeError}
                                 onExpand={() => setExpandedSceneIds((prev) => {
                                   const next = new Set(prev);
                                   if (next.has(scene.id)) next.delete(scene.id); else next.add(scene.id);
@@ -2133,6 +2497,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                                 })}
                                 onEdit={() => { setInsertAtPosition(null); setEditingScene(scene); }}
                                 onGenerate={() => handleGenerateScene(scene)}
+                                onGenerateKeyframe={() => { void handleGenerateKeyframe(scene); }}
                                 onOpenClips={() => {
                                   if (sceneClips.length === 1) {
                                     setModalIdx(getModalIndexById(sceneClips[0].id));
@@ -2143,7 +2508,19 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                                 onOpenCanonical={() => {
                                   if (canonicalClip) setModalIdx(getModalIndexById(canonicalClip.id));
                                 }}
+                                onOpenKeyframes={() => {
+                                  if (sceneKeyframes.length === 1) {
+                                    setModalIdx(getModalIndexById(sceneKeyframes[0].id));
+                                  } else {
+                                    setCanonicalKeyframePickerScene(scene);
+                                  }
+                                }}
+                                onOpenCanonicalKeyframe={() => {
+                                  if (canonicalKeyframe) setModalIdx(getModalIndexById(canonicalKeyframe.id));
+                                  else setCanonicalKeyframePickerScene(scene);
+                                }}
                                 onDismissError={() => setQuickGenerateError(null)}
+                                onDismissKeyframeError={() => setKeyframeError(null)}
                               />
                               {/* Insert between scenes (non-compact only) */}
                               {!compactMode && (
@@ -2173,6 +2550,33 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                     </SortableContext>
                   </DndContext>
                 )}
+
+                {/* Batch keyframe generation */}
+                {(() => {
+                  const scenesNeedingKeyframes = storyboard.scenes.filter(
+                    (s) => resolveCanonicalKeyframeId(s, clips) === null,
+                  );
+                  const batchTotal = batchKeyframeScenes.size;
+                  const batchCompleted = Array.from(batchKeyframeScenes).filter(
+                    (id) => !inFlightKeyframeScenes.has(id),
+                  ).length;
+                  const batchInProgress = batchTotal > 0 && batchCompleted < batchTotal;
+
+                  if (scenesNeedingKeyframes.length === 0 && !batchInProgress) return null;
+
+                  return (
+                    <button
+                      type="button"
+                      disabled={batchInProgress}
+                      onClick={() => setShowBatchKeyframeConfirm(true)}
+                      className="w-full min-h-12 rounded-xl bg-sky-600/15 hover:bg-sky-600/25 border border-sky-600/25 hover:border-sky-600/45 text-sky-300 text-sm font-medium transition-colors disabled:opacity-60 disabled:pointer-events-none flex items-center justify-center gap-2"
+                    >
+                      {batchInProgress
+                        ? `Generating keyframes (${batchCompleted}/${batchTotal})`
+                        : `🖼 Generate keyframes (${scenesNeedingKeyframes.length} needed)`}
+                    </button>
+                  );
+                })()}
 
                 {/* Storyboard actions */}
                 <div className="flex gap-2 pt-1">
@@ -2424,6 +2828,15 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             }
           }}
           storyboard={storyboard}
+          onPromoteToVideo={(record) => {
+            if (!storyboard || !record.sceneId || record.mediaType !== 'image') return;
+            const scene = storyboard.scenes.find((s) => s.id === record.sceneId);
+            if (!scene) return;
+            const keyframe = clips.find((c) => c.id === record.id);
+            if (!keyframe) return;
+            setModalIdx(null);
+            void handlePromoteKeyframeToVideo(keyframe, scene);
+          }}
         />
       )}
 
@@ -2609,6 +3022,59 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           onCanonicalChanged={(updated) => setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
         />
       )}
+
+      {/* ── Canonical keyframe picker ── */}
+      {canonicalKeyframePickerScene && storyboard && (
+        <CanonicalKeyframePickerModal
+          scene={canonicalKeyframePickerScene}
+          sceneIndex={storyboard.scenes.indexOf(canonicalKeyframePickerScene)}
+          sceneKeyframes={clips.filter((c) => c.sceneId === canonicalKeyframePickerScene.id && c.mediaType === 'image')}
+          canonicalKeyframeId={resolveCanonicalKeyframeId(canonicalKeyframePickerScene, clips)}
+          projectId={projectId}
+          projectName={project?.name ?? ''}
+          storyboard={storyboard}
+          onClose={() => setCanonicalKeyframePickerScene(null)}
+          onCanonicalChanged={(updated) => setStoryboards((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
+          onGenerateKeyframe={(scene) => { void handleGenerateKeyframe(scene); }}
+          onPromoteToVideo={(keyframe, scene) => { void handlePromoteKeyframeToVideo(keyframe, scene); }}
+          onOpenModal={(id) => setModalIdx(getModalIndexById(id))}
+        />
+      )}
+
+      {/* ── Batch keyframe confirm dialog ── */}
+      {showBatchKeyframeConfirm && storyboard && (() => {
+        const scenesNeedingKeyframes = storyboard.scenes.filter(
+          (s) => resolveCanonicalKeyframeId(s, clips) === null,
+        );
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowBatchKeyframeConfirm(false)}>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-base font-semibold text-zinc-100">Generate keyframes for {scenesNeedingKeyframes.length} scene{scenesNeedingKeyframes.length !== 1 ? 's' : ''}?</h2>
+              <p className="text-sm text-zinc-400 leading-relaxed">
+                This will queue {scenesNeedingKeyframes.length} image generation{scenesNeedingKeyframes.length !== 1 ? 's' : ''} on the GPU.
+                They&apos;ll run in sequence and complete in roughly {Math.ceil(scenesNeedingKeyframes.length * 0.5)} minutes.
+                You can keep using the app while they generate.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowBatchKeyframeConfirm(false)}
+                  className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleGenerateAllKeyframes(); }}
+                  className="flex-1 min-h-12 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold transition-colors"
+                >
+                  Generate
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
