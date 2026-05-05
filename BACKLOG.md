@@ -72,5 +72,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Watchdog timer starts on execution, not registration; sentinel 0 disables — `batch/watchdog-queue-aware` (PR #66)
 - [x] Fix Phase 5b: scene's suggested starting frame doesn't auto-populate — `batch/fix-5b-auto-select-starting-frame` (PR #67)
 - [x] Phase 5c — Storyboard quick-generate toggle — `batch/phase-5c-storyboard-quick-generate` (PR #68)
-- [ ] Phase 5d — Multi-storyboard + scene management + canonical play/stitch — see prompts/phase-5d-multi-storyboard-and-scene-management.md
+- [~] Phase 5d — Multi-storyboard + scene management + canonical play/stitch — `batch/phase-5d-multi-storyboard-and-scene-management` (PR #69)
 - [ ] Phase 6 — Storyboard keyframes (cheap previews + promote to video) — see prompts/phase-6-storyboard-keyframes.md
