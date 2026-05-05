@@ -436,6 +436,7 @@ class ComfyWSManager {
           pushSSE(job.controller, 'error', { message: msg });
           closeSSE(job.controller);
           this.jobs.delete(promptId);
+          this.cleanupJob(job);
         } else if (statusStr === 'error') {
           job.finalized = true;
           if (job.timeoutId !== null) clearTimeout(job.timeoutId);
@@ -445,6 +446,7 @@ class ComfyWSManager {
           pushSSE(job.controller, 'error', { message: msg });
           closeSSE(job.controller);
           this.jobs.delete(promptId);
+          this.cleanupJob(job);
         }
       } catch {
         // /history fetch failed — leave job in place and let the watchdog handle it.
@@ -883,6 +885,7 @@ class ComfyWSManager {
     this.addToRecentlyCompleted(job, 'error', 'Aborted by user');
     pushSSE(job.controller, 'error', { message: 'Aborted by user' });
     closeSSE(job.controller);
+    if (this.activePromptId === promptId) this.activePromptId = null;
     this.jobs.delete(promptId);
     return true;
   }

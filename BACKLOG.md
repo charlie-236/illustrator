@@ -78,4 +78,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Fix storyboard tab ⋮ menu + add rename — `batch/fix-storyboard-tab-menu-and-rename` (PR #73)
 - [x] Strip hardcoded service identities and username from public repo — see prompts/strip-hardcoded-service-identities.md
 - [x] Rename app to Loom + install new logo — `batch/rename-to-loom` (PR #75)
-- [ ] comfyws cleanup hygiene — SSH cleanup on reconnect + activePromptId clear on abort — see prompts/comfyws-cleanup-hygiene.md
+- [~] comfyws cleanup hygiene — SSH cleanup on reconnect + activePromptId clear on abort — `batch/comfyws-cleanup-hygiene` (PR #76)
