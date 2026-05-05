@@ -75,4 +75,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 5d — Multi-storyboard + scene management + canonical play/stitch — `batch/phase-5d-multi-storyboard-and-scene-management` (PR #69)
 - [x] Phase 6 — Storyboard keyframes (cheap previews + promote to video) — `batch/phase-6-storyboard-keyframes` (PR #70)
 - [x] Fix bundle — Phase 5d / Phase 6 issues (keyframe checkpoint, deletes, attach/detach, stitch storyboard naming) — `batch/fix-5d-and-phase6-issues` (PR #72)
-- [ ] Fix storyboard tab ⋮ menu + add rename — see prompts/fix-storyboard-tab-menu-and-rename.md
+- [~] Fix storyboard tab ⋮ menu + add rename — `batch/fix-storyboard-tab-menu-and-rename` (PR #73)
