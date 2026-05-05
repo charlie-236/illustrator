@@ -639,6 +639,7 @@ class ComfyWSManager {
               highResFix: params.highResFix ?? false,
               mediaType: 'image',
               ...(params.projectId ? { projectId: params.projectId, position } : {}),
+              ...(params.sceneId ? { sceneId: params.sceneId } : {}),
             },
           });
 

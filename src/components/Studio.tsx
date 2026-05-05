@@ -605,12 +605,13 @@ export default function Studio({
       // Stash sceneId for the generate-video request
       setActiveSceneId(sc.sceneId);
 
-      // Suggest starting frame from previous scene's canonical clip
+      // Suggest starting frame: keyframe takes priority over previous-scene clip
       setUseStartingFrame(false);
       setStartingFrameRecord(null);
-      if (sc.suggestedStartingClipId) {
-        setSelectedStartingClipId(sc.suggestedStartingClipId);
-        // Populate pickerItems so the thumbnail renders and submit can resolve the clip
+      const startingId = sc.suggestedStartingKeyframeId ?? sc.suggestedStartingClipId;
+      if (startingId) {
+        setSelectedStartingClipId(startingId);
+        // Populate pickerItems so the thumbnail renders and submit can resolve the clip/keyframe
         void loadPickerItems(projectContextTrigger.projectId);
       } else {
         setSelectedStartingClipId(null);
