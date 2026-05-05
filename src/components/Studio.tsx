@@ -610,10 +610,12 @@ export default function Studio({
       setStartingFrameRecord(null);
       if (sc.suggestedStartingClipId) {
         setSelectedStartingClipId(sc.suggestedStartingClipId);
+        // Populate pickerItems so the thumbnail renders and submit can resolve the clip
+        void loadPickerItems(projectContextTrigger.projectId);
       } else {
         setSelectedStartingClipId(null);
+        setPickerItems([]);
       }
-      setPickerItems([]);
 
       onProjectContextTriggerConsumed();
       return;
@@ -700,13 +702,11 @@ export default function Studio({
     setPickerItems([]);
   }
 
-  async function openFramePicker() {
-    if (!projectContext) return;
-    setFramePickerOpen(true);
-    if (pickerItems.length > 0) return; // already loaded
+  async function loadPickerItems(projectId: string) {
+    if (pickerItems.length > 0) return; // already loaded for this project
     setPickerFetching(true);
     try {
-      const res = await fetch(`/api/projects/${projectContext.projectId}`);
+      const res = await fetch(`/api/projects/${projectId}`);
       if (!res.ok) return;
       const data = await res.json() as {
         clips: ProjectClip[];
@@ -735,6 +735,12 @@ export default function Studio({
     } finally {
       setPickerFetching(false);
     }
+  }
+
+  async function openFramePicker() {
+    if (!projectContext) return;
+    setFramePickerOpen(true);
+    await loadPickerItems(projectContext.projectId);
   }
 
   async function handleProjectSwitch(projectId: string | null, projectName: string | null) {
