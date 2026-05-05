@@ -3,9 +3,9 @@ import { NodeSSH } from 'node-ssh';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VM_USER = process.env.A100_VM_USER ?? '';
-const VM_IP = process.env.A100_VM_IP ?? '';
-const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
+const VM_USER = process.env.GPU_VM_USER ?? '';
+const VM_IP = process.env.GPU_VM_IP ?? '';
+const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 
 type ServiceName = 'comfy-illustrator' | 'aphrodite-writer' | 'aphrodite-illustrator-polisher';
 type ServiceStatus = 'ready' | 'loading' | 'inactive' | 'unknown';
@@ -67,13 +67,13 @@ async function runSystemctlChecks(ssh: NodeSSH): Promise<Record<ServiceName, num
 
 export async function GET() {
   if (!SSH_KEY_PATH) {
-    return Response.json({ error: 'A100_SSH_KEY_PATH not configured' }, { status: 500 });
+    return Response.json({ error: 'GPU_VM_SSH_KEY_PATH not configured' }, { status: 500 });
   }
   if (!VM_USER) {
-    return Response.json({ error: 'A100_VM_USER not configured' }, { status: 500 });
+    return Response.json({ error: 'GPU_VM_USER not configured' }, { status: 500 });
   }
   if (!VM_IP) {
-    return Response.json({ error: 'A100_VM_IP not configured' }, { status: 500 });
+    return Response.json({ error: 'GPU_VM_IP not configured' }, { status: 500 });
   }
 
   const ssh = new NodeSSH();

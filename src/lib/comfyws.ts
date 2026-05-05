@@ -116,9 +116,9 @@ const VIDEO_JOB_TIMEOUT_MS = Number(process.env.VIDEO_JOB_TIMEOUT_MS) || 15 * 60
 const STITCH_JOB_TIMEOUT_MS = Number(process.env.STITCH_JOB_TIMEOUT_MS) || 5 * 60 * 1000;
 const RECENT_COMPLETED_TTL_MS = Number(process.env.RECENT_COMPLETED_TTL_MS) || 5 * 60 * 1000;
 const COMFYUI_OUTPUT_PATH = process.env.COMFYUI_OUTPUT_PATH ?? '/models/ComfyUI/output';
-const VM_USER = process.env.A100_VM_USER ?? '';
-const VM_IP = process.env.A100_VM_IP ?? '';
-const SSH_KEY_PATH = process.env.A100_SSH_KEY_PATH ?? '';
+const VM_USER = process.env.GPU_VM_USER ?? '';
+const VM_IP = process.env.GPU_VM_IP ?? '';
+const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 
 const encoder = new TextEncoder();
 
