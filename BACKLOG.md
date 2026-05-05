@@ -70,5 +70,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 5b — Storyboard scene execution + editing — `batch/phase-5b-storyboard-execution` (PR #64)
 - [~] Env cleanup — split LLM endpoints, remove hardware-specific names — `batch/env-cleanup-llm-split-and-hardware-neutral` (PR #65)
 - [~] Watchdog timer starts on execution, not registration; sentinel 0 disables — `batch/watchdog-queue-aware` (PR #66)
-- [ ] Fix Phase 5b: scene's suggested starting frame doesn't auto-populate — see prompts/fix-5b-auto-select-starting-frame.md
+- [~] Fix Phase 5b: scene's suggested starting frame doesn't auto-populate — `batch/fix-5b-auto-select-starting-frame` (PR #67)
 - [ ] Phase 5c — Storyboard quick-generate toggle — see prompts/phase-5c-storyboard-quick-generate.md
