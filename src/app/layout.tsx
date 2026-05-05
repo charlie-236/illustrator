@@ -2,11 +2,11 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Illustrator',
-  description: 'ComfyUI Generation Studio',
+  title: 'Loom',
+  description: 'Multi-modal creative workspace for stories.',
   appleWebApp: {
     capable: true,
-    title: 'Illustrator',
+    title: 'Loom',
     statusBarStyle: 'black-translucent',
   },
   manifest: '/manifest.json',

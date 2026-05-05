@@ -1,0 +1,40 @@
+interface LoomLogoProps {
+  size?: number;
+  className?: string;
+}
+
+/**
+ * Loom logo mark — abstract weave in violet on dark.
+ * Renders as an inline SVG; size defaults to 32px.
+ */
+export default function LoomLogo({ size = 32, className }: LoomLogoProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-label="Loom"
+      role="img"
+    >
+      <rect x="0" y="0" width="32" height="32" rx="5" fill="#0d0d10" />
+      <path d="M 7 6 L 7 26" stroke="#8b5cf6" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 13 6 L 13 26" stroke="#a78bfa" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 19 6 L 19 26" stroke="#8b5cf6" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 25 6 L 25 26" stroke="#a78bfa" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 4 10 L 12 10" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 14 10 L 18 10" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 20 10 L 24 10" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 26 10 L 28 10" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 4 16 L 6 16" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 8 16 L 18 16" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 20 16 L 24 16" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 26 16 L 28 16" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 4 22 L 12 22" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 14 22 L 18 22" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 20 22 L 24 22" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M 26 22 L 28 22" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
