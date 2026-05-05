@@ -12,7 +12,7 @@ const SSH_KEY_PATH = process.env.GPU_VM_SSH_KEY_PATH ?? '';
 const SERVICE_UNITS: Record<string, string> = {
   'comfy-illustrator': 'comfy-illustrator.service',
   'aphrodite-writer': 'aphrodite-writer',
-  'aphrodite-illustrator-polisher': 'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer': 'aphrodite-cinematographer',
 };
 
 export async function POST(req: NextRequest) {

@@ -47,8 +47,8 @@ If `/health` is the verified-correct endpoint:
   unit: 'aphrodite-writer',
   probeUrl: 'http://127.0.0.1:21434/health',
 },
-'aphrodite-illustrator-polisher': {
-  unit: 'aphrodite-illustrator-polisher',
+'aphrodite-cinematographer': {
+  unit: 'aphrodite-cinematographer',
   probeUrl: 'http://127.0.0.1:11438/health',
 },
 ```

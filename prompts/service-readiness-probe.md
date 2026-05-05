@@ -31,8 +31,8 @@ const SERVICE_CONFIG: Record<ServiceName, { unit: string; probeUrl: string }> = 
     unit: 'aphrodite-writer',
     probeUrl: 'http://127.0.0.1:21434/v1/models',
   },
-  'aphrodite-illustrator-polisher': {
-    unit: 'aphrodite-illustrator-polisher',
+  'aphrodite-cinematographer': {
+    unit: 'aphrodite-cinematographer',
     probeUrl: 'http://127.0.0.1:11438/v1/models',
   },
 };
@@ -203,7 +203,7 @@ Probe endpoints:
 |---|---|
 | comfy-illustrator | http://127.0.0.1:8188/system_stats |
 | aphrodite-writer | http://127.0.0.1:21434/v1/models |
-| aphrodite-illustrator-polisher | http://127.0.0.1:11438/v1/models |
+| aphrodite-cinematographer | http://127.0.0.1:11438/v1/models |
 
 All probes go through mint-pc localhost tunnels. The writer (21434) and polisher (11438) tunnels must be live on mint-pc for their probes to succeed. ComfyUI (8188) shares the tunnel used by /api/generate.
 ```
