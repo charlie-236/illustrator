@@ -89,6 +89,7 @@ export async function GET(
             createdAt: true,
             isFavorite: true,
             mediaType: true,
+            sceneId: true,
           },
         },
         stitchedExports: {
@@ -143,6 +144,7 @@ export async function GET(
         isFavorite: g.isFavorite,
         mediaType: g.mediaType,
         isStitched: false,
+        sceneId: g.sceneId ?? null,
       })),
       stitchedExports: project.stitchedExports.map((e) => ({
         id: e.id,

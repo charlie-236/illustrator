@@ -29,6 +29,8 @@ export interface VideoJobParams {
   loras?: WanLoraSpec[];
   /** Optional project to associate this clip with. Position is auto-computed at save time. */
   projectId?: string;
+  /** Soft reference to a StoryboardScene.id within the project's storyboardJson. Null for non-storyboard clips. */
+  sceneId?: string;
 }
 
 interface BaseJob {
@@ -711,6 +713,7 @@ class ComfyWSManager {
           videoLorasJson: videoLorasJsonValue ?? undefined,
           lightning: videoParams.lightning ?? false,
           ...(videoParams.projectId ? { projectId: videoParams.projectId, position } : {}),
+          ...(videoParams.sceneId ? { sceneId: videoParams.sceneId } : {}),
         },
       });
 

@@ -77,7 +77,7 @@ export default function Home() {
     setTab('projects');
   }, []);
   const handleProjectContextTriggerConsumed = useCallback(() => setProjectContextTrigger(null), []);
-  const handleGenerateInProject = useCallback((project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video') => {
+  const handleGenerateInProject = useCallback((project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video', sceneContext?: ProjectContext['sceneContext']) => {
     const context: ProjectContext = {
       projectId: project.id,
       projectName: project.name,
@@ -95,6 +95,7 @@ export default function Home() {
         lightning: project.defaultLightning ?? null,
         videoLoras: project.defaultVideoLoras ?? null,
       },
+      ...(sceneContext ? { sceneContext } : {}),
     };
     setProjectContextTrigger(context);
     setTab('studio');

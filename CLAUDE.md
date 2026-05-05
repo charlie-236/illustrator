@@ -932,6 +932,7 @@ isStitched       Boolean  @default(false)
 parentProjectId  String?
 parentProject    Project? @relation("StitchedFromProject", fields: [parentProjectId], references: [id], onDelete: SetNull)
 stitchedClipIds  String?   // JSON: Phase 3 = string[] (plain array); Phase 3.1+ = { selected: string[], total: number }
+sceneId          String?   // Phase 5b: soft ref to StoryboardScene.id within Project.storyboardJson; null for non-storyboard clips
 
 // Existing relation explicitly named (required when two relations exist between same models):
 project          Project? @relation("ProjectClips", fields: [projectId], references: [id], onDelete: SetNull)
@@ -1023,8 +1024,6 @@ Storyboards live as `Project.storyboardJson` (Json column). They're scene-by-sce
 
 **UI:** Project Detail has a new collapsible Storyboard section above the Generate buttons. Empty state offers "Plan with AI"; populated state shows scene cards (read-only in 5a, editable in 5b).
 
-**Phase 5b** adds per-scene Generate buttons, `Generation.sceneId` linkage, last-frame chaining between scenes, scene editing, and the canonical-clip picker.
-
 Source layout additions:
 - `src/app/api/storyboard/generate/route.ts` — LLM call for storyboard generation; mirrors polisher pattern.
 - `src/app/api/storyboard/generate/prompt.ts` — system prompt and user-message builder.
@@ -1033,6 +1032,78 @@ Source layout additions:
 - `src/components/StoryboardGenerationModal.tsx` — modal for generating a new storyboard (idle / loading / error states).
 
 Env vars (see `.env.example` for details): `STORYBOARD_LLM_MODEL`, `STORYBOARD_TIMEOUT_MS`, `STORYBOARD_TEMPERATURE`, `STORYBOARD_TOP_P`, `STORYBOARD_MAX_TOKENS`.
+
+---
+
+## Phase 5b — Storyboard scene execution + editing
+
+Extends Phase 5a storyboards with per-scene generation, scene editing, canonical-clip tracking, and last-frame chaining between scenes.
+
+### Schema addition
+
+```prisma
+// New field on Generation:
+sceneId String? // soft ref to StoryboardScene.id within Project.storyboardJson; null for non-storyboard clips
+```
+
+Applied via `npx prisma db push` (no migration file).
+
+### Type extensions
+
+- `StoryboardScene` gains `notes?: string | null` (freeform production notes) and `canonicalClipId?: string | null` (explicit best-clip selection; falls back to earliest-created clip for that scene).
+- `GenerationRecord` and `ProjectClip` gain `sceneId: string | null`.
+- New `SceneTriggerContext` type (in `src/types/index.ts`): `{ sceneId, sceneIndex, prompt, durationSeconds, suggestedStartingClipId }` — carries scene-specific overrides when launching Studio from a scene card.
+- `ProjectContext` gains optional `sceneContext?: SceneTriggerContext`.
+
+### Per-scene Generate button (ProjectDetail)
+
+Each scene card in `ProjectDetail` shows a "Generate clip" button. Clicking it calls `handleGenerateScene(scene)`, which:
+1. Resolves the canonical clip for the previous scene via `resolveCanonicalClipId` (explicit canonical → earliest-created fallback → null).
+2. Builds a `SceneTriggerContext` with `suggestedStartingClipId` = previous scene's canonical clip (i2v chaining), then calls `onGenerateInProject(project, latestClip, 'video', sceneContext)`.
+
+Scene cards also show: clip count button (taps open `CanonicalClipPickerModal` when >1 clip exists), canonical clip thumbnail, and notes text.
+
+### `clampToValidFrameCount` (Studio)
+
+Converts `durationSeconds × 16` to the nearest valid Wan 2.2 frame count: satisfies `(n-1) % 8 === 0`, clamped to [17, 121].
+
+### Studio sceneContext trigger
+
+When `projectContextTrigger.sceneContext` is set, Studio's trigger `useEffect`:
+- Forces video mode.
+- Applies `clampToValidFrameCount(sc.durationSeconds * 16)` as the frames value.
+- Sets `activeSceneId` state (cleared on mode switch, remix, regular project trigger, and after generation completes).
+- Sets `selectedStartingClipId` from `sc.suggestedStartingClipId` for i2v chaining.
+
+`activeSceneId` is sent in the `/api/generate-video` request body and persisted to `Generation.sceneId`.
+
+### `resolveCanonicalClipId`
+
+```ts
+function resolveCanonicalClipId(scene: StoryboardScene, projectClips: ProjectClip[]): string | null
+```
+
+Priority: explicit `scene.canonicalClipId` (if the clip still exists in the project) → earliest-created clip with matching `sceneId` → null.
+
+### `SceneEditModal` (new component)
+
+Bottom-sheet for editing a scene's `description`, `positivePrompt`, `durationSeconds` (stepper ±1, range 1–10), and `notes`. Tracks dirty state; shows discard confirm on close if unsaved. On save, PUTs the full updated storyboard to `/api/projects/[id]/storyboard`.
+
+### `CanonicalClipPickerModal` (new component)
+
+Bottom-sheet listing all clips with `sceneId === scene.id`. Shows a "Canonical" badge on the current canonical. "Set as canonical" button PUTs updated storyboard. Tapping a clip tile opens `ImageModal` for detail view (mounted inside the picker at a higher z-index).
+
+### ImageModal scene info
+
+When `storyboard` prop is passed (from `ProjectDetail`) and `record.sceneId` is set, the metadata footer shows:
+```
+Scene N of M · description
+```
+Omitted when `storyboard` is not passed (Gallery context — option b).
+
+Source layout additions (Phase 5b):
+- `src/components/SceneEditModal.tsx` — scene field editor bottom-sheet.
+- `src/components/CanonicalClipPickerModal.tsx` — canonical clip selector bottom-sheet.
 
 ---
 

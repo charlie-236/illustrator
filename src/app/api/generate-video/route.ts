@@ -27,6 +27,7 @@ interface VideoRequest {
   lightning?: boolean;
   loras?: WanLoraSpec[];
   batchSize?: number;
+  sceneId?: string;
 }
 
 const SSE_HEADERS = {
@@ -118,6 +119,11 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'batchSize must be an integer between 1 and 4 inclusive' }), { status: 400 });
   }
 
+  // Validate sceneId if provided (soft ref — no DB lookup; trust the client)
+  if (body.sceneId !== undefined && (typeof body.sceneId !== 'string' || body.sceneId.trim().length === 0)) {
+    return new Response(JSON.stringify({ error: 'sceneId must be a non-empty string' }), { status: 400 });
+  }
+
   // ─── prepare ──────────────────────────────────────────────────────────────
 
   // Match the image-side contract: seed === -1 means random, anything else is literal.
@@ -160,6 +166,7 @@ export async function POST(req: NextRequest) {
     lightning,
     loras,
     ...(body.projectId ? { projectId: body.projectId } : {}),
+    ...(body.sceneId ? { sceneId: body.sceneId } : {}),
   };
 
   let workflow: ComfyWorkflow;

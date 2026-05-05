@@ -65,6 +65,13 @@ function validateStoryboard(storyboard: unknown): string | null {
     if (!Number.isInteger(scene.durationSeconds) || scene.durationSeconds < 1 || scene.durationSeconds > 10) {
       return `scene[${i}].durationSeconds must be an integer 1-10`;
     }
+    // Optional 5b fields: notes (string | null) and canonicalClipId (string | null)
+    if ('notes' in scene && scene.notes !== null && scene.notes !== undefined && typeof scene.notes !== 'string') {
+      return `scene[${i}].notes must be a string or null`;
+    }
+    if ('canonicalClipId' in scene && scene.canonicalClipId !== null && scene.canonicalClipId !== undefined && typeof scene.canonicalClipId !== 'string') {
+      return `scene[${i}].canonicalClipId must be a string or null`;
+    }
   }
   return null;
 }

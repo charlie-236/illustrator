@@ -18,10 +18,12 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport, WanLoraEntry, Storyboard } from '@/types';
+import type { ProjectClip, ProjectDetail, GenerationRecord, ProjectStitchedExport, WanLoraEntry, Storyboard, StoryboardScene, ProjectContext } from '@/types';
 import ImageModal from './ImageModal';
 import DeleteConfirmDialog from './DeleteConfirmDialog';
 import StoryboardGenerationModal from './StoryboardGenerationModal';
+import SceneEditModal from './SceneEditModal';
+import CanonicalClipPickerModal from './CanonicalClipPickerModal';
 import { imgSrc } from '@/lib/imageSrc';
 import { useQueue } from '@/contexts/QueueContext';
 import { useModelLists } from '@/lib/useModelLists';
@@ -32,7 +34,7 @@ interface Props {
   onBack: () => void;
   onDeleted: () => void;
   onNavigateToGallery: () => void;
-  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video') => void;
+  onGenerateInProject: (project: ProjectDetail, latestClip: ProjectClip | null, mode: 'image' | 'video', sceneContext?: ProjectContext['sceneContext']) => void;
 }
 
 const VIDEO_RESOLUTIONS = [
@@ -72,8 +74,26 @@ function clipToRecord(clip: ProjectClip, projectId: string, projectName: string)
     stitchedClipIds: null,
     videoLorasJson: null,
     lightning: null,
+    sceneId: clip.sceneId ?? null,
     createdAt: clip.createdAt,
   };
+}
+
+/**
+ * Resolves the canonical clip ID for a scene.
+ * Uses scene.canonicalClipId if set and the clip still exists, otherwise falls back
+ * to the earliest-created clip with matching sceneId.
+ */
+function resolveCanonicalClipId(scene: StoryboardScene, projectClips: ProjectClip[]): string | null {
+  if (scene.canonicalClipId) {
+    if (projectClips.some((c) => c.id === scene.canonicalClipId)) {
+      return scene.canonicalClipId;
+    }
+  }
+  const sceneClips = projectClips
+    .filter((c) => c.sceneId === scene.id)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return sceneClips[0]?.id ?? null;
 }
 
 function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, projectName: string): GenerationRecord {
@@ -107,6 +127,7 @@ function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, pro
     stitchedClipIds: null,
     videoLorasJson: null,
     lightning: null,
+    sceneId: null,
     createdAt: e.createdAt,
   };
 }
@@ -818,6 +839,10 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [showStoryboardModal, setShowStoryboardModal] = useState(false);
   const [showStoryboardRegenConfirm, setShowStoryboardRegenConfirm] = useState(false);
   const [showStoryboardDeleteConfirm, setShowStoryboardDeleteConfirm] = useState(false);
+  // Scene edit state
+  const [editingScene, setEditingScene] = useState<StoryboardScene | null>(null);
+  // Canonical clip picker state
+  const [canonicalPickerScene, setCanonicalPickerScene] = useState<StoryboardScene | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [nameSaving, setNameSaving] = useState(false);
@@ -974,6 +999,31 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     } catch {
       // silently ignore — storyboard stays rendered
     }
+  }
+
+  function handleGenerateScene(scene: StoryboardScene) {
+    if (!project) return;
+    const sceneIndex = scene.position;
+
+    // Resolve previous scene's canonical clip for i2v chaining suggestion
+    let suggestedStartingClipId: string | null = null;
+    if (storyboard && sceneIndex > 0) {
+      const prevScene = storyboard.scenes[sceneIndex - 1];
+      if (prevScene) {
+        suggestedStartingClipId = resolveCanonicalClipId(prevScene, clips);
+      }
+    }
+
+    const latestClip = clips.length > 0 ? clips[clips.length - 1] : null;
+    const sceneCtx: ProjectContext['sceneContext'] = {
+      sceneId: scene.id,
+      sceneIndex,
+      prompt: scene.positivePrompt,
+      durationSeconds: scene.durationSeconds,
+      suggestedStartingClipId,
+    };
+
+    onGenerateInProject(project, latestClip, 'video', sceneCtx);
   }
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -1193,23 +1243,100 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             ) : (
               /* Populated state */
               <div className="space-y-3">
-                {storyboard.scenes.map((scene, i) => (
+                {storyboard.scenes.map((scene, i) => {
+                  const sceneClips = clips.filter((c) => c.sceneId === scene.id);
+                  const canonicalId = resolveCanonicalClipId(scene, clips);
+                  const canonicalClip = canonicalId ? clips.find((c) => c.id === canonicalId) ?? null : null;
+
+                  return (
                   <div
                     key={scene.id}
-                    className="bg-zinc-800/60 rounded-lg p-3 space-y-1.5"
+                    className="bg-zinc-800/60 rounded-xl p-3 space-y-2"
                   >
-                    <div className="flex items-center gap-2">
+                    {/* Scene header row */}
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-bold text-zinc-300">Scene {i + 1}</span>
                       <span className="text-xs text-zinc-500 bg-zinc-700/60 px-1.5 py-0.5 rounded">
                         {scene.durationSeconds}s
                       </span>
+                      {sceneClips.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (sceneClips.length === 1) {
+                              // Single clip: open ImageModal directly
+                              const clipIdx = clips.findIndex((c) => c.id === sceneClips[0].id);
+                              if (clipIdx !== -1) setModalIdx(getModalIndexById(sceneClips[0].id));
+                            } else {
+                              // Multiple clips: open canonical picker
+                              setCanonicalPickerScene(scene);
+                            }
+                          }}
+                          className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2"
+                        >
+                          {sceneClips.length} clip{sceneClips.length !== 1 ? 's' : ''}
+                        </button>
+                      )}
                     </div>
+
+                    {/* Description */}
                     <p className="text-sm text-zinc-200 leading-relaxed">{scene.description}</p>
+                    {/* Prompt */}
                     <p className="text-xs font-mono text-zinc-500 leading-relaxed break-words">
                       {scene.positivePrompt}
                     </p>
+                    {/* Notes */}
+                    {scene.notes && (
+                      <p className="text-xs text-zinc-400 italic leading-relaxed">{scene.notes}</p>
+                    )}
+
+                    {/* Canonical clip thumbnail */}
+                    {canonicalClip && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const idx = getModalIndexById(canonicalClip.id);
+                          if (idx !== -1) setModalIdx(idx);
+                        }}
+                        className="block w-1/2 rounded-lg overflow-hidden border border-zinc-700 hover:border-violet-500 transition-colors"
+                      >
+                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                        <video
+                          src={imgSrc(canonicalClip.filePath)}
+                          preload="metadata"
+                          muted
+                          playsInline
+                          className="w-full aspect-video object-cover bg-zinc-800"
+                        />
+                      </button>
+                    )}
+
+                    {/* Generate / Edit buttons */}
+                    <div className="flex gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateScene(scene)}
+                        className="flex-1 min-h-12 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/30 hover:border-violet-600/50 text-violet-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        Generate this scene
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingScene(scene)}
+                        className="min-h-12 min-w-12 rounded-xl bg-zinc-700/60 hover:bg-zinc-700 border border-zinc-600/40 text-zinc-400 hover:text-zinc-200 text-sm transition-colors flex items-center justify-center"
+                        title="Edit scene"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {/* Regenerate / Delete actions */}
                 <div className="flex gap-2 pt-1">
@@ -1417,6 +1544,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                 isFavorite: false,
                 mediaType: 'video',
                 isStitched: true,
+                sceneId: null,
               };
               return (
                 <StitchedTile
@@ -1459,6 +1587,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
               setClips((prev) => prev.filter((c) => c.id !== id));
             }
           }}
+          storyboard={storyboard}
         />
       )}
 
@@ -1576,6 +1705,34 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Scene edit modal ── */}
+      {editingScene && storyboard && (
+        <SceneEditModal
+          scene={editingScene}
+          sceneIndex={editingScene.position}
+          totalScenes={storyboard.scenes.length}
+          projectId={projectId}
+          storyboard={storyboard}
+          onClose={() => setEditingScene(null)}
+          onSaved={(updated) => { setStoryboard(updated); setEditingScene(null); }}
+        />
+      )}
+
+      {/* ── Canonical clip picker ── */}
+      {canonicalPickerScene && storyboard && (
+        <CanonicalClipPickerModal
+          scene={canonicalPickerScene}
+          sceneIndex={canonicalPickerScene.position}
+          sceneClips={clips.filter((c) => c.sceneId === canonicalPickerScene.id)}
+          canonicalClipId={resolveCanonicalClipId(canonicalPickerScene, clips)}
+          projectId={projectId}
+          projectName={project?.name ?? ''}
+          storyboard={storyboard}
+          onClose={() => setCanonicalPickerScene(null)}
+          onCanonicalChanged={(updated) => setStoryboard(updated)}
+        />
       )}
     </div>
   );

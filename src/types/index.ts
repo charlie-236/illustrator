@@ -90,6 +90,7 @@ export interface GenerationRecord {
   stitchedClipIds: string | null;
   videoLorasJson: WanLoraSpec[] | null;
   lightning: boolean | null;
+  sceneId: string | null;
   createdAt: string;
 }
 
@@ -129,6 +130,25 @@ export interface ProjectClip {
   isFavorite: boolean;
   mediaType: string;
   isStitched: boolean;
+  sceneId: string | null;
+}
+
+/** A single scene within a storyboard. LLM-generated; user-editable in Phase 5b. */
+export interface StoryboardScene {
+  id: string;                 // cuid; generated server-side
+  position: number;           // 0-indexed
+  description: string;        // LLM-generated; human-readable narrative summary
+  positivePrompt: string;     // LLM-generated; Wan 2.2-friendly prose for video generation
+  durationSeconds: number;    // LLM-suggested; integer 2-7 typically
+  notes?: string | null;      // user freeform notes; null/undefined for newly generated
+  canonicalClipId?: string | null; // explicit canonical clip choice; null = fallback to earliest-created
+}
+
+/** A storyboard belongs to a project. Stored as Project.storyboardJson. */
+export interface Storyboard {
+  scenes: StoryboardScene[];
+  generatedAt: string;        // ISO timestamp
+  storyIdea: string;          // user's original input — preserved for display and regeneration prefill
 }
 
 /** A single scene within a storyboard. LLM-generated; user-editable in Phase 5b. */
@@ -214,6 +234,17 @@ export interface ModelInfo {
   embeddings: string[];
 }
 
+/** Scene-specific overrides passed with a ProjectContext when generating from a storyboard scene. */
+export interface SceneTriggerContext {
+  sceneId: string;
+  /** 0-indexed position within the storyboard — used for display ("Scene 3 of 5"). */
+  sceneIndex: number;
+  prompt: string;
+  durationSeconds: number;
+  /** Canonical clip ID from the previous scene to use as i2v starting frame. Null when chaining is not applicable. */
+  suggestedStartingClipId: string | null;
+}
+
 /** Project context passed from Projects tab to Studio when generating a new clip. */
 export interface ProjectContext {
   projectId: string;
@@ -237,6 +268,8 @@ export interface ProjectContext {
     lightning: boolean | null;
     videoLoras: WanLoraSpec[] | null;
   };
+  /** When present, Studio applies scene-specific overrides on top of the project defaults. */
+  sceneContext?: SceneTriggerContext;
 }
 
 /** Params passed from Gallery to Studio when remixing a video generation. */

@@ -38,6 +38,7 @@ model Generation {
   stitchedClipIds  String?                      // JSON array of source generation IDs
   videoLorasJson   Json?                        // WanLoraSpec[] for video; null for image and legacy
   lightning        Boolean?                     // true for Wan 2.2 Lightning; null for image and legacy
+  sceneId          String?                      // soft ref to StoryboardScene.id within Project.storyboardJson; null for non-storyboard clips
   createdAt        DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
