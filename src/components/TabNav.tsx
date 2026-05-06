@@ -12,6 +12,7 @@ const TAB_LABELS: Record<Tab, string> = {
   studio: 'Studio',
   projects: 'Projects',
   gallery: 'Gallery',
+  chats: 'Chats',
   models: 'Models',
   admin: 'Admin',
 };
