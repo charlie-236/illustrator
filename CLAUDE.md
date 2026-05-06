@@ -1425,6 +1425,12 @@ Activates the branching shape schemaed (but dormant) in 7a. Three new capabiliti
 
 **Streaming refactor:** `consumeChatStream()` in `ChatView.tsx` is a shared async helper used by send, regenerate, and edit-and-continue. After any stream completes, `ChatView` refetches the full chat to sync `activeBranchesJson` and message tree state.
 
+**Typography.** Chat prose uses Merriweather (self-hosted via `@fontsource/merriweather`) at 19px / line-height 1.65 / max-width 66ch / paragraph margin 2em — tablet long-form best practices per WCAG 2.2 SC 1.4.12 and Bringhurst's measure rule. User directives render in small sans-serif italic to visually distinguish scaffolding from prose. The `chat-prose` class lives in `globals.css`; the `prose-textarea` class matches it for in-place editing. The `chat-message-list` class centers the content column at 66ch on wide viewports.
+
+**Streaming display.** During token streaming, assistant message content is trimmed to the last sentence-ending punctuation (`trimToLastCompleteSentence` in `ChatMessage.tsx`); trailing fragment hides until the next terminator arrives or `done` fires. Reduces visual jitter from word-by-word formation; markdown re-parse runs on the trimmed string for a free perf win. The trim only applies when a single word follows the last sentence ender; multiple complete words after a period turn the trim off and show the full content.
+
+**Branch persistence bug fix.** `GET /api/chats/[id]` previously omitted `activeBranchesJson` from `serializeChatRecord`, causing every `loadChat()` call to reset branch selection to index 0. Fixed by adding `activeBranchesJson` to both `ChatWithRelations` type and the `serializeChatRecord` return object in `src/app/api/chats/[id]/route.ts`.
+
 ### Source layout additions (Phase 7b)
 
 - `src/lib/chatBranches.ts` — `resolveActivePath`, `decorateWithBranchInfo`, `getSiblingCount`, `getBranchPosition`

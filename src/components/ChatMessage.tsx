@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { MessageWithBranchInfo } from '@/types';
 
@@ -16,6 +16,63 @@ interface Props {
   isActionDisabled?: boolean; // true while streaming — disables regenerate/edit
 }
 
+// ── Streaming trim ────────────────────────────────────────────────────────────
+
+function trimToLastCompleteSentence(text: string): string {
+  // Match everything up to the last sentence-ending punctuation + optional closing chars.
+  // \s*\S*$ matches a single trailing word-fragment; if more than one word follows the
+  // last terminator the regex fails and we fall back to showing full content.
+  const match = text.match(/^([\s\S]*[.!?…][\s”“”')]*)\s*\S*$/);
+  if (match) return match[1];
+  return '';
+}
+
+// ── Auto-grow textarea ────────────────────────────────────────────────────────
+
+function AutoGrowTextarea({
+  value,
+  onChange,
+  minRows = 6,
+  maxRows = 30,
+  className,
+  autoFocus,
+  ...props
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  minRows?: number;
+  maxRows?: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const lineHeight = parseInt(getComputedStyle(el).lineHeight, 10) || 24;
+    const minH = lineHeight * minRows;
+    const maxH = lineHeight * maxRows;
+    const newH = Math.max(minH, Math.min(maxH, el.scrollHeight));
+    el.style.height = `${newH}px`;
+    el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
+  }, [value, minRows, maxRows]);
+
+  // autoFocus via ref so it fires after the height calculation
+  useEffect(() => {
+    if (autoFocus && ref.current) ref.current.focus();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={onChange}
+      className={className}
+      {...props}
+    />
+  );
+}
+
+// ── Dialogue colouring ────────────────────────────────────────────────────────
+
 function colorDialogueText(text: string): React.ReactNode {
   const parts = text.split(/([""][^"""]*[""])/g);
   if (parts.length === 1) return text;
@@ -26,7 +83,7 @@ function colorDialogueText(text: string): React.ReactNode {
           (part.startsWith('"') || part.startsWith('“') || part.startsWith('”')) &&
           part.length > 2;
         return isDialogue ? (
-          <span key={i} className="text-violet-300">
+          <span key={i} className="dialogue">
             {part}
           </span>
         ) : (
@@ -45,14 +102,15 @@ function applyDialogueToChildren(children: React.ReactNode): React.ReactNode {
 }
 
 const MARKDOWN_COMPONENTS = {
+  // Paragraph spacing handled by .chat-prose p CSS; keep leading-relaxed for fallback contexts
   p: ({ children }: { children?: React.ReactNode }) => (
-    <p className="mb-4 last:mb-0 leading-relaxed">{applyDialogueToChildren(children)}</p>
+    <p className="leading-relaxed">{applyDialogueToChildren(children)}</p>
   ),
   em: ({ children }: { children?: React.ReactNode }) => (
     <em className="italic">{applyDialogueToChildren(children)}</em>
   ),
   strong: ({ children }: { children?: React.ReactNode }) => (
-    <strong className="font-semibold">{applyDialogueToChildren(children)}</strong>
+    <strong className="font-bold">{applyDialogueToChildren(children)}</strong>
   ),
   h1: ({ children }: { children?: React.ReactNode }) => (
     <h1 className="text-xl font-semibold mb-3 mt-4">{children}</h1>
@@ -90,6 +148,8 @@ const MARKDOWN_COMPONENTS = {
   },
 };
 
+// ── Think blocks ──────────────────────────────────────────────────────────────
+
 function extractThinkBlocks(content: string): { prose: string; thinks: string[] } {
   const thinks: string[] = [];
   const prose = content
@@ -125,7 +185,44 @@ function ThinkBlock({ content }: { content: string }) {
   );
 }
 
-/** Branch navigation chevrons — shown when branchCount > 1 */
+// ── Branch navigation ─────────────────────────────────────────────────────────
+
+function ChevronLeftIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
 function BranchNav({
   message,
   onSwitch,
@@ -141,29 +238,41 @@ function BranchNav({
   const atLast = message.branchPosition === message.branchCount;
 
   return (
-    <div className="flex items-center gap-1 mb-2">
+    <div className="flex items-center gap-2 mb-3" role="group" aria-label="Branch navigation">
       <button
-        onClick={() => !disabled && !atFirst && onSwitch(message.parentMessageId!, message.branchIndex - 1)}
+        onClick={() =>
+          !disabled && !atFirst && onSwitch(message.parentMessageId!, message.branchIndex - 1)
+        }
         disabled={disabled || atFirst}
         aria-label="Previous branch"
-        className="min-h-10 min-w-10 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="min-h-12 min-w-12 flex items-center justify-center rounded-lg
+                   bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600
+                   disabled:opacity-30 disabled:cursor-not-allowed
+                   text-zinc-100 transition-colors"
       >
-        ‹
+        <ChevronLeftIcon />
       </button>
-      <span className="text-xs text-zinc-500 px-1 select-none">
-        {message.branchPosition}/{message.branchCount}
+      <span className="text-sm font-medium text-zinc-300 min-w-12 text-center tabular-nums select-none">
+        {message.branchPosition} / {message.branchCount}
       </span>
       <button
-        onClick={() => !disabled && !atLast && onSwitch(message.parentMessageId!, message.branchIndex + 1)}
+        onClick={() =>
+          !disabled && !atLast && onSwitch(message.parentMessageId!, message.branchIndex + 1)
+        }
         disabled={disabled || atLast}
         aria-label="Next branch"
-        className="min-h-10 min-w-10 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="min-h-12 min-w-12 flex items-center justify-center rounded-lg
+                   bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600
+                   disabled:opacity-30 disabled:cursor-not-allowed
+                   text-zinc-100 transition-colors"
       >
-        ›
+        <ChevronRightIcon />
       </button>
     </div>
   );
 }
+
+// ── ChatMessage ───────────────────────────────────────────────────────────────
 
 export default function ChatMessage({
   message,
@@ -179,8 +288,25 @@ export default function ChatMessage({
   const [editValue, setEditValue] = useState('');
   const [confirmingUserEdit, setConfirmingUserEdit] = useState(false);
 
-  const content = isStreaming ? (streamingContent ?? '') : message.content;
+  // For assistant messages, apply streaming trim during active streaming
+  const rawContent = isStreaming ? (streamingContent ?? '') : message.content;
   const isUser = message.role === 'user';
+
+  // Streaming trim: hide trailing incomplete sentence during active streaming
+  let displayContent = rawContent;
+  let hasIncomplete = false;
+  if (isStreaming && !isUser) {
+    const trimmed = trimToLastCompleteSentence(rawContent);
+    if (trimmed) {
+      displayContent = trimmed;
+      hasIncomplete = trimmed.length < rawContent.length;
+    } else {
+      // No complete sentence yet — show raw so the first sentence-in-progress is visible
+      displayContent = rawContent;
+    }
+  }
+
+  void chatId; // used by parent via onEditSave/onBranchSwitch
 
   function startEdit() {
     setEditValue(message.content);
@@ -219,10 +345,12 @@ export default function ChatMessage({
 
           {editing ? (
             <div className="bg-zinc-800/60 rounded-2xl px-4 py-3">
-              <textarea
-                className="input-base resize-none text-sm text-zinc-200 w-full min-h-[80px] max-h-48"
+              <AutoGrowTextarea
+                className="input-base resize-none w-full"
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
+                minRows={4}
+                maxRows={20}
                 autoFocus
               />
               {confirmingUserEdit && (
@@ -251,7 +379,7 @@ export default function ChatMessage({
             </div>
           ) : (
             <div className="bg-zinc-800/60 rounded-2xl px-4 py-3">
-              <p className="text-sm text-zinc-400 italic leading-relaxed">{message.content}</p>
+              <p className="chat-directive">{message.content}</p>
               {!isStreaming && !isActionDisabled && (
                 <div className="flex justify-end mt-2">
                   <button
@@ -271,7 +399,7 @@ export default function ChatMessage({
   }
 
   // ── Assistant message ─────────────────────────────────────────────────────
-  const { prose, thinks } = extractThinkBlocks(content);
+  const { prose, thinks } = extractThinkBlocks(displayContent);
 
   return (
     <div className="mb-6">
@@ -283,10 +411,12 @@ export default function ChatMessage({
 
       {editing ? (
         <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-4">
-          <textarea
-            className="input-base resize-none text-sm text-zinc-100 w-full min-h-[120px] max-h-96 font-mono leading-relaxed"
+          <AutoGrowTextarea
+            className="prose-textarea input-base resize-none w-full"
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
+            minRows={12}
+            maxRows={40}
             autoFocus
           />
           <div className="flex gap-2 mt-3 flex-wrap">
@@ -312,11 +442,18 @@ export default function ChatMessage({
         </div>
       ) : (
         <>
-          <div className="prose-content text-zinc-100 text-[15px]">
+          <div className="chat-prose">
             <ReactMarkdown components={MARKDOWN_COMPONENTS as Record<string, React.ElementType>}>
-              {prose || (isStreaming ? '▊' : '')}
+              {prose || (isStreaming ? '◊' : '')}
             </ReactMarkdown>
-            {isStreaming && prose && <span className="animate-pulse">▊</span>}
+            {isStreaming && prose && (
+              <span
+                className={`ml-1 ${hasIncomplete ? 'text-zinc-600' : 'text-zinc-500'} animate-pulse`}
+                aria-label="Writing"
+              >
+                ▊
+              </span>
+            )}
           </div>
 
           {!isStreaming && !isActionDisabled && (

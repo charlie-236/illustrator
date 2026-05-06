@@ -41,3 +41,52 @@
     @apply bg-zinc-900 border border-zinc-800 rounded-xl p-4;
   }
 }
+
+/* ── Chat typography ──────────────────────────────────────────────────────── */
+
+.chat-message-list {
+  max-width: 66ch;
+  margin: 0 auto;
+}
+
+.chat-prose {
+  font-family: 'Merriweather', Charter, 'Iowan Old Style', Cambria, Georgia, serif;
+  font-size: 1.1875rem;
+  line-height: 1.65;
+  color: rgb(244 244 245);
+  max-width: 66ch;
+}
+
+.chat-prose p {
+  margin-bottom: 2em;
+}
+
+.chat-prose p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-prose .dialogue {
+  color: rgb(196 181 253);
+}
+
+.chat-prose em {
+  font-style: italic;
+}
+
+.chat-prose strong {
+  font-weight: 700;
+}
+
+.chat-directive {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: rgb(161 161 170);
+  font-style: italic;
+}
+
+.prose-textarea {
+  font-family: 'Merriweather', Charter, 'Iowan Old Style', Cambria, Georgia, serif;
+  font-size: 1.1875rem;
+  line-height: 1.65;
+}
