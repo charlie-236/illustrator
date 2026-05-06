@@ -193,6 +193,11 @@ export default function ChatView({ chatId, onBack }: Props) {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    // Local capture for the assistant message id — sidesteps the stale-closure
+    // issue where setStreamingMsgId(...) schedules an update but doesn't mutate
+    // the closure-captured `streamingMsgId` state variable.
+    let assistantMsgId: string | null = null;
+
     try {
       const res = await fetch(`/api/chats/${chatId}/send`, {
         method: 'POST',
@@ -248,6 +253,7 @@ export default function ChatView({ chatId, onBack }: Props) {
             }
             case 'assistant_message_started': {
               const assMsgId = data.id as string;
+              assistantMsgId = assMsgId;
               const assMsg: MessageRecord = {
                 id: assMsgId,
                 chatId,
@@ -280,11 +286,13 @@ export default function ChatView({ chatId, onBack }: Props) {
                 renderTimerRef.current = null;
               }
               const finalContent = data.content as string;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === streamingMsgId ? { ...m, content: finalContent } : m,
-                ),
-              );
+              if (assistantMsgId) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: finalContent } : m,
+                  ),
+                );
+              }
               setStreamingMsgId(null);
               setStreamingContent('');
               accumulatorRef.current = '';
@@ -297,10 +305,10 @@ export default function ChatView({ chatId, onBack }: Props) {
                 renderTimerRef.current = null;
               }
               const partial = accumulatorRef.current;
-              if (partial && streamingMsgId) {
+              if (partial && assistantMsgId) {
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === streamingMsgId ? { ...m, content: partial } : m,
+                    m.id === assistantMsgId ? { ...m, content: partial } : m,
                   ),
                 );
               }
@@ -319,10 +327,10 @@ export default function ChatView({ chatId, onBack }: Props) {
         renderTimerRef.current = null;
       }
       const partial = accumulatorRef.current;
-      if (partial && streamingMsgId) {
+      if (partial && assistantMsgId) {
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === streamingMsgId ? { ...m, content: partial } : m,
+            m.id === assistantMsgId ? { ...m, content: partial } : m,
           ),
         );
       }
@@ -509,19 +517,6 @@ export default function ChatView({ chatId, onBack }: Props) {
           ) : (
             <ChatMessage key={msg.id} message={msg} />
           ),
-        )}
-
-        {/* Stop button anchored near the bottom of the stream */}
-        {isSending && streamingMsgId && (
-          <div className="flex justify-center mb-4">
-            <button
-              onClick={handleStop}
-              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm px-5 min-h-10 rounded-full border border-zinc-700 transition-colors"
-            >
-              <span>■</span>
-              <span>Stop</span>
-            </button>
-          </div>
         )}
 
         <div ref={messagesEndRef} />
