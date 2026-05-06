@@ -340,9 +340,15 @@ export interface ChatRecord {
   samplingPreset: SamplingPresetRecord | null;
   samplingOverridesJson: Partial<SamplingParams> | null;
   contextLimit: number;
+  activeBranchesJson: Record<string, number> | null;
   createdAt: string;
   updatedAt: string;
   messages: MessageRecord[];
+}
+
+export interface MessageWithBranchInfo extends MessageRecord {
+  branchCount: number;     // total siblings at this parent (1 if no branches)
+  branchPosition: number;  // 1-indexed display ("2 of 3")
 }
 
 export interface ChatSummary {

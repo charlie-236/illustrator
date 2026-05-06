@@ -2,23 +2,28 @@
 
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { MessageRecord } from '@/types';
+import type { MessageWithBranchInfo } from '@/types';
 
 interface Props {
-  message: MessageRecord;
+  message: MessageWithBranchInfo;
   isStreaming?: boolean;
   streamingContent?: string;
+  chatId: string;
+  // Callbacks from ChatView
+  onBranchSwitch: (parentMessageId: string, branchIndex: number) => void;
+  onRegenerate: (messageId: string) => void;
+  onEditSave: (messageId: string, content: string, andContinue: boolean) => void;
+  isActionDisabled?: boolean; // true while streaming — disables regenerate/edit
 }
 
 function colorDialogueText(text: string): React.ReactNode {
-  // Match straight double quotes or curly double quotes
-  const parts = text.split(/(["“][^"“”]*["”])/g);
+  const parts = text.split(/([""][^"""]*[""])/g);
   if (parts.length === 1) return text;
   return (
     <>
       {parts.map((part, i) => {
         const isDialogue =
-          (part.startsWith('"') || part.startsWith('“') || part.startsWith('“')) &&
+          (part.startsWith('"') || part.startsWith('“') || part.startsWith('”')) &&
           part.length > 2;
         return isDialogue ? (
           <span key={i} className="text-violet-300">
@@ -120,33 +125,222 @@ function ThinkBlock({ content }: { content: string }) {
   );
 }
 
-export default function ChatMessage({ message, isStreaming, streamingContent }: Props) {
+/** Branch navigation chevrons — shown when branchCount > 1 */
+function BranchNav({
+  message,
+  onSwitch,
+  disabled,
+}: {
+  message: MessageWithBranchInfo;
+  onSwitch: (parentMessageId: string, branchIndex: number) => void;
+  disabled?: boolean;
+}) {
+  if (message.branchCount <= 1) return null;
+
+  const atFirst = message.branchIndex === 0;
+  const atLast = message.branchPosition === message.branchCount;
+
+  return (
+    <div className="flex items-center gap-1 mb-2">
+      <button
+        onClick={() => !disabled && !atFirst && onSwitch(message.parentMessageId!, message.branchIndex - 1)}
+        disabled={disabled || atFirst}
+        aria-label="Previous branch"
+        className="min-h-10 min-w-10 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        ‹
+      </button>
+      <span className="text-xs text-zinc-500 px-1 select-none">
+        {message.branchPosition}/{message.branchCount}
+      </span>
+      <button
+        onClick={() => !disabled && !atLast && onSwitch(message.parentMessageId!, message.branchIndex + 1)}
+        disabled={disabled || atLast}
+        aria-label="Next branch"
+        className="min-h-10 min-w-10 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+export default function ChatMessage({
+  message,
+  isStreaming,
+  streamingContent,
+  chatId,
+  onBranchSwitch,
+  onRegenerate,
+  onEditSave,
+  isActionDisabled,
+}: Props) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [confirmingUserEdit, setConfirmingUserEdit] = useState(false);
+
   const content = isStreaming ? (streamingContent ?? '') : message.content;
   const isUser = message.role === 'user';
 
+  function startEdit() {
+    setEditValue(message.content);
+    setEditing(true);
+    setConfirmingUserEdit(false);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setConfirmingUserEdit(false);
+  }
+
+  function handleUserSave() {
+    if (!editValue.trim()) return;
+    if (!confirmingUserEdit) {
+      setConfirmingUserEdit(true);
+      return;
+    }
+    setEditing(false);
+    setConfirmingUserEdit(false);
+    onEditSave(message.id, editValue.trim(), false);
+  }
+
+  function handleAssistantSave(andContinue: boolean) {
+    if (!editValue.trim()) return;
+    setEditing(false);
+    onEditSave(message.id, editValue.trim(), andContinue);
+  }
+
+  // ── User message ──────────────────────────────────────────────────────────
   if (isUser) {
     return (
       <div className="flex justify-end mb-3">
-        <div className="max-w-[70%] bg-zinc-800/60 rounded-2xl px-4 py-3">
-          <p className="text-sm text-zinc-400 italic leading-relaxed">{message.content}</p>
+        <div className="max-w-[70%]">
+          <BranchNav message={message} onSwitch={onBranchSwitch} disabled={isActionDisabled} />
+
+          {editing ? (
+            <div className="bg-zinc-800/60 rounded-2xl px-4 py-3">
+              <textarea
+                className="input-base resize-none text-sm text-zinc-200 w-full min-h-[80px] max-h-48"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                autoFocus
+              />
+              {confirmingUserEdit && (
+                <p className="text-xs text-amber-400 mt-2 mb-1">
+                  Edit this message? Everything after it will be removed.
+                </p>
+              )}
+              <div className="flex gap-2 mt-2 justify-end">
+                <button
+                  onClick={cancelEdit}
+                  className="text-xs text-zinc-400 hover:text-zinc-200 min-h-9 px-3 rounded-lg hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUserSave}
+                  className={`text-xs min-h-9 px-3 rounded-lg font-medium transition-colors ${
+                    confirmingUserEdit
+                      ? 'bg-red-600 hover:bg-red-500 text-white'
+                      : 'bg-violet-600 hover:bg-violet-500 text-white'
+                  }`}
+                >
+                  {confirmingUserEdit ? 'Confirm edit' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-zinc-800/60 rounded-2xl px-4 py-3">
+              <p className="text-sm text-zinc-400 italic leading-relaxed">{message.content}</p>
+              {!isStreaming && !isActionDisabled && (
+                <div className="flex justify-end mt-2">
+                  <button
+                    onClick={startEdit}
+                    aria-label="Edit message"
+                    className="text-xs text-zinc-600 hover:text-zinc-400 min-h-9 min-w-9 flex items-center justify-center rounded-lg hover:bg-zinc-700 transition-colors px-2"
+                  >
+                    ✏
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
+  // ── Assistant message ─────────────────────────────────────────────────────
   const { prose, thinks } = extractThinkBlocks(content);
 
   return (
     <div className="mb-6">
+      <BranchNav message={message} onSwitch={onBranchSwitch} disabled={isActionDisabled} />
+
       {thinks.map((think, i) => (
         <ThinkBlock key={i} content={think} />
       ))}
-      <div className="prose-content text-zinc-100 text-[15px]">
-        <ReactMarkdown components={MARKDOWN_COMPONENTS as Record<string, React.ElementType>}>
-          {prose || (isStreaming ? '▊' : '')}
-        </ReactMarkdown>
-        {isStreaming && prose && <span className="animate-pulse">▊</span>}
-      </div>
+
+      {editing ? (
+        <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-4">
+          <textarea
+            className="input-base resize-none text-sm text-zinc-100 w-full min-h-[120px] max-h-96 font-mono leading-relaxed"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            autoFocus
+          />
+          <div className="flex gap-2 mt-3 flex-wrap">
+            <button
+              onClick={cancelEdit}
+              className="text-xs text-zinc-400 hover:text-zinc-200 min-h-9 px-3 rounded-lg hover:bg-zinc-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleAssistantSave(false)}
+              className="text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-100 min-h-9 px-3 rounded-lg font-medium transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => handleAssistantSave(true)}
+              className="text-xs bg-violet-600 hover:bg-violet-500 text-white min-h-9 px-4 rounded-lg font-medium transition-colors"
+            >
+              Save &amp; continue
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="prose-content text-zinc-100 text-[15px]">
+            <ReactMarkdown components={MARKDOWN_COMPONENTS as Record<string, React.ElementType>}>
+              {prose || (isStreaming ? '▊' : '')}
+            </ReactMarkdown>
+            {isStreaming && prose && <span className="animate-pulse">▊</span>}
+          </div>
+
+          {!isStreaming && !isActionDisabled && (
+            <div className="flex gap-1 mt-2">
+              <button
+                onClick={startEdit}
+                aria-label="Edit message"
+                title="Edit"
+                className="text-xs text-zinc-600 hover:text-zinc-400 min-h-9 min-w-9 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors px-2"
+              >
+                ✏
+              </button>
+              <button
+                onClick={() => onRegenerate(message.id)}
+                aria-label="Regenerate"
+                title="Regenerate"
+                className="text-xs text-zinc-600 hover:text-zinc-400 min-h-9 min-w-9 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors px-2"
+              >
+                ↺
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

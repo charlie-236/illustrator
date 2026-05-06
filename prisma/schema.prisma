@@ -148,6 +148,7 @@ model Chat {
   samplingPreset       SamplingPreset? @relation(fields: [samplingPresetId], references: [id], onDelete: SetNull)
   samplingOverridesJson Json?          // Partial<SamplingParams>
   contextLimit         Int             @default(64000)
+  activeBranchesJson   Json?           // Record<parentMessageId, activeBranchIndex>; null = all branches at index 0
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   messages             Message[]
