@@ -79,4 +79,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Strip hardcoded service identities and username from public repo — see prompts/strip-hardcoded-service-identities.md
 - [x] Rename app to Loom + install new logo — `batch/rename-to-loom` (PR #75)
 - [X] comfyws cleanup hygiene — SSH cleanup on reconnect + activePromptId clear on abort — `batch/comfyws-cleanup-hygiene` (PR #76)
-- [~] Phase 7a — Ghost writing chat (foundation) — `batch/phase-7a-ghost-writing` (PR #77)
+- [x] Phase 7a — Ghost writing chat (foundation) — `batch/phase-7a-ghost-writing` (PR #77)
+- [ ] Fix Phase 7a: assistant content disappears on done; remove redundant floating Stop button — see prompts/fix-7a-streaming-and-floating-stop.md
