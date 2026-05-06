@@ -1312,6 +1312,92 @@ New optional prop: `onPromoteToVideo?: (record: GenerationRecord) => void`.
 
 ---
 
+## Phase 7a — Ghost writing chat (foundation)
+
+A new top-level "Chats" tab (between Gallery and Models). Each chat is a multi-turn conversation where the user **directs** and the LLM **expands directives into prose**. The user's messages are scaffolding; the assistant's messages are the actual story text.
+
+**Schema:** `SamplingPreset` (with three seeded built-ins: Balanced, Wild, Coherent), `Chat` (name, system prompt override, sampling preset ref, per-chat overrides JSON, context limit), `Message` (role, content @db.Text, `parentMessageId` + `branchIndex` for 7b's branching).
+
+**LLM integration:** Aphrodite Engine via OpenAI-compatible streaming chat completions at `WRITER_LLM_ENDPOINT`. Token counting via `WRITER_LLM_TOKENIZE_ENDPOINT`. Independent from polish (`POLISH_LLM_ENDPOINT`) and storyboard (`STORYBOARD_LLM_ENDPOINT`) endpoints — typically a different port hosting a larger creative-writing model.
+
+**Streaming:** `POST /api/chats/[id]/send` returns SSE with events `user_message_saved`, `assistant_message_started`, `token` (repeated), `done`, `error`. Stop button uses AbortController; partial content persists to the `Message` row.
+
+**Sampling resolution:** three layers — env defaults → chat preset → chat overrides. Merge is shallow per-key. Helper at `src/lib/writerSampling.ts`.
+
+**Director mode system prompt:** `src/lib/writerSystemPrompt.ts`. Instructs the LLM to expand directives into prose, never respond conversationally. User can override per-chat via `chat.systemPromptOverride`.
+
+**Markdown + dialogue heuristic:** assistant messages render as Markdown via `react-markdown`; quoted strings (`"..."` or `“...”`) get violet coloring (`text-violet-300`). `<think>...</think>` blocks render as a collapsed disclosure above the prose.
+
+**Aphrodite stream parser:** `src/lib/aphroditeStream.ts` — async generator that yields content deltas from an Aphrodite/OpenAI-compatible streaming SSE response.
+
+**Out of scope (7b/c/d):** message editing, regeneration, branching UI, characters with images, context summarization, project association.
+
+### Schema (Phase 7a)
+
+```prisma
+model SamplingPreset {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  paramsJson  Json     // SamplingParams shape
+  isBuiltIn   Boolean  @default(false)  // seeded presets cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  chats       Chat[]
+}
+
+model Chat {
+  id                    String          @id @default(cuid())
+  name                  String          @default("Untitled chat")
+  systemPromptOverride  String?         // null = use canonical director-mode prompt
+  samplingPresetId      String?
+  samplingPreset        SamplingPreset? @relation(...)
+  samplingOverridesJson Json?           // Partial<SamplingParams>
+  contextLimit          Int             @default(64000)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  messages              Message[]
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  chatId          String
+  chat            Chat     @relation(...)
+  role            String   // 'user' | 'assistant' | 'system'
+  content         String   @db.Text  // raw including <think> tags
+  parentMessageId String?  // null = first message; otherwise the message this branches from
+  branchIndex     Int      @default(0)  // 0 = primary; 1+ = alternate branches (7b)
+  createdAt       DateTime @default(now())
+}
+```
+
+### API routes (Phase 7a)
+
+| Route | Description |
+|---|---|
+| `GET /api/sampling-presets` | Returns all presets; seeds three built-ins on first call. |
+| `POST /api/sampling-presets` | Creates a user preset. |
+| `PATCH /api/sampling-presets/[id]` | Updates a preset (built-ins editable but not deletable). |
+| `DELETE /api/sampling-presets/[id]` | Deletes a user preset; 400 on built-in. |
+| `GET /api/chats` | Returns `ChatSummary[]` ordered by `updatedAt` desc. |
+| `POST /api/chats` | Creates a chat. |
+| `GET /api/chats/[id]` | Returns `ChatRecord` with full message list. |
+| `PATCH /api/chats/[id]` | Updates name, system prompt, preset, overrides, context limit. |
+| `DELETE /api/chats/[id]` | Deletes chat (cascades to messages). |
+| `POST /api/chats/[id]/send` | SSE-streaming generation. |
+| `POST /api/chats/[id]/tokenize` | Server-side token count via Aphrodite's `/v1/tokenize`. |
+
+### Source layout additions (Phase 7a)
+
+- `src/components/ChatsTab.tsx` — top-level chats list / empty state; opens `ChatView` when a chat is selected
+- `src/components/ChatView.tsx` — single-chat page with composer, streaming message list, settings bottom-sheet
+- `src/components/ChatMessage.tsx` — single message renderer with Markdown + dialogue heuristic + `<think>` collapse
+- `src/components/SamplingPresetsManager.tsx` — preset CRUD bottom-sheet modal
+- `src/lib/writerSampling.ts` — three-layer sampling param resolver + Aphrodite serializer
+- `src/lib/writerSystemPrompt.ts` — director-mode canonical system prompt constant
+- `src/lib/aphroditeStream.ts` — Aphrodite/OpenAI SSE delta parser (async generator)
+
+---
+
 ## Not yet implemented (planned features)
 
 **Live step previews.** The architecture spec calls for catching the intermediate base64 preview images ComfyUI streams during sampling and displaying them in the UI as a live preview (updating every N steps). Currently `GenerationProgress` only shows a progress bar during generation and the final image on completion.

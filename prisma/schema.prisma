@@ -129,3 +129,45 @@ model EmbeddingConfig {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
+
+model SamplingPreset {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  paramsJson  Json     // SamplingParams shape
+  isBuiltIn   Boolean  @default(false)  // seeded presets cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  chats       Chat[]
+}
+
+model Chat {
+  id                   String          @id @default(cuid())
+  name                 String          @default("Untitled chat")
+  systemPromptOverride String?         // null = use the canonical director-mode prompt
+  samplingPresetId     String?
+  samplingPreset       SamplingPreset? @relation(fields: [samplingPresetId], references: [id], onDelete: SetNull)
+  samplingOverridesJson Json?          // Partial<SamplingParams>
+  contextLimit         Int             @default(64000)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  messages             Message[]
+
+  @@index([updatedAt])
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  chatId          String
+  chat            Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role            String   // 'user' | 'assistant' | 'system'
+  content         String   @db.Text  // raw including <think> tags
+  parentMessageId String?  // null for first message; otherwise the message this one replies to / branches from
+  branchIndex     Int      @default(0)  // 0 = primary; 1+ = alternate branches at this parent (7b)
+  createdAt       DateTime @default(now())
+
+  parent          Message?  @relation("MessageBranches", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  branches        Message[] @relation("MessageBranches")
+
+  @@index([chatId, createdAt])
+  @@index([parentMessageId, branchIndex])
+}

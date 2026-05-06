@@ -287,6 +287,72 @@ export type SSEEvent =
   | { type: 'complete'; records: GenerationRecord[] }
   | { type: 'error'; message: string };
 
+// ── Phase 7a: Ghost writing chat ──────────────────────────────────────────────
+
+export interface SamplingParams {
+  // Primary creative-writing params surfaced in the main UI:
+  temperature?: number;         // 0.0–2.0
+  min_p?: number;               // 0.0–1.0; 0.05–0.1 typical
+  max_tokens?: number;          // generation length cap
+  // DRY anti-repetition (the three sub-params travel together):
+  dry_multiplier?: number;      // 0 disables DRY; 0.8 typical
+  dry_base?: number;            // 1.5–2.0 typical
+  dry_allowed_length?: number;  // 2 typical
+  dry_sequence_breakers?: string[]; // default ["\n", ":", "\"", "*"]
+  // Advanced (behind a disclosure):
+  top_p?: number;               // 1.0 disables nucleus sampling
+  top_k?: number;               // 0 disables
+  repetition_penalty?: number;  // 1.0 disables; conflicts with DRY
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  xtc_threshold?: number;       // XTC: 0.1 typical
+  xtc_probability?: number;     // 0 disables; 0.5 typical
+  typical_p?: number;           // 1.0 disables
+  mirostat_mode?: number;       // 0 disables; 2 = Mirostat 2.0
+  mirostat_tau?: number;        // 5.0 typical
+  mirostat_eta?: number;        // 0.1 typical
+}
+
+export interface SamplingPresetRecord {
+  id: string;
+  name: string;
+  paramsJson: SamplingParams;
+  isBuiltIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageRecord {
+  id: string;
+  chatId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  parentMessageId: string | null;
+  branchIndex: number;
+  createdAt: string;
+}
+
+export interface ChatRecord {
+  id: string;
+  name: string;
+  systemPromptOverride: string | null;
+  samplingPresetId: string | null;
+  samplingPreset: SamplingPresetRecord | null;
+  samplingOverridesJson: Partial<SamplingParams> | null;
+  contextLimit: number;
+  createdAt: string;
+  updatedAt: string;
+  messages: MessageRecord[];
+}
+
+export interface ChatSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
 export const SAMPLERS = [
   'euler',
   'euler_ancestral',

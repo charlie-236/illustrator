@@ -6,12 +6,13 @@ import Gallery from '@/components/Gallery';
 import Projects from '@/components/Projects';
 import ModelConfig from '@/components/ModelConfig';
 import ServerBay from '@/components/ServerBay';
+import ChatsTab from '@/components/ChatsTab';
 import TabNav from '@/components/TabNav';
 import ToastContainer from '@/components/Toast';
 import { QueueProvider } from '@/contexts/QueueContext';
 import type { GenerationParams, GenerationRecord, LoraEntry, VideoRemixData, ProjectContext, ProjectDetail, ProjectClip } from '@/types';
 
-export type Tab = 'studio' | 'projects' | 'gallery' | 'models' | 'admin';
+export type Tab = 'studio' | 'projects' | 'gallery' | 'chats' | 'models' | 'admin';
 
 function parseLoras(loraStr: string | null): LoraEntry[] {
   if (!loraStr) return [];
@@ -130,6 +131,9 @@ export default function Home() {
           </div>
           <div className={tab === 'gallery' ? '' : 'hidden'}>
             <Gallery refreshToken={refreshGallery} onRemix={handleRemix} onNavigateToProject={handleNavigateToProjects} />
+          </div>
+          <div className={tab === 'chats' ? '' : 'hidden'}>
+            <ChatsTab />
           </div>
           <div className={tab === 'models' ? '' : 'hidden'}>
             <ModelConfig onSaved={() => setModelConfigVersion((n) => n + 1)} />
