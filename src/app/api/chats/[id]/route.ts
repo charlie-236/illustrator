@@ -112,6 +112,7 @@ type ChatWithRelations = {
     updatedAt: Date;
   } | null;
   samplingOverridesJson: unknown;
+  activeBranchesJson: unknown;
   contextLimit: number;
   createdAt: Date;
   updatedAt: Date;
@@ -143,6 +144,7 @@ function serializeChatRecord(chat: ChatWithRelations) {
         }
       : null,
     samplingOverridesJson: (chat.samplingOverridesJson as Partial<SamplingParams>) ?? null,
+    activeBranchesJson: (chat.activeBranchesJson as Record<string, number> | null) ?? null,
     contextLimit: chat.contextLimit,
     createdAt: chat.createdAt.toISOString(),
     updatedAt: chat.updatedAt.toISOString(),

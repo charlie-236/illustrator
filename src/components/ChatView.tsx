@@ -646,28 +646,30 @@ export default function ChatView({ chatId, onBack }: Props) {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 pt-6 pb-4"
       >
-        {activePath.length === 0 && !isSending && (
-          <div className="text-center text-zinc-600 text-sm mt-12">
-            <p>Direct the story. The LLM writes the prose.</p>
-            <p className="mt-1 text-xs">Type an instruction and tap Send.</p>
-          </div>
-        )}
+        <div className="chat-message-list">
+          {activePath.length === 0 && !isSending && (
+            <div className="text-center text-zinc-600 text-sm mt-12">
+              <p>Direct the story. The LLM writes the prose.</p>
+              <p className="mt-1 text-xs">Type an instruction and tap Send.</p>
+            </div>
+          )}
 
-        {activePath.map((msg) => (
-          <ChatMessage
-            key={`${msg.id}-${msg.branchIndex}`}
-            message={msg}
-            isStreaming={msg.id === streamingMsgId}
-            streamingContent={msg.id === streamingMsgId ? streamingContent : undefined}
-            chatId={chatId}
-            onBranchSwitch={handleBranchSwitch}
-            onRegenerate={handleRegenerate}
-            onEditSave={handleEditSave}
-            isActionDisabled={isSending}
-          />
-        ))}
+          {activePath.map((msg) => (
+            <ChatMessage
+              key={`${msg.id}-${msg.branchIndex}`}
+              message={msg}
+              isStreaming={msg.id === streamingMsgId}
+              streamingContent={msg.id === streamingMsgId ? streamingContent : undefined}
+              chatId={chatId}
+              onBranchSwitch={handleBranchSwitch}
+              onRegenerate={handleRegenerate}
+              onEditSave={handleEditSave}
+              isActionDisabled={isSending}
+            />
+          ))}
 
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Composer */}
