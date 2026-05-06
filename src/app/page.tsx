@@ -41,7 +41,7 @@ function recordToParams(record: GenerationRecord): GenerationParams {
 }
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>('studio');
+  const [tab, setTab] = useState<Tab>('projects');
   const [refreshGallery, setRefreshGallery] = useState(0);
   const [remixParams, setRemixParams] = useState<GenerationParams | null>(null);
   const [videoRemixParams, setVideoRemixParams] = useState<VideoRemixData | null>(null);

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatRecord, MessageRecord, SamplingPresetRecord, SamplingParams } from '@/types';
+import type { ChatRecord, MessageRecord, MessageWithBranchInfo, SamplingPresetRecord, SamplingParams } from '@/types';
+import { resolveActivePath, decorateWithBranchInfo } from '@/lib/chatBranches';
 import ChatMessage from './ChatMessage';
 import SamplingPresetsManager from './SamplingPresetsManager';
 
@@ -55,9 +56,81 @@ function SliderRow({
   );
 }
 
+// ── Shared SSE stream consumer ────────────────────────────────────────────────
+
+interface StreamCallbacks {
+  onUserMessageSaved?: (id: string) => void;
+  onAssistantMessageStarted: (id: string) => void;
+  onToken: (text: string) => void;
+  onDone: (id: string, finalContent: string, tokenCount: number) => void;
+  onError: (message: string, reason: string) => void;
+}
+
+async function consumeChatStream(
+  responseBody: ReadableStream<Uint8Array>,
+  callbacks: StreamCallbacks,
+): Promise<void> {
+  const reader = responseBody.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  // Mutable locals captured once at the top of the async frame
+  let assistantMsgId: string | null = null;
+  let accumulatedContent = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+
+    for (const part of parts) {
+      const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+      const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+      const eventName = eventLine?.slice(7).trim();
+      const dataStr = dataLine?.slice(6).trim();
+      if (!eventName || !dataStr) continue;
+
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(dataStr) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      switch (eventName) {
+        case 'user_message_saved':
+          callbacks.onUserMessageSaved?.(data.id as string);
+          break;
+        case 'assistant_message_started':
+          assistantMsgId = data.id as string;
+          callbacks.onAssistantMessageStarted(assistantMsgId);
+          break;
+        case 'token':
+          accumulatedContent += data.text as string;
+          callbacks.onToken(data.text as string);
+          break;
+        case 'done':
+          callbacks.onDone(
+            (data.id as string) ?? assistantMsgId ?? '',
+            (data.content as string) ?? accumulatedContent,
+            (data.tokenCount as number) ?? 0,
+          );
+          break;
+        case 'error':
+          callbacks.onError(data.message as string, data.reason as string);
+          break;
+      }
+    }
+  }
+}
+
+// ── ChatView ──────────────────────────────────────────────────────────────────
+
 export default function ChatView({ chatId, onBack }: Props) {
   const [chat, setChat] = useState<ChatRecord | null>(null);
-  const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [allMessages, setAllMessages] = useState<MessageRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [composerText, setComposerText] = useState('');
@@ -76,44 +149,53 @@ export default function ChatView({ chatId, onBack }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  // Settings sheet
   const [showSettings, setShowSettings] = useState(false);
   const [showPresetsManager, setShowPresetsManager] = useState(false);
   const [showAdvancedOverrides, setShowAdvancedOverrides] = useState(false);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [presets, setPresets] = useState<SamplingPresetRecord[]>([]);
 
-  // Inline chat name editing
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // Settings sheet state (mirrors chat fields locally for optimistic UI)
   const [settingsPresetId, setSettingsPresetId] = useState<string | null>(null);
   const [settingsOverrides, setSettingsOverrides] = useState<Partial<SamplingParams>>({});
   const [settingsSystemPrompt, setSettingsSystemPrompt] = useState('');
   const [settingsContextLimit, setSettingsContextLimit] = useState(64000);
   const settingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load chat
+  // Compute active-path messages for display
+  const activeBranches = chat?.activeBranchesJson ?? null;
+  const activePath: MessageWithBranchInfo[] = decorateWithBranchInfo(
+    resolveActivePath(allMessages, activeBranches),
+    allMessages,
+  );
+
+  // ── Chat load ────────────────────────────────────────────────────────────
+
+  async function loadChat() {
+    try {
+      const res = await fetch(`/api/chats/${chatId}`);
+      if (!res.ok) return;
+      const d = (await res.json()) as { chat: ChatRecord };
+      setChat(d.chat);
+      setAllMessages(d.chat.messages);
+      setContextLimit(d.chat.contextLimit);
+      setSettingsPresetId(d.chat.samplingPresetId);
+      setSettingsOverrides(d.chat.samplingOverridesJson ?? {});
+      setSettingsSystemPrompt(d.chat.systemPromptOverride ?? '');
+      setSettingsContextLimit(d.chat.contextLimit);
+    } catch {
+      // Non-fatal
+    }
+  }
+
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/chats/${chatId}`)
-      .then((r) => r.json())
-      .then((d: { chat: ChatRecord }) => {
-        setChat(d.chat);
-        setMessages(d.chat.messages);
-        setContextLimit(d.chat.contextLimit);
-        setSettingsPresetId(d.chat.samplingPresetId);
-        setSettingsOverrides(d.chat.samplingOverridesJson ?? {});
-        setSettingsSystemPrompt(d.chat.systemPromptOverride ?? '');
-        setSettingsContextLimit(d.chat.contextLimit);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [chatId]);
+    loadChat().finally(() => setLoading(false));
+  }, [chatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load presets when settings opens
   useEffect(() => {
     if (!showSettings) return;
     fetch('/api/sampling-presets')
@@ -122,12 +204,11 @@ export default function ChatView({ chatId, onBack }: Props) {
       .catch(() => {});
   }, [showSettings]);
 
-  // Auto-scroll
   useEffect(() => {
     if (autoScroll && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, streamingContent, autoScroll]);
+  }, [activePath.length, streamingContent, autoScroll]);
 
   const handleScroll = useCallback(() => {
     const el = listRef.current;
@@ -136,13 +217,11 @@ export default function ChatView({ chatId, onBack }: Props) {
     setAutoScroll(atBottom);
   }, []);
 
-  // Flush streaming content to React state
   const flushStreamContent = useCallback(() => {
     setStreamingContent(accumulatorRef.current);
     setAutoScroll(true);
   }, []);
 
-  // Token counter with debounce
   const updateTokenCount = useCallback(
     (text: string) => {
       if (tokenDebounceRef.current) clearTimeout(tokenDebounceRef.current);
@@ -178,25 +257,73 @@ export default function ChatView({ chatId, onBack }: Props) {
     }
   }
 
+  // ── Streaming helpers ─────────────────────────────────────────────────────
+
+  function beginStream(controller: AbortController) {
+    abortControllerRef.current = controller;
+    accumulatorRef.current = '';
+    setStreamingContent('');
+    setIsSending(true);
+  }
+
+  function onToken(text: string) {
+    accumulatorRef.current += text;
+    if (!renderTimerRef.current) {
+      renderTimerRef.current = setTimeout(() => {
+        flushStreamContent();
+        renderTimerRef.current = null;
+      }, 250);
+    }
+  }
+
+  function onStreamDone(msgId: string, finalContent: string, tokenCount: number) {
+    if (renderTimerRef.current) {
+      clearTimeout(renderTimerRef.current);
+      renderTimerRef.current = null;
+    }
+    setAllMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, content: finalContent } : m)),
+    );
+    setStreamingMsgId(null);
+    setStreamingContent('');
+    accumulatorRef.current = '';
+    setTokenCount(tokenCount);
+  }
+
+  function onStreamError() {
+    if (renderTimerRef.current) {
+      clearTimeout(renderTimerRef.current);
+      renderTimerRef.current = null;
+    }
+    const partial = accumulatorRef.current;
+    if (partial && streamingMsgId) {
+      setAllMessages((prev) =>
+        prev.map((m) => (m.id === streamingMsgId ? { ...m, content: partial } : m)),
+      );
+    }
+    setStreamingMsgId(null);
+    setStreamingContent('');
+    accumulatorRef.current = '';
+  }
+
+  function endStream() {
+    setIsSending(false);
+    abortControllerRef.current = null;
+  }
+
+  // ── Send new message ──────────────────────────────────────────────────────
+
   async function handleSend() {
     if (!composerText.trim() || isSending) return;
 
     const msgText = composerText.trim();
-    const lastMsg = messages[messages.length - 1] ?? null;
+    // Use the last message in the active path as parent
+    const lastMsg = activePath[activePath.length - 1] ?? null;
     const parentMessageId = lastMsg?.id ?? null;
 
-    setIsSending(true);
     setComposerText('');
-    accumulatorRef.current = '';
-    setStreamingContent('');
-
     const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    // Local capture for the assistant message id — sidesteps the stale-closure
-    // issue where setStreamingMsgId(...) schedules an update but doesn't mutate
-    // the closure-captured `streamingMsgId` state variable.
-    let assistantMsgId: string | null = null;
+    beginStream(controller);
 
     try {
       const res = await fetch(`/api/chats/${chatId}/send`, {
@@ -211,135 +338,155 @@ export default function ChatView({ chatId, onBack }: Props) {
         throw new Error(errData.error ?? `HTTP ${res.status}`);
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
-
-        for (const part of parts) {
-          const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
-          const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
-          const eventName = eventLine?.slice(7).trim();
-          const dataStr = dataLine?.slice(6).trim();
-          if (!eventName || !dataStr) continue;
-
-          let data: Record<string, unknown>;
-          try {
-            data = JSON.parse(dataStr) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-
-          switch (eventName) {
-            case 'user_message_saved': {
-              const userMsg: MessageRecord = {
-                id: data.id as string,
-                chatId,
-                role: 'user',
-                content: msgText,
-                parentMessageId,
-                branchIndex: 0,
-                createdAt: new Date().toISOString(),
-              };
-              setMessages((prev) => [...prev, userMsg]);
-              break;
-            }
-            case 'assistant_message_started': {
-              const assMsgId = data.id as string;
-              assistantMsgId = assMsgId;
-              const assMsg: MessageRecord = {
-                id: assMsgId,
-                chatId,
-                role: 'assistant',
-                content: '',
-                parentMessageId: null,
-                branchIndex: 0,
-                createdAt: new Date().toISOString(),
-              };
-              setMessages((prev) => [...prev, assMsg]);
-              setStreamingMsgId(assMsgId);
-              setAutoScroll(true);
-              break;
-            }
-            case 'token': {
-              accumulatorRef.current += data.text as string;
-              // Debounced re-render: flush every 250ms
-              if (!renderTimerRef.current) {
-                renderTimerRef.current = setTimeout(() => {
-                  flushStreamContent();
-                  renderTimerRef.current = null;
-                }, 250);
-              }
-              break;
-            }
-            case 'done': {
-              // Final flush
-              if (renderTimerRef.current) {
-                clearTimeout(renderTimerRef.current);
-                renderTimerRef.current = null;
-              }
-              const finalContent = data.content as string;
-              if (assistantMsgId) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsgId ? { ...m, content: finalContent } : m,
-                  ),
-                );
-              }
-              setStreamingMsgId(null);
-              setStreamingContent('');
-              accumulatorRef.current = '';
-              setTokenCount(data.tokenCount as number);
-              break;
-            }
-            case 'error': {
-              if (renderTimerRef.current) {
-                clearTimeout(renderTimerRef.current);
-                renderTimerRef.current = null;
-              }
-              const partial = accumulatorRef.current;
-              if (partial && assistantMsgId) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsgId ? { ...m, content: partial } : m,
-                  ),
-                );
-              }
-              setStreamingMsgId(null);
-              setStreamingContent('');
-              accumulatorRef.current = '';
-              break;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      // Client-side abort or network error
-      if (renderTimerRef.current) {
-        clearTimeout(renderTimerRef.current);
-        renderTimerRef.current = null;
-      }
-      const partial = accumulatorRef.current;
-      if (partial && assistantMsgId) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId ? { ...m, content: partial } : m,
-          ),
-        );
-      }
-      setStreamingMsgId(null);
-      setStreamingContent('');
-      accumulatorRef.current = '';
+      await consumeChatStream(res.body, {
+        onUserMessageSaved: (id) => {
+          const userMsg: MessageRecord = {
+            id,
+            chatId,
+            role: 'user',
+            content: msgText,
+            parentMessageId,
+            branchIndex: 0,
+            createdAt: new Date().toISOString(),
+          };
+          setAllMessages((prev) => [...prev, userMsg]);
+        },
+        onAssistantMessageStarted: (id) => {
+          const assMsg: MessageRecord = {
+            id,
+            chatId,
+            role: 'assistant',
+            content: '',
+            parentMessageId: null,
+            branchIndex: 0,
+            createdAt: new Date().toISOString(),
+          };
+          setAllMessages((prev) => [...prev, assMsg]);
+          setStreamingMsgId(id);
+          setAutoScroll(true);
+        },
+        onToken,
+        onDone: onStreamDone,
+        onError: onStreamError,
+      });
+    } catch {
+      onStreamError();
     } finally {
-      setIsSending(false);
-      abortControllerRef.current = null;
+      endStream();
+      // Refetch to sync activeBranchesJson and any server-side changes
+      await loadChat();
+    }
+  }
+
+  // ── Regenerate assistant message ──────────────────────────────────────────
+
+  async function handleRegenerate(messageId: string) {
+    if (isSending) return;
+    const controller = new AbortController();
+    beginStream(controller);
+
+    try {
+      const res = await fetch(`/api/chats/${chatId}/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      await consumeChatStream(res.body, {
+        onAssistantMessageStarted: (id) => {
+          // Will be added to allMessages after refetch; for now just track streaming
+          setStreamingMsgId(id);
+          setAutoScroll(true);
+        },
+        onToken,
+        onDone: (id, finalContent, tokenCount) => {
+          onStreamDone(id, finalContent, tokenCount);
+        },
+        onError: onStreamError,
+      });
+    } catch {
+      onStreamError();
+    } finally {
+      endStream();
+      await loadChat();
+    }
+  }
+
+  // ── Edit message ──────────────────────────────────────────────────────────
+
+  async function handleEditSave(messageId: string, content: string, andContinue: boolean) {
+    if (isSending) return;
+
+    if (andContinue) {
+      // SSE streaming response
+      const controller = new AbortController();
+      beginStream(controller);
+
+      try {
+        const res = await fetch(`/api/chats/${chatId}/messages/${messageId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, andContinue: true }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        await consumeChatStream(res.body, {
+          onAssistantMessageStarted: (id) => {
+            setStreamingMsgId(id);
+            setAutoScroll(true);
+          },
+          onToken,
+          onDone: (id, finalContent, tokenCount) => {
+            onStreamDone(id, finalContent, tokenCount);
+          },
+          onError: onStreamError,
+        });
+      } catch {
+        onStreamError();
+      } finally {
+        endStream();
+        await loadChat();
+      }
+    } else {
+      // JSON response (plain edit or user message hard-truncate)
+      try {
+        const res = await fetch(`/api/chats/${chatId}/messages/${messageId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+        if (res.ok) {
+          await loadChat();
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+  }
+
+  // ── Branch switch ─────────────────────────────────────────────────────────
+
+  async function handleBranchSwitch(parentMessageId: string, branchIndex: number) {
+    if (isSending) return;
+    try {
+      const res = await fetch(`/api/chats/${chatId}/branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentMessageId, branchIndex }),
+      });
+      if (res.ok) {
+        const d = (await res.json()) as { chat: ChatRecord };
+        setChat(d.chat);
+        setAllMessages(d.chat.messages);
+        // Don't auto-scroll on branch switch
+      }
+    } catch {
+      // Non-fatal
     }
   }
 
@@ -499,25 +646,26 @@ export default function ChatView({ chatId, onBack }: Props) {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 pt-6 pb-4"
       >
-        {messages.length === 0 && !isSending && (
+        {activePath.length === 0 && !isSending && (
           <div className="text-center text-zinc-600 text-sm mt-12">
             <p>Direct the story. The LLM writes the prose.</p>
             <p className="mt-1 text-xs">Type an instruction and tap Send.</p>
           </div>
         )}
 
-        {messages.map((msg) =>
-          msg.id === streamingMsgId ? (
-            <ChatMessage
-              key={msg.id}
-              message={msg}
-              isStreaming={true}
-              streamingContent={streamingContent}
-            />
-          ) : (
-            <ChatMessage key={msg.id} message={msg} />
-          ),
-        )}
+        {activePath.map((msg) => (
+          <ChatMessage
+            key={`${msg.id}-${msg.branchIndex}`}
+            message={msg}
+            isStreaming={msg.id === streamingMsgId}
+            streamingContent={msg.id === streamingMsgId ? streamingContent : undefined}
+            chatId={chatId}
+            onBranchSwitch={handleBranchSwitch}
+            onRegenerate={handleRegenerate}
+            onEditSave={handleEditSave}
+            isActionDisabled={isSending}
+          />
+        ))}
 
         <div ref={messagesEndRef} />
       </div>
@@ -559,12 +707,10 @@ export default function ChatView({ chatId, onBack }: Props) {
             className="w-full bg-zinc-900 border-t border-zinc-800 rounded-t-2xl max-h-[88vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Handle */}
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-10 h-1 rounded-full bg-zinc-700" />
             </div>
 
-            {/* Settings header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
               <h2 className="text-base font-semibold text-zinc-100">Chat Settings</h2>
               <button
@@ -576,7 +722,6 @@ export default function ChatView({ chatId, onBack }: Props) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
-              {/* Sampling preset */}
               <div>
                 <label className="label mb-2">Sampling Preset</label>
                 <select
@@ -600,7 +745,6 @@ export default function ChatView({ chatId, onBack }: Props) {
                     max {activePreset.paramsJson.max_tokens}
                   </p>
                 )}
-
                 <div className="flex gap-3 mt-3">
                   <button
                     onClick={() => setShowPresetsManager(true)}
@@ -611,7 +755,6 @@ export default function ChatView({ chatId, onBack }: Props) {
                 </div>
               </div>
 
-              {/* Per-chat overrides */}
               <div className="border border-zinc-800 rounded-xl">
                 <button
                   onClick={() => setShowAdvancedOverrides((v) => !v)}
@@ -664,7 +807,6 @@ export default function ChatView({ chatId, onBack }: Props) {
                 )}
               </div>
 
-              {/* System prompt override */}
               <div className="border border-zinc-800 rounded-xl">
                 <button
                   onClick={() => setShowSystemPrompt((v) => !v)}
@@ -690,7 +832,6 @@ export default function ChatView({ chatId, onBack }: Props) {
                 )}
               </div>
 
-              {/* Context limit */}
               <div>
                 <label className="label mb-1.5">Context limit (tokens)</label>
                 <input
@@ -707,7 +848,6 @@ export default function ChatView({ chatId, onBack }: Props) {
                 </p>
               </div>
 
-              {/* Delete chat */}
               <div className="pt-2 border-t border-zinc-800">
                 <button
                   onClick={handleDeleteChat}
@@ -721,12 +861,10 @@ export default function ChatView({ chatId, onBack }: Props) {
         </div>
       )}
 
-      {/* Presets manager modal */}
       {showPresetsManager && (
         <SamplingPresetsManager
           onClose={() => setShowPresetsManager(false)}
           onPresetSaved={() => {
-            // Reload presets
             fetch('/api/sampling-presets')
               .then((r) => r.json())
               .then((d: { presets: SamplingPresetRecord[] }) => setPresets(d.presets))

@@ -1398,6 +1398,42 @@ model Message {
 
 ---
 
+## Phase 7b — Chat editing, regeneration, branching
+
+Activates the branching shape schemaed (but dormant) in 7a. Three new capabilities:
+
+- **Regenerate assistant messages.** Each regeneration creates a new sibling branch at the same parent. Old branch preserved; user navigates between via `‹ N/M ›` chevrons in the message bubble.
+- **Edit any message.** Asymmetric semantics: user edits hard-truncate descendants (the directive changed; downstream is now stale); assistant edits create a new branch (preserves old).
+- **Continue from cursor.** User edits an assistant message and taps "Save & continue" — the LLM resumes generating from the edited text via Aphrodite's assistant-prefill pattern.
+
+**New schema field:** `Chat.activeBranchesJson` (`Record<parentMessageId, branchIndex>`). Server-authoritative active-path tracking. Persists across reloads and devices. Null means all branches at index 0.
+
+**Tab reorder:** Projects is now the first top-level tab. Default tab on fresh load is Projects.
+
+**New routes:**
+- `POST /api/chats/[id]/regenerate` — streams new sibling branch from the same parent as the target assistant message
+- `PATCH /api/chats/[id]/messages/[msgId]` — edit user message (hard truncate descendants) or assistant message (new branch; `andContinue: true` streams a prefill continuation)
+- `POST /api/chats/[id]/branch` — switch active branch for a given parent message ID
+
+**Active-path resolution:** `src/lib/chatBranches.ts` provides `resolveActivePath(messages, activeBranches)` — pure function that walks the message tree and returns the displayed sequence. `decorateWithBranchInfo` wraps the path with `branchCount`/`branchPosition` for the chevron UI.
+
+**Branch chevrons:** Each `ChatMessage` renders `‹ N/M ›` navigation when `branchCount > 1`. Tapping a chevron POSTs `/api/chats/[id]/branch` and the view refetches to re-resolve the active path.
+
+**Action rows:** User messages show an edit (✏) button; assistant messages show edit (✏) and regenerate (↺) buttons. Inline edit for user messages requires a two-tap confirmation ("Confirm edit") before the destructive truncate fires. Assistant message edit shows Save / Save & continue / Cancel — no confirm dialog (non-destructive).
+
+**Continue-from-cursor uses Aphrodite's assistant-prefill.** The message list sent to Aphrodite ends with `{role: 'assistant', content: '<edited>'}` and `stream: true`; Aphrodite resumes from the edit. Standard pattern for Aphrodite/vLLM; not supported by OpenAI's API.
+
+**Streaming refactor:** `consumeChatStream()` in `ChatView.tsx` is a shared async helper used by send, regenerate, and edit-and-continue. After any stream completes, `ChatView` refetches the full chat to sync `activeBranchesJson` and message tree state.
+
+### Source layout additions (Phase 7b)
+
+- `src/lib/chatBranches.ts` — `resolveActivePath`, `decorateWithBranchInfo`, `getSiblingCount`, `getBranchPosition`
+- `src/app/api/chats/[id]/regenerate/route.ts` — SSE streaming regeneration
+- `src/app/api/chats/[id]/messages/[msgId]/route.ts` — PATCH edit (user: hard truncate; assistant: new branch; `andContinue`: SSE continuation)
+- `src/app/api/chats/[id]/branch/route.ts` — POST branch switch
+
+---
+
 ## Not yet implemented (planned features)
 
 **Live step previews.** The architecture spec calls for catching the intermediate base64 preview images ComfyUI streams during sampling and displaying them in the UI as a live preview (updating every N steps). Currently `GenerationProgress` only shows a progress bar during generation and the final image on completion.
