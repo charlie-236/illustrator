@@ -149,6 +149,7 @@ model Chat {
   samplingOverridesJson Json?          // Partial<SamplingParams>
   contextLimit         Int             @default(64000)
   activeBranchesJson   Json?           // Record<parentMessageId, activeBranchIndex>; null = all branches at index 0
+  suggestionsEnabled   Boolean         @default(true)
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   messages             Message[]
@@ -164,6 +165,7 @@ model Message {
   content         String   @db.Text  // raw including <think> tags
   parentMessageId String?  // null for first message; otherwise the message this one replies to / branches from
   branchIndex     Int      @default(0)  // 0 = primary; 1+ = alternate branches at this parent (7b)
+  suggestionsJson Json?    // Suggestion[] | null — cached next-prompt suggestions for assistant messages
   createdAt       DateTime @default(now())
 
   parent          Message?  @relation("MessageBranches", fields: [parentMessageId], references: [id], onDelete: SetNull)
