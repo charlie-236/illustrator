@@ -82,4 +82,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 7a — Ghost writing chat (foundation) — `batch/phase-7a-ghost-writing` (PR #77)
 - [x] Fix Phase 7a: assistant content disappears on done; remove redundant floating Stop button — `batch/fix-7a-streaming-and-floating-stop` (PR #78)
 - [x] Phase 7b — Chat editing, regeneration, branching (+ Projects-first tab) — `batch/phase-7b-chat-editing-branching` (PR #79)
-- [~] Phase 7b followups — streaming display, edit UX, typography refresh — `batch/fix-7b-display-and-typography` (PR #80)
+- [x] Phase 7b followups — streaming display, edit UX, typography refresh — `batch/fix-7b-display-and-typography` (PR #80)
+- [ ] Chat fixes bundle (10 issues — streaming regression, edit auto-rerun, deletes, typography, sizing, width) — see prompts/fix-chat-bundle.md
+- [ ] Keyframe fixes bundle (delete regression, regenerate-all, auto-canonical) — see prompts/fix-keyframe-bundle.md
+- [ ] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — see prompts/fix-cross-cutting-bundle.md
