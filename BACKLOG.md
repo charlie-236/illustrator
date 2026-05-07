@@ -87,5 +87,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Keyframe fixes bundle (delete regression, regenerate-all, auto-canonical) — `batch/fix-keyframe-bundle` (PR #82)
 - [x] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — `batch/fix-cross-cutting-bundle` (PR #83)
 - [~] Cross-cutting bundle followups (queue auto-clear, WAN toggle, queue timer) — `batch/fix-cross-cutting-followups` (PR #84)
-- [ ] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see prompts/fix-chat-scroll-and-width.md
+- [~] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — `batch/fix-chat-scroll-and-width` (PR #85)
 - [ ] Phase 7 followup — suggested next prompts (three pills above composer) — see prompts/phase-7-suggested-next-prompts.md
