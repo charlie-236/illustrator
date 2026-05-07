@@ -105,3 +105,68 @@
   font-size: 1.1875rem;
   line-height: 1.65;
 }
+
+/* ── Suggested next prompts ───────────────────────────────────────────────── */
+
+.suggestions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  width: 100%;
+}
+
+.suggestion-pill {
+  flex: 1 1 auto;
+  min-height: 48px;
+  padding: 0.75rem 1rem;
+  background: rgb(39 39 42);
+  border: 1px solid rgb(63 63 70);
+  border-radius: 9999px;
+  color: rgb(228 228 231);
+  font-family: 'Merriweather', Charter, Georgia, serif;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+  display: flex;
+  align-items: center;
+}
+
+.suggestion-pill:hover {
+  background: rgb(63 63 70);
+  border-color: rgb(139 92 246);
+}
+
+.suggestion-pill:active {
+  background: rgb(82 82 91);
+}
+
+.suggestion-skeleton {
+  flex: 1 1 auto;
+  min-height: 48px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg,
+    rgb(39 39 42) 0%,
+    rgb(63 63 70) 50%,
+    rgb(39 39 42) 100%);
+  background-size: 200% 100%;
+  animation: pulse-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (max-width: 768px) {
+  .suggestions-row {
+    flex-direction: column;
+  }
+  .suggestion-pill,
+  .suggestion-skeleton {
+    width: 100%;
+    flex: none;
+  }
+}

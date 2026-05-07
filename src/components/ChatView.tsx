@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatRecord, MessageRecord, MessageWithBranchInfo, SamplingPresetRecord, SamplingParams } from '@/types';
+import type { ChatRecord, MessageRecord, MessageWithBranchInfo, SamplingPresetRecord, SamplingParams, Suggestion } from '@/types';
 import { resolveActivePath, decorateWithBranchInfo } from '@/lib/chatBranches';
 import ChatMessage from './ChatMessage';
 import SamplingPresetsManager from './SamplingPresetsManager';
@@ -157,6 +157,8 @@ export default function ChatView({ chatId, onBack }: Props) {
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [presets, setPresets] = useState<SamplingPresetRecord[]>([]);
 
+  const [suggestionsLoading, setSuggestionsLoading] = useState<Set<string>>(new Set());
+
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -165,6 +167,7 @@ export default function ChatView({ chatId, onBack }: Props) {
   const [settingsOverrides, setSettingsOverrides] = useState<Partial<SamplingParams>>({});
   const [settingsSystemPrompt, setSettingsSystemPrompt] = useState('');
   const [settingsContextLimit, setSettingsContextLimit] = useState(64000);
+  const [settingsSuggestionsEnabled, setSettingsSuggestionsEnabled] = useState(true);
   const settingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Compute active-path messages for display
@@ -188,6 +191,7 @@ export default function ChatView({ chatId, onBack }: Props) {
       setSettingsOverrides(d.chat.samplingOverridesJson ?? {});
       setSettingsSystemPrompt(d.chat.systemPromptOverride ?? '');
       setSettingsContextLimit(d.chat.contextLimit);
+      setSettingsSuggestionsEnabled(d.chat.suggestionsEnabled);
     } catch {
       // Non-fatal
     }
@@ -279,6 +283,39 @@ export default function ChatView({ chatId, onBack }: Props) {
     setStreamingContent('');
     accumulatorRef.current = '';
     setTokenCount(newTokenCount);
+
+    // Kick off suggestions in the background
+    if (settingsSuggestionsEnabled) {
+      void requestSuggestions(msgId);
+    }
+  }
+
+  async function requestSuggestions(messageId: string) {
+    setSuggestionsLoading((prev) => new Set(prev).add(messageId));
+    try {
+      const res = await fetch(
+        `/api/chats/${chatId}/messages/${messageId}/suggestions`,
+        { method: 'POST' },
+      );
+      if (!res.ok) throw new Error('Suggestions request failed');
+      const data = (await res.json()) as { suggestions: Suggestion[] | null };
+
+      if (data.suggestions) {
+        setAllMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, suggestionsJson: data.suggestions } : m,
+          ),
+        );
+      }
+    } catch (err) {
+      console.warn('Suggestions request failed:', err);
+    } finally {
+      setSuggestionsLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(messageId);
+        return next;
+      });
+    }
   }
 
   function onStreamError() {
@@ -343,6 +380,7 @@ export default function ChatView({ chatId, onBack }: Props) {
             content: msgText,
             parentMessageId,
             branchIndex: 0,
+            suggestionsJson: null,
             createdAt: new Date().toISOString(),
           };
           setAllMessages((prev) => [...prev, userMsg]);
@@ -355,6 +393,7 @@ export default function ChatView({ chatId, onBack }: Props) {
             content: '',
             parentMessageId: parentMsgId,
             branchIndex,
+            suggestionsJson: null,
             createdAt: new Date().toISOString(),
           };
           setAllMessages((prev) => [...prev, assMsg]);
@@ -400,6 +439,7 @@ export default function ChatView({ chatId, onBack }: Props) {
             content: '',
             parentMessageId: parentMsgId ?? targetMsg?.parentMessageId ?? null,
             branchIndex,
+            suggestionsJson: null,
             createdAt: new Date().toISOString(),
           };
           setAllMessages((prev) => [...prev, newMsg]);
@@ -476,6 +516,7 @@ export default function ChatView({ chatId, onBack }: Props) {
               content: '',
               parentMessageId: parentMsgId,
               branchIndex,
+              suggestionsJson: null,
               createdAt: new Date().toISOString(),
             };
             setAllMessages((prev) => [...prev, newMsg]);
@@ -638,7 +679,31 @@ export default function ChatView({ chatId, onBack }: Props) {
     }
   }
 
+  async function handleSuggestionsToggle(enabled: boolean) {
+    setSettingsSuggestionsEnabled(enabled);
+    setChat((c) => (c ? { ...c, suggestionsEnabled: enabled } : c));
+    try {
+      await fetch(`/api/chats/${chatId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestionsEnabled: enabled }),
+      });
+    } catch {
+      // Non-fatal
+    }
+  }
+
   const activePreset = presets.find((p) => p.id === settingsPresetId) ?? null;
+
+  // Suggestions display logic
+  const lastAssistantMsg = [...activePath].reverse().find((m) => m.role === 'assistant') ?? null;
+  const showPills =
+    settingsSuggestionsEnabled &&
+    lastAssistantMsg != null &&
+    composerText.trim().length === 0 &&
+    !isActive;
+  const pillsLoading = lastAssistantMsg != null && suggestionsLoading.has(lastAssistantMsg.id);
+  const pillsAvailable = lastAssistantMsg?.suggestionsJson ?? null;
 
   if (loading) {
     return (
@@ -736,8 +801,34 @@ export default function ChatView({ chatId, onBack }: Props) {
       </div>
 
       {/* Composer */}
-      <div className="flex-shrink-0 bg-zinc-950 border-t border-zinc-800 py-3">
+      <div className="flex-shrink-0 bg-zinc-950 border-t border-zinc-800 pt-2 pb-3">
         <div className="chat-message-list px-4">
+          {/* Suggested next prompts */}
+          {showPills && (
+            <div className="suggestions-row">
+              {pillsLoading ? (
+                <>
+                  <div className="suggestion-skeleton" />
+                  <div className="suggestion-skeleton" />
+                  <div className="suggestion-skeleton" />
+                </>
+              ) : pillsAvailable && pillsAvailable.length > 0 ? (
+                pillsAvailable.map((s, i) => (
+                  <button
+                    key={i}
+                    className="suggestion-pill"
+                    onClick={() => {
+                      setComposerText(s.prompt);
+                      updateTokenCount(s.prompt);
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))
+              ) : null}
+            </div>
+          )}
+
           <div className="flex gap-3 items-end">
             <textarea
               value={composerText}
@@ -913,6 +1004,31 @@ export default function ChatView({ chatId, onBack }: Props) {
                 <p className="text-xs text-zinc-600 mt-1">
                   Token counter turns amber at 80%, red at 95%.
                 </p>
+              </div>
+
+              <div className="border border-zinc-800 rounded-xl p-4">
+                <div className="flex items-center justify-between min-h-12">
+                  <div>
+                    <p className="text-sm text-zinc-200">Suggested next prompts</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      Three suggestions appear above the composer after each response.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleSuggestionsToggle(!settingsSuggestionsEnabled)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 min-w-[44px] ${
+                      settingsSuggestionsEnabled ? 'bg-violet-600' : 'bg-zinc-700'
+                    }`}
+                    role="switch"
+                    aria-checked={settingsSuggestionsEnabled}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${
+                        settingsSuggestionsEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
               <div className="pt-2 border-t border-zinc-800">

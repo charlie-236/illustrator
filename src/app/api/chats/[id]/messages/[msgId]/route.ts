@@ -100,6 +100,7 @@ export async function PATCH(
         content: m.id === msgId ? trimmedContent : m.content,
         parentMessageId: m.parentMessageId,
         branchIndex: m.branchIndex,
+        suggestionsJson: null,
         createdAt: m.createdAt.toISOString(),
       }));
 
@@ -343,6 +344,7 @@ export async function PATCH(
           content: m.content,
           parentMessageId: m.parentMessageId,
           branchIndex: m.branchIndex,
+          suggestionsJson: null,
           createdAt: m.createdAt.toISOString(),
         }));
 
