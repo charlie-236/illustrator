@@ -83,6 +83,8 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Fix Phase 7a: assistant content disappears on done; remove redundant floating Stop button — `batch/fix-7a-streaming-and-floating-stop` (PR #78)
 - [x] Phase 7b — Chat editing, regeneration, branching (+ Projects-first tab) — `batch/phase-7b-chat-editing-branching` (PR #79)
 - [x] Phase 7b followups — streaming display, edit UX, typography refresh — `batch/fix-7b-display-and-typography` (PR #80)
-- [~] Chat fixes bundle (10 issues — streaming regression, edit auto-rerun, deletes, typography, sizing, width) — `batch/fix-chat-bundle` (PR #81)
-- [~] Keyframe fixes bundle (delete regression, regenerate-all, auto-canonical) — `batch/fix-keyframe-bundle` (PR #82)
-- [~] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — `batch/fix-cross-cutting-bundle` (PR #83)
+- [x] Chat fixes bundle (10 issues — streaming regression, edit auto-rerun, deletes, typography, sizing, width) — `batch/fix-chat-bundle` (PR #81)
+- [x] Keyframe fixes bundle (delete regression, regenerate-all, auto-canonical) — `batch/fix-keyframe-bundle` (PR #82)
+- [x] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — `batch/fix-cross-cutting-bundle` (PR #83)
+- [ ] Cross-cutting bundle followups (queue auto-clear, WAN toggle, queue timer) — see prompts/fix-cross-cutting-followups.md
+- [ ] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see prompts/fix-chat-scroll-and-width.md
