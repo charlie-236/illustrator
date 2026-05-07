@@ -185,7 +185,18 @@ export default function ChatView({ chatId, onBack }: Props) {
       if (!res.ok) return;
       const d = (await res.json()) as { chat: ChatRecord };
       setChat(d.chat);
-      setAllMessages(d.chat.messages);
+      // Merge: prefer server state but keep client-side suggestionsJson if the server
+      // doesn't have it yet (suggestions write is async and may not be committed).
+      setAllMessages((prev) => {
+        const prevById = new Map(prev.map((m) => [m.id, m]));
+        return d.chat.messages.map((serverMsg) => {
+          const localMsg = prevById.get(serverMsg.id);
+          if (localMsg?.suggestionsJson && !serverMsg.suggestionsJson) {
+            return { ...serverMsg, suggestionsJson: localMsg.suggestionsJson };
+          }
+          return serverMsg;
+        });
+      });
       setContextLimit(d.chat.contextLimit);
       setSettingsPresetId(d.chat.samplingPresetId);
       setSettingsOverrides(d.chat.samplingOverridesJson ?? {});

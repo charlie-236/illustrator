@@ -33,6 +33,8 @@ const LORA_BLANK = {
   category: '',
   description: '',
   url: '' as string | null | undefined,
+  appliesToHigh: true as boolean,
+  appliesToLow: true as boolean,
 };
 
 const BASE_MODEL_OPTIONS = ['', 'SD 1.5', 'SDXL', 'Pony', 'Flux.1', 'SD 3', 'Big Love', 'Wan 2.2'];
@@ -279,6 +281,8 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
               category: config.category ?? '',
               description: config.description ?? '',
               url: config.url,
+              appliesToHigh: config.appliesToHigh ?? true,
+              appliesToLow: config.appliesToLow ?? true,
             }
           : { ...LORA_BLANK });
       })
@@ -958,6 +962,37 @@ export default function ModelConfig({ onSaved }: { onSaved?: () => void }) {
                 ))}
               </select>
             </div>
+
+            {loraForm.baseModel === 'Wan 2.2' && (
+              <div>
+                <label className="label">Expert scope</label>
+                <p className="text-xs text-zinc-400 mb-1.5">
+                  Wan 2.2 has separate high-noise and low-noise transformers. Most paired
+                  LoRAs target one specifically. Auto-detected from filename at ingest;
+                  override here if the detection was wrong.
+                </p>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 min-h-12 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={loraForm.appliesToHigh ?? true}
+                      onChange={(e) => loraField('appliesToHigh', e.target.checked)}
+                      className="w-5 h-5 accent-violet-500"
+                    />
+                    <span className="text-sm text-zinc-300">High noise transformer</span>
+                  </label>
+                  <label className="flex items-center gap-2 min-h-12 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={loraForm.appliesToLow ?? true}
+                      onChange={(e) => loraField('appliesToLow', e.target.checked)}
+                      className="w-5 h-5 accent-violet-500"
+                    />
+                    <span className="text-sm text-zinc-300">Low noise transformer</span>
+                  </label>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="label">Category</label>
