@@ -316,6 +316,11 @@ export interface SamplingParams {
   mirostat_eta?: number;        // 0.1 typical
 }
 
+export interface Suggestion {
+  label: string;    // 3-8 words for pill display
+  prompt: string;   // 30-60 word detailed directive
+}
+
 export interface SamplingPresetRecord {
   id: string;
   name: string;
@@ -332,6 +337,7 @@ export interface MessageRecord {
   content: string;
   parentMessageId: string | null;
   branchIndex: number;
+  suggestionsJson: Suggestion[] | null;
   createdAt: string;
 }
 
@@ -344,6 +350,7 @@ export interface ChatRecord {
   samplingOverridesJson: Partial<SamplingParams> | null;
   contextLimit: number;
   activeBranchesJson: Record<string, number> | null;
+  suggestionsEnabled: boolean;
   createdAt: string;
   updatedAt: string;
   messages: MessageRecord[];

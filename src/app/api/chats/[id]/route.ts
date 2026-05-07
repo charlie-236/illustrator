@@ -34,6 +34,7 @@ export async function PATCH(
     samplingPresetId?: string | null;
     samplingOverridesJson?: Partial<SamplingParams> | null;
     contextLimit?: number;
+    suggestionsEnabled?: boolean;
   };
   try {
     body = await req.json();
@@ -76,6 +77,10 @@ export async function PATCH(
     data.contextLimit = limit;
   }
 
+  if (body.suggestionsEnabled !== undefined) {
+    data.suggestionsEnabled = Boolean(body.suggestionsEnabled);
+  }
+
   const updated = await prisma.chat.update({
     where: { id: params.id },
     data,
@@ -114,6 +119,7 @@ type ChatWithRelations = {
   samplingOverridesJson: unknown;
   activeBranchesJson: unknown;
   contextLimit: number;
+  suggestionsEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
   messages: Array<{
@@ -123,6 +129,7 @@ type ChatWithRelations = {
     content: string;
     parentMessageId: string | null;
     branchIndex: number;
+    suggestionsJson: unknown;
     createdAt: Date;
   }>;
 };
@@ -146,6 +153,7 @@ function serializeChatRecord(chat: ChatWithRelations) {
     samplingOverridesJson: (chat.samplingOverridesJson as Partial<SamplingParams>) ?? null,
     activeBranchesJson: (chat.activeBranchesJson as Record<string, number> | null) ?? null,
     contextLimit: chat.contextLimit,
+    suggestionsEnabled: chat.suggestionsEnabled,
     createdAt: chat.createdAt.toISOString(),
     updatedAt: chat.updatedAt.toISOString(),
     messages: chat.messages.map((m) => ({
@@ -155,6 +163,7 @@ function serializeChatRecord(chat: ChatWithRelations) {
       content: m.content,
       parentMessageId: m.parentMessageId,
       branchIndex: m.branchIndex,
+      suggestionsJson: (m.suggestionsJson as import('@/types').Suggestion[] | null) ?? null,
       createdAt: m.createdAt.toISOString(),
     })),
   };

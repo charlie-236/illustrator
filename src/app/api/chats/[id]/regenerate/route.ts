@@ -90,6 +90,7 @@ export async function POST(
           content: m.content,
           parentMessageId: m.parentMessageId,
           branchIndex: m.branchIndex,
+          suggestionsJson: null,
           createdAt: m.createdAt.toISOString(),
         }));
 
