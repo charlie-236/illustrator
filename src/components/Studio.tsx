@@ -548,7 +548,7 @@ export default function Studio({
     setP((prev) => ({ ...prev, positivePrompt: videoRemixParams.positivePrompt, seed: videoRemixParams.seed ?? -1 }));
     setLightningAndPersist(videoRemixParams.lightning ?? false);
     const loraEntries: WanLoraEntry[] = videoRemixParams.videoLoras
-      ? videoRemixParams.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }))
+      ? videoRemixParams.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight, appliesToHigh: s.appliesToHigh, appliesToLow: s.appliesToLow }))
       : [];
     setVideoLorasAndPersist(loraEntries);
     setUseStartingFrame(false);
@@ -595,7 +595,7 @@ export default function Studio({
       }
 
       if (projectContextTrigger.defaults.videoLoras) {
-        const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+        const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight, appliesToHigh: s.appliesToHigh, appliesToLow: s.appliesToLow }));
         setVideoLorasAndPersist(entries);
       }
 
@@ -644,7 +644,7 @@ export default function Studio({
       }
 
       if (projectContextTrigger.defaults.videoLoras) {
-        const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+        const entries = projectContextTrigger.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight, appliesToHigh: s.appliesToHigh, appliesToLow: s.appliesToLow }));
         setVideoLorasAndPersist(entries);
       }
     } else {
@@ -801,7 +801,7 @@ export default function Studio({
 
       // Pre-fill video LoRA stack from project defaults if provided
       if (newCtx.defaults.videoLoras) {
-        const entries = newCtx.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+        const entries = newCtx.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight, appliesToHigh: s.appliesToHigh, appliesToLow: s.appliesToLow }));
         setVideoLorasAndPersist(entries);
       }
 
@@ -863,7 +863,7 @@ export default function Studio({
 
     // Pre-fill video LoRA stack from project defaults if provided
     if (newCtx.defaults.videoLoras) {
-      const entries = newCtx.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight }));
+      const entries = newCtx.defaults.videoLoras.map((s) => ({ loraName: s.loraName, weight: s.weight, appliesToHigh: s.appliesToHigh, appliesToLow: s.appliesToLow }));
       setVideoLorasAndPersist(entries);
     }
 
