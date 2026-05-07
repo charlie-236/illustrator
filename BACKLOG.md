@@ -88,3 +88,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — `batch/fix-cross-cutting-bundle` (PR #83)
 - [ ] Cross-cutting bundle followups (queue auto-clear, WAN toggle, queue timer) — see prompts/fix-cross-cutting-followups.md
 - [ ] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see prompts/fix-chat-scroll-and-width.md
+- [ ] Phase 7 followup — suggested next prompts (three pills above composer) — see prompts/phase-7-suggested-next-prompts.md
