@@ -1464,7 +1464,9 @@ Activates the branching shape schemaed (but dormant) in 7a. Three new capabiliti
 >
 > **48px action buttons.** Per-message Edit, Regenerate, and Delete buttons raised to `min-h-12 min-w-12` with `bg-zinc-800 hover:bg-zinc-700` — same treatment as branch chevrons. Delete picks up a red hover state (`hover:text-red-400`).
 >
-> **Responsive prose width.** `.chat-prose` and `.chat-message-list` max-width raised from `66ch` to `min(85ch, 100%)`. Media queries: 17px on narrow phones, 19px default, 20px/line-height 1.7 on `≥1280px`. Composer uses the same centering block so it aligns with the prose column.
+> **Scroll behavior.** During streaming, the message list does NOT auto-scroll. User retains full control of scroll position throughout. One-shot scroll-to-bottom fires only at send time so the user sees their just-sent message and incoming response. All other scroll position is sticky.
+>
+> **Width.** Chat prose fills available viewport width minus side padding (`px-4` = 16px each side). No `max-width` on `.chat-prose` or `.chat-message-list`. Media queries: 17px on narrow phones, 19px default, 20px/line-height 1.7 on `≥1280px`.
 
 ---
 

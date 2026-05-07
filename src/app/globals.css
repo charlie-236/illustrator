@@ -46,8 +46,6 @@
 
 .chat-message-list {
   width: 100%;
-  max-width: min(85ch, 100%);
-  margin: 0 auto;
 }
 
 .chat-prose {
@@ -55,13 +53,11 @@
   font-size: 1.1875rem;
   line-height: 1.65;
   color: rgb(244 244 245);
-  max-width: min(85ch, 100%);
 }
 
 @media (max-width: 768px) {
   .chat-prose {
     font-size: 1.0625rem;
-    max-width: 100%;
   }
 }
 

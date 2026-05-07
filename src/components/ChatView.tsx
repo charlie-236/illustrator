@@ -149,9 +149,7 @@ export default function ChatView({ chatId, onBack }: Props) {
   const [contextLimit, setContextLimit] = useState(64000);
   const tokenDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
 
   const [showSettings, setShowSettings] = useState(false);
   const [showPresetsManager, setShowPresetsManager] = useState(false);
@@ -208,22 +206,8 @@ export default function ChatView({ chatId, onBack }: Props) {
       .catch(() => {});
   }, [showSettings]);
 
-  useEffect(() => {
-    if (autoScroll && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [activePath.length, streamingContent, autoScroll]);
-
-  const handleScroll = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    setAutoScroll(atBottom);
-  }, []);
-
   const flushStreamContent = useCallback(() => {
     setStreamingContent(accumulatorRef.current);
-    setAutoScroll(true);
   }, []);
 
   const updateTokenCount = useCallback(
@@ -332,6 +316,11 @@ export default function ChatView({ chatId, onBack }: Props) {
     const controller = new AbortController();
     beginStream(controller);
 
+    // One-shot scroll to bottom so the user sees their just-sent message + incoming response
+    setTimeout(() => {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+    }, 50);
+
     try {
       const res = await fetch(`/api/chats/${chatId}/send`, {
         method: 'POST',
@@ -370,7 +359,6 @@ export default function ChatView({ chatId, onBack }: Props) {
           };
           setAllMessages((prev) => [...prev, assMsg]);
           setStreamingMsgId(id);
-          setAutoScroll(true);
         },
         onToken,
         onDone: onStreamDone,
@@ -424,7 +412,6 @@ export default function ChatView({ chatId, onBack }: Props) {
             });
           }
           setStreamingMsgId(id);
-          setAutoScroll(true);
         },
         onToken,
         onDone: (id, finalContent, newTokenCount) => {
@@ -501,7 +488,6 @@ export default function ChatView({ chatId, onBack }: Props) {
               });
             }
             setStreamingMsgId(id);
-            setAutoScroll(true);
           },
           onToken,
           onDone: onStreamDone,
@@ -663,9 +649,9 @@ export default function ChatView({ chatId, onBack }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
       {/* Header */}
-      <div className="sticky top-14 z-30 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-4 py-3 flex items-center gap-3">
+      <div className="flex-shrink-0 bg-zinc-950 border-b border-zinc-800 px-4 py-3 flex items-center gap-3">
         <button
           onClick={onBack}
           className="text-zinc-400 hover:text-zinc-200 min-h-10 min-w-10 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
@@ -721,7 +707,6 @@ export default function ChatView({ chatId, onBack }: Props) {
       {/* Message list */}
       <div
         ref={listRef}
-        onScroll={handleScroll}
         className="flex-1 overflow-y-auto pt-6 pb-4"
       >
         <div className="chat-message-list px-4">
@@ -747,12 +732,11 @@ export default function ChatView({ chatId, onBack }: Props) {
             />
           ))}
 
-          <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Composer */}
-      <div className="sticky bottom-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 py-3">
+      <div className="flex-shrink-0 bg-zinc-950 border-t border-zinc-800 py-3">
         <div className="chat-message-list px-4">
           <div className="flex gap-3 items-end">
             <textarea
