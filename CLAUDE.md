@@ -1300,13 +1300,19 @@ New optional prop: `onPromoteToVideo?: (record: GenerationRecord) => void`.
 
 `suggestedStartingKeyframeId: string | null` — set to the scene's own canonical keyframe when launching video generation from a scene. Studio's trigger `useEffect` prefers this over `suggestedStartingClipId` (`startingId = sc.suggestedStartingKeyframeId ?? sc.suggestedStartingClipId`).
 
+**Auto-canonical on regenerate.** When any keyframe generation completes (per-scene Generate, gap-fill batch, or regenerate-all), the scene's `canonicalKeyframeId` auto-updates to the new keyframe. The polling effect in `ProjectDetail` detects the new keyframe and fires a fire-and-forget PUT to `/api/storyboards/[id]`. User can manually re-promote via the picker if they prefer an older variant.
+
+**Regenerate-all batch.** Sibling action to the gap-fill batch. Visible when any scene already has a canonical keyframe. Submits a keyframe generation for every scene in the storyboard regardless of existing canonicals; new keyframes auto-canonicalize on completion. Existing keyframes are preserved as non-canonical alternates. Button shows alongside "Generate keyframes (N needed)" when both conditions apply; only "Regenerate all" shows when all scenes already have canonicals.
+
+**Keyframe delete.** Delete button (trash icon) added to each keyframe row in `CanonicalKeyframePickerModal`. The nested `ImageModal` inside the picker also has a working `onDelete` handler. Deleting a canonical keyframe clears the scene's `canonicalKeyframeId` via a fire-and-forget PUT to the storyboard (two-step client flow is acceptable per the single-user reliability policy).
+
 ### Source layout additions (Phase 6)
 
 - `src/types/index.ts` — `StoryboardScene.canonicalKeyframeId`, `SceneTriggerContext.suggestedStartingKeyframeId`, `GenerationParams.sceneId`
 - `src/lib/comfyws.ts` — `finalizeImageJob` writes `sceneId` to DB
 - `src/app/api/generate/route.ts` — validates `sceneId` param
-- `src/components/CanonicalKeyframePickerModal.tsx` — new component
-- `src/components/ProjectDetail.tsx` — `resolveCanonicalClipId` (video-only), `resolveCanonicalKeyframeId`, keyframe state/handlers, dual thumbnails, batch button, batch confirm dialog
+- `src/components/CanonicalKeyframePickerModal.tsx` — new component; `onDeleteKeyframe` prop; delete button per keyframe; nested ImageModal onDelete wired
+- `src/components/ProjectDetail.tsx` — `resolveCanonicalClipId` (video-only), `resolveCanonicalKeyframeId`, keyframe state/handlers, dual thumbnails, batch button, batch confirm dialog; `handleDeleteKeyframe`, `clearCanonicalKeyframeIfNeeded`, `handleRegenerateAllKeyframes`, regenerate-all button + confirm dialog; auto-canonical in polling effect
 - `src/components/ImageModal.tsx` — `onPromoteToVideo` prop, keyframe vs. clip scene row
 - `src/components/Studio.tsx` — keyframe priority in sceneContext starting-frame resolution
 
