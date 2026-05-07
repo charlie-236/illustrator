@@ -1171,8 +1171,8 @@ export default function Studio({
       loraName: e.loraName,
       friendlyName: modelLists.loraNames[e.loraName] ?? '(unknown LoRA)',
       weight: e.weight,
-      appliesToHigh: modelLists.loraAppliesToHigh[e.loraName] ?? true,
-      appliesToLow: modelLists.loraAppliesToLow[e.loraName] ?? true,
+      appliesToHigh: e.appliesToHigh ?? modelLists.loraAppliesToHigh[e.loraName] ?? true,
+      appliesToLow: e.appliesToLow ?? modelLists.loraAppliesToLow[e.loraName] ?? true,
     }));
 
     // Request notification permission once before the batch

@@ -42,6 +42,9 @@ export interface RegisteredModelInfo {
   friendlyName: string;
   baseModel: string;
   triggerWords: string;
+  /** Set for Wan 2.2 LoRAs only — indicates which UNet expert(s) this LoRA targets. */
+  appliesToHigh?: boolean;
+  appliesToLow?: boolean;
 }
 
 // Normalize CivitAI base model strings to canonical internal values.
@@ -50,6 +53,20 @@ function normalizeBaseModel(raw: string): string {
   const s = raw.trim();
   if (/wan\s*(?:video\s*)?2\.?2/i.test(s)) return 'Wan 2.2';
   return s;
+}
+
+/**
+ * Detects the expert-scope of a Wan 2.2 LoRA from CivitAI version name / model name.
+ * Patterns: "high_noise", "high noise" → high only; "low_noise", "low noise" → low only;
+ * anything else → both (user should verify in the Models tab).
+ */
+function detectWanLoraScope(friendlyName: string, versionName: string): { appliesToHigh: boolean; appliesToLow: boolean } {
+  const combined = `${friendlyName} ${versionName}`.toLowerCase();
+  const hasHigh = /high[_\s-]?noise/.test(combined);
+  const hasLow = /low[_\s-]?noise/.test(combined);
+  if (hasHigh && !hasLow) return { appliesToHigh: true, appliesToLow: false };
+  if (hasLow && !hasHigh) return { appliesToHigh: false, appliesToLow: true };
+  return { appliesToHigh: true, appliesToLow: true };
 }
 
 function extractCategoryFromTags(meta: CivitAIMetadata): string | null {
@@ -104,6 +121,10 @@ export async function registerModel(
       return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
     } else if (type === 'lora') {
       const category = extractCategoryFromTags(civitaiMetadata);
+      const isWan22 = normalizeBaseModel(civitaiMetadata.baseModel ?? '') === 'Wan 2.2';
+      const scope = isWan22
+        ? detectWanLoraScope(friendlyName, civitaiMetadata.name ?? '')
+        : { appliesToHigh: true, appliesToLow: true };
       const record = await prisma.loraConfig.upsert({
         where: { loraName: filename },
         create: {
@@ -114,10 +135,12 @@ export async function registerModel(
           category,
           description,
           url,
+          appliesToHigh: scope.appliesToHigh,
+          appliesToLow: scope.appliesToLow,
         },
         update: { friendlyName, triggerWords, ...(baseModel ? { baseModel } : {}), ...(category ? { category } : {}), description, url },
       });
-      return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords } };
+      return { ok: true, record: { id: record.id, friendlyName, baseModel, triggerWords, appliesToHigh: record.appliesToHigh, appliesToLow: record.appliesToLow } };
     } else {
       const category = extractCategoryFromTags(civitaiMetadata);
       const record = await prisma.embeddingConfig.upsert({

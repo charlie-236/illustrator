@@ -6,12 +6,15 @@ export interface LoraEntry {
 }
 
 /**
- * Wan 2.2 LoRA entry in Studio form state (minimal — friendlyName and expert
- * flags are looked up from ModelLists at render / submit time).
+ * Wan 2.2 LoRA entry in Studio form state. Expert-scope flags are initialized
+ * from ModelLists (DB config) when a LoRA is added and can be overridden per-row
+ * in the VideoLoraStack UI. friendlyName is looked up from ModelLists at submit time.
  */
 export interface WanLoraEntry {
   loraName: string;
   weight: number;
+  appliesToHigh?: boolean;
+  appliesToLow?: boolean;
 }
 
 /**

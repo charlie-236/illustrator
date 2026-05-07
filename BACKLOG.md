@@ -85,4 +85,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 7b followups — streaming display, edit UX, typography refresh — `batch/fix-7b-display-and-typography` (PR #80)
 - [~] Chat fixes bundle (10 issues — streaming regression, edit auto-rerun, deletes, typography, sizing, width) — `batch/fix-chat-bundle` (PR #81)
 - [~] Keyframe fixes bundle (delete regression, regenerate-all, auto-canonical) — `batch/fix-keyframe-bundle` (PR #82)
-- [ ] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — see prompts/fix-cross-cutting-bundle.md
+- [~] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — `batch/fix-cross-cutting-bundle` (PR #83)

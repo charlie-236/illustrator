@@ -212,17 +212,17 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     prevJobsRef.current = new Map(state.jobs.map((j) => [j.promptId, j]));
   }, [state.jobs, state.muted]);
 
-  // ── auto-dismiss completed jobs after 30 s ─────────────────────────────────
+  // ── auto-dismiss completed/errored jobs after 60 s ────────────────────────
   const autoDismissRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
-    // Schedule auto-dismiss for newly-done jobs
+    // Schedule auto-dismiss for newly-terminal jobs (done or error)
     for (const job of state.jobs) {
-      if (job.status === 'done' && !autoDismissRef.current.has(job.promptId)) {
+      if ((job.status === 'done' || job.status === 'error') && !autoDismissRef.current.has(job.promptId)) {
         const timer = setTimeout(() => {
           dispatch({ type: 'REMOVE_JOB', promptId: job.promptId });
           autoDismissRef.current.delete(job.promptId);
-        }, 30_000);
+        }, 60_000);
         autoDismissRef.current.set(job.promptId, timer);
       }
     }
