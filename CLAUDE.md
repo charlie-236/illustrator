@@ -1435,8 +1435,30 @@ Activates the branching shape schemaed (but dormant) in 7a. Three new capabiliti
 
 - `src/lib/chatBranches.ts` — `resolveActivePath`, `decorateWithBranchInfo`, `getSiblingCount`, `getBranchPosition`
 - `src/app/api/chats/[id]/regenerate/route.ts` — SSE streaming regeneration
-- `src/app/api/chats/[id]/messages/[msgId]/route.ts` — PATCH edit (user: hard truncate; assistant: new branch; `andContinue`: SSE continuation)
+- `src/app/api/chats/[id]/messages/[msgId]/route.ts` — PATCH edit (user: SSE auto-regen; assistant: new branch; `andContinue`: SSE continuation); DELETE cascade
 - `src/app/api/chats/[id]/branch/route.ts` — POST branch switch
+
+### Phase 7b followup fixes
+
+> **User-message edit auto-regenerates.** Editing a user prompt and saving now triggers immediate streaming of a new assistant response. Original 7b spec required manual re-send; revised based on use feedback. The PATCH handler for user messages now returns SSE instead of JSON. The client's `handleEditSave` detects user messages, optimistically prunes descendants from local state, and consumes the SSE stream.
+>
+> **Assistant-message delete cascades.** A new DELETE handler on `messages/[msgId]/route.ts` removes the target assistant message and all its descendants across all branches. If sibling branches exist at the same parent, the active branch switches to the lowest remaining sibling. Client-side: Delete button (🗑) in the assistant action row, confirmed via `window.confirm`.
+>
+> **Stop button works pre-token.** `isRequestInFlight` state (alongside `isSending`) is set the moment `handleSend`/`handleRegenerate`/`handleEditSave` starts. The composer's Send/Stop button is gated on `isActive = isSending || isRequestInFlight`, so Stop is reachable before any SSE events arrive.
+>
+> **Stop tokens stripped server-side.** `<|im_end|>`, `<|endoftext\|>`, `<|eot_id\|>`, `<|im_start\|>`, `[INST]`, `[/INST]`, `<s>`, `</s>` are stripped via `src/lib/stripStopTokens.ts` before persistence and before the `done` SSE event in all three streaming routes (send, regenerate, messages/[msgId]).
+>
+> **Streaming fix: messages appear during generation.** `assistant_message_started` SSE events now include `parentMessageId` and `branchIndex`. Clients use these to add the new assistant message to `allMessages` immediately (with correct tree position) and update `activeBranchesJson` for regeneration/edit branches. Previously, regenerated and continued messages were invisible until `loadChat()` ran after streaming completed.
+>
+> **Edit confirm dialog removed.** User-message edit no longer shows a two-step confirm before saving. The save fires immediately into the auto-regen flow.
+>
+> **Larger user-edit textarea.** `minRows` for user-message edit textarea raised from 4→8, `maxRows` from 20→40. Now uses `prose-textarea` class to match Merriweather body font.
+>
+> **Readable prompt history typography.** `.chat-directive` now uses Merriweather at 17px/1.65 line-height in `rgb(228 228 231)` (zinc-200), normal style. User prompts are visually distinct from assistant prose by background color and right-alignment, not by tiny italic sans-serif.
+>
+> **48px action buttons.** Per-message Edit, Regenerate, and Delete buttons raised to `min-h-12 min-w-12` with `bg-zinc-800 hover:bg-zinc-700` — same treatment as branch chevrons. Delete picks up a red hover state (`hover:text-red-400`).
+>
+> **Responsive prose width.** `.chat-prose` and `.chat-message-list` max-width raised from `66ch` to `min(85ch, 100%)`. Media queries: 17px on narrow phones, 19px default, 20px/line-height 1.7 on `≥1280px`. Composer uses the same centering block so it aligns with the prose column.
 
 ---
 
