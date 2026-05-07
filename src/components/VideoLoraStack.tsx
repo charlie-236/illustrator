@@ -90,10 +90,12 @@ interface RowProps {
   displayName: string;
   onOpenPicker: () => void;
   onWeightChange: (w: number) => void;
+  onHighChange: (v: boolean) => void;
+  onLowChange: (v: boolean) => void;
   onRemove: () => void;
 }
 
-function VideoLoraRow({ entry, displayName, onOpenPicker, onWeightChange, onRemove }: RowProps) {
+function VideoLoraRow({ entry, displayName, onOpenPicker, onWeightChange, onHighChange, onLowChange, onRemove }: RowProps) {
   const [weightStr, setWeightStr] = useState(entry.weight.toFixed(2));
   const inputFocused = useRef(false);
 
@@ -164,6 +166,27 @@ function VideoLoraRow({ entry, displayName, onOpenPicker, onWeightChange, onRemo
           className="w-20 flex-shrink-0 text-center text-sm py-1.5 px-1 input-base"
         />
       </div>
+      {/* Expert-scope toggles — controls which Wan 2.2 UNet expert(s) apply this LoRA */}
+      <div className="flex items-center gap-4 pt-0.5">
+        <label className="flex items-center gap-2 min-h-12 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={entry.appliesToHigh ?? true}
+            onChange={(e) => onHighChange(e.target.checked)}
+            className="w-5 h-5 accent-violet-500"
+          />
+          <span className="text-sm text-zinc-300">High noise</span>
+        </label>
+        <label className="flex items-center gap-2 min-h-12 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={entry.appliesToLow ?? true}
+            onChange={(e) => onLowChange(e.target.checked)}
+            className="w-5 h-5 accent-violet-500"
+          />
+          <span className="text-sm text-zinc-300">Low noise</span>
+        </label>
+      </div>
     </div>
   );
 }
@@ -175,7 +198,13 @@ export default function VideoLoraStack({ loras, lists, onChange }: Props) {
 
   function addLora() {
     if (wanLoras.length === 0) return;
-    onChange([...loras, { loraName: wanLoras[0], weight: 1.0 }]);
+    const loraName = wanLoras[0];
+    onChange([...loras, {
+      loraName,
+      weight: 1.0,
+      appliesToHigh: lists.loraAppliesToHigh[loraName] ?? true,
+      appliesToLow: lists.loraAppliesToLow[loraName] ?? true,
+    }]);
   }
 
   function updateWeight(index: number, weight: number) {
@@ -183,7 +212,20 @@ export default function VideoLoraStack({ loras, lists, onChange }: Props) {
   }
 
   function updateName(index: number, loraName: string) {
-    onChange(loras.map((e, i) => (i === index ? { ...e, loraName } : e)));
+    onChange(loras.map((e, i) => (i === index ? {
+      ...e,
+      loraName,
+      appliesToHigh: lists.loraAppliesToHigh[loraName] ?? true,
+      appliesToLow: lists.loraAppliesToLow[loraName] ?? true,
+    } : e)));
+  }
+
+  function updateHigh(index: number, appliesToHigh: boolean) {
+    onChange(loras.map((e, i) => (i === index ? { ...e, appliesToHigh } : e)));
+  }
+
+  function updateLow(index: number, appliesToLow: boolean) {
+    onChange(loras.map((e, i) => (i === index ? { ...e, appliesToLow } : e)));
   }
 
   function remove(index: number) {
@@ -216,6 +258,8 @@ export default function VideoLoraStack({ loras, lists, onChange }: Props) {
               displayName={lists.loraNames[entry.loraName] ?? entry.loraName}
               onOpenPicker={() => setPickerIndex(i)}
               onWeightChange={(w) => updateWeight(i, w)}
+              onHighChange={(v) => updateHigh(i, v)}
+              onLowChange={(v) => updateLow(i, v)}
               onRemove={() => remove(i)}
             />
           ))}

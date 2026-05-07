@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { parseCivitaiInput } from '@/lib/civitaiUrl';
+import { safeRandomId } from '@/lib/safeRandomId';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,9 @@ interface PhaseEvent {
   triggerWords?: string;
   message?: string;
   orphanPath?: string;
+  /** Present for Wan 2.2 LoRAs — the auto-detected expert-scope flags. */
+  appliesToHigh?: boolean;
+  appliesToLow?: boolean;
 }
 
 interface ParsedIds {
@@ -124,7 +128,7 @@ function formatBytes(bytes: number): string {
 
 function createBlankRow(): BatchRow {
   return {
-    clientId: crypto.randomUUID(),
+    clientId: safeRandomId(),
     type: 'lora',
     urlInput: '',
     parsedIds: null,
@@ -148,6 +152,15 @@ function applyUrlParse(value: string): { urlInput: string; parsedIds: ParsedIds 
   const result = parseCivitaiInput(value);
   if ('error' in result) return { urlInput: value, parsedIds: null, parseError: result.error };
   return { urlInput: value.trim(), parsedIds: result, parseError: null };
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function summarizeLoraScope(high: boolean, low: boolean): string {
+  if (high && low) return 'Scope: both transformers (verify — may want high or low only)';
+  if (high) return 'Scope: high noise transformer';
+  if (low) return 'Scope: low noise transformer';
+  return 'Scope: neither transformer (disabled)';
 }
 
 // ── Phase rendering ───────────────────────────────────────────────────────────
@@ -197,6 +210,9 @@ function PhaseLine({ event, freezeSpinner = false }: { event: PhaseEvent; freeze
   else if (event.phase === 'done') {
     const parts: string[] = [`Added: ${event.friendlyName || 'model'}`];
     if (event.baseModel) parts.push(`Base: ${event.baseModel}`);
+    if (event.baseModel === 'Wan 2.2' && event.appliesToHigh !== undefined && event.appliesToLow !== undefined) {
+      parts.push(summarizeLoraScope(event.appliesToHigh, event.appliesToLow));
+    }
     if (event.triggerWords) parts.push(`Trigger: ${event.triggerWords}`);
     label = parts.join(' | ');
     icon = 'success';

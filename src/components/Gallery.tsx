@@ -49,6 +49,8 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
   const loadingRef = useRef(false);
   const favoritesOnlyRef = useRef(false);
   const mediaFilterRef = useRef<MediaFilter>('all');
+  // Tracks the in-flight fetch so it can be aborted on filter/token reset
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   cursorRef.current = cursor;
   hasMoreRef.current = hasMore;
@@ -69,6 +71,8 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
     if (loadingRef.current || !hasMoreRef.current) return;
     setLoading(true);
     loadingRef.current = true;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
       const params = new URLSearchParams();
       if (cursorRef.current) params.set('cursor', cursorRef.current);
@@ -82,19 +86,24 @@ export default function Gallery({ refreshToken, onRemix, onNavigateToProject }: 
         params.set('mediaType', 'video');
         params.set('isStitched', 'true');
       }
-      const res = await fetch(`/api/gallery?${params}`);
+      const res = await fetch(`/api/gallery?${params}`, { signal: controller.signal });
       const data = await res.json() as GalleryResponse;
       setItems((prev) => [...prev, ...data.records]);
       setCursor(data.nextCursor);
       setHasMore(data.nextCursor !== null);
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return;
     } finally {
       setLoading(false);
       loadingRef.current = false;
     }
   }, []);
 
-  // Reset and reload from scratch when refreshToken, favoritesOnly, or mediaFilter changes
+  // Reset and reload from scratch when refreshToken, favoritesOnly, or mediaFilter changes.
+  // Abort any in-flight fetch first to prevent stale results from landing after the reset.
   useEffect(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setItems([]);
     setCursor(null);
     setHasMore(true);

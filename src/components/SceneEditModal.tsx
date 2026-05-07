@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { StoryboardScene, Storyboard } from '@/types';
+import { safeRandomId } from '@/lib/safeRandomId';
 
 interface Props {
   /** null = create/insert mode; non-null = edit existing scene */
@@ -72,7 +73,7 @@ export default function SceneEditModal({
     if (isInsert) {
       const pos = insertAtPosition ?? storyboard.scenes.length;
       const newScene: StoryboardScene = {
-        id: crypto.randomUUID(),
+        id: safeRandomId(),
         position: pos,
         description: descTrimmed,
         positivePrompt: promptTrimmed,
