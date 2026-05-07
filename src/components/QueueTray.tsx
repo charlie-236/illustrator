@@ -141,7 +141,7 @@ function JobRow({
 }) {
   // Elapsed counts from execution start (runningSince), not submission time.
   // For queued jobs we don't display elapsed at all.
-  const [elapsed, setElapsed] = useState(() =>
+  const [liveElapsed, setLiveElapsed] = useState(() =>
     Math.floor((Date.now() - (job.runningSince ?? job.startedAt)) / 1000),
   );
   const [aborting, setAborting] = useState(false);
@@ -150,7 +150,7 @@ function JobRow({
     if (job.status === 'done' || job.status === 'error' || job.status === 'queued') return;
     const base = job.runningSince ?? job.startedAt;
     const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - base) / 1000));
+      setLiveElapsed(Math.floor((Date.now() - base) / 1000));
     }, 1000);
     return () => clearInterval(id);
   }, [job.runningSince, job.startedAt, job.status]);
@@ -158,9 +158,14 @@ function JobRow({
   // Snap elapsed to 0 when the job transitions from queued → running.
   useEffect(() => {
     if (job.status === 'running' && job.runningSince !== null) {
-      setElapsed(Math.floor((Date.now() - job.runningSince) / 1000));
+      setLiveElapsed(Math.floor((Date.now() - job.runningSince) / 1000));
     }
   }, [job.status, job.runningSince]);
+
+  // Frozen elapsed for terminal states: use terminalAt for accuracy; fall back to last live value.
+  const elapsed = (job.status === 'done' || job.status === 'error')
+    ? Math.floor(((job.terminalAt ?? Date.now()) - (job.runningSince ?? job.startedAt)) / 1000)
+    : liveElapsed;
 
   const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'completing';
 

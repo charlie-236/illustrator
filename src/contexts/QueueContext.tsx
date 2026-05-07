@@ -22,6 +22,8 @@ export interface ActiveJob {
   startedAt: number;
   /** Unix ms when ComfyUI began executing this job. Null while in ComfyUI's queue. */
   runningSince: number | null;
+  /** Unix ms when the job entered a terminal state (done/error). Used to freeze the elapsed display. */
+  terminalAt?: number;
   progress: { current: number; total: number } | null;
   status: 'queued' | 'running' | 'completing' | 'done' | 'error';
   errorMessage?: string;
@@ -113,7 +115,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
         ...state,
         jobs: state.jobs.map((j) =>
           j.promptId === action.promptId
-            ? { ...j, status: 'done', generationId: action.generationId, progress: null }
+            ? { ...j, status: 'done', generationId: action.generationId, progress: null, terminalAt: Date.now() }
             : j,
         ),
         toasts: [...state.toasts, toast],
@@ -128,7 +130,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
         ...state,
         jobs: state.jobs.map((j) =>
           j.promptId === action.promptId
-            ? { ...j, status: 'error', errorMessage: action.errorMessage }
+            ? { ...j, status: 'error', errorMessage: action.errorMessage, terminalAt: Date.now() }
             : j,
         ),
       };
@@ -215,6 +217,14 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   // ── auto-dismiss completed/errored jobs after 60 s ────────────────────────
   const autoDismissRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  // Unmount-only cleanup — keeps the scheduling effect from cancelling active
+  // timers every time state.jobs changes (e.g., on each progress update).
+  useEffect(() => {
+    return () => {
+      for (const timer of autoDismissRef.current.values()) clearTimeout(timer);
+    };
+  }, []);
+
   useEffect(() => {
     // Schedule auto-dismiss for newly-terminal jobs (done or error)
     for (const job of state.jobs) {
@@ -234,10 +244,6 @@ export function QueueProvider({ children }: { children: ReactNode }) {
         autoDismissRef.current.delete(promptId);
       }
     }
-
-    return () => {
-      for (const timer of autoDismissRef.current.values()) clearTimeout(timer);
-    };
   }, [state.jobs]);
 
   // ── poll /api/jobs/active while any jobs are active (queued/running/completing)
