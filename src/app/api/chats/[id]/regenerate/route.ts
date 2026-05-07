@@ -4,6 +4,7 @@ import { DIRECTOR_MODE_SYSTEM_PROMPT } from '@/lib/writerSystemPrompt';
 import { resolveSamplingParams, samplingParamsForAphrodite } from '@/lib/writerSampling';
 import { parseAphroditeStream } from '@/lib/aphroditeStream';
 import { resolveActivePath } from '@/lib/chatBranches';
+import { stripStopTokens } from '@/lib/stripStopTokens';
 import type { SamplingParams, MessageRecord } from '@/types';
 
 export const runtime = 'nodejs';
@@ -135,7 +136,7 @@ export async function POST(
           data: { activeBranchesJson: updatedBranches },
         });
 
-        send('assistant_message_started', { id: newAssistantMsgId });
+        send('assistant_message_started', { id: newAssistantMsgId, parentMessageId: target.parentMessageId, branchIndex: newBranchIndex });
 
         const endpoint = process.env.WRITER_LLM_ENDPOINT;
         const model = process.env.WRITER_LLM_MODEL;
@@ -183,6 +184,7 @@ export async function POST(
           req.signal.removeEventListener('abort', onAbort);
         }
 
+        accumulated = stripStopTokens(accumulated);
         await prisma.message.update({
           where: { id: newAssistantMsgId },
           data: { content: accumulated },
@@ -220,7 +222,7 @@ export async function POST(
         const isAbort = err instanceof Error && err.name === 'AbortError';
         if (newAssistantMsgId) {
           await prisma.message
-            .update({ where: { id: newAssistantMsgId }, data: { content: accumulated } })
+            .update({ where: { id: newAssistantMsgId }, data: { content: stripStopTokens(accumulated) } })
             .catch(() => {});
         }
         if (!cancelled) {

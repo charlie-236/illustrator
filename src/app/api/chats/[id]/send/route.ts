@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { DIRECTOR_MODE_SYSTEM_PROMPT } from '@/lib/writerSystemPrompt';
 import { resolveSamplingParams, samplingParamsForAphrodite } from '@/lib/writerSampling';
 import { parseAphroditeStream } from '@/lib/aphroditeStream';
+import { stripStopTokens } from '@/lib/stripStopTokens';
 import type { SamplingParams } from '@/types';
 
 export const runtime = 'nodejs';
@@ -107,7 +108,7 @@ export async function POST(
           },
         });
         assistantMsgId = assistantMsg.id;
-        send('assistant_message_started', { id: assistantMsg.id });
+        send('assistant_message_started', { id: assistantMsg.id, parentMessageId: userMsg.id, branchIndex: 0 });
 
         const endpoint = process.env.WRITER_LLM_ENDPOINT;
         const model = process.env.WRITER_LLM_MODEL;
@@ -161,7 +162,8 @@ export async function POST(
           req.signal.removeEventListener('abort', onAbort);
         }
 
-        // Persist final content
+        // Strip stop tokens and persist final content
+        accumulated = stripStopTokens(accumulated);
         await prisma.message.update({
           where: { id: assistantMsgId },
           data: { content: accumulated },
@@ -202,10 +204,10 @@ export async function POST(
       } catch (err) {
         const isAbort = err instanceof Error && err.name === 'AbortError';
 
-        // Save partial content
+        // Save partial content (strip stop tokens defensively)
         if (assistantMsgId) {
           await prisma.message
-            .update({ where: { id: assistantMsgId }, data: { content: accumulated } })
+            .update({ where: { id: assistantMsgId }, data: { content: stripStopTokens(accumulated) } })
             .catch(() => {});
         }
 

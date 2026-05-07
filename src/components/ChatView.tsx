@@ -60,7 +60,7 @@ function SliderRow({
 
 interface StreamCallbacks {
   onUserMessageSaved?: (id: string) => void;
-  onAssistantMessageStarted: (id: string) => void;
+  onAssistantMessageStarted: (id: string, parentMessageId: string | null, branchIndex: number) => void;
   onToken: (text: string) => void;
   onDone: (id: string, finalContent: string, tokenCount: number) => void;
   onError: (message: string, reason: string) => void;
@@ -73,7 +73,6 @@ async function consumeChatStream(
   const reader = responseBody.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  // Mutable locals captured once at the top of the async frame
   let assistantMsgId: string | null = null;
   let accumulatedContent = '';
 
@@ -105,7 +104,11 @@ async function consumeChatStream(
           break;
         case 'assistant_message_started':
           assistantMsgId = data.id as string;
-          callbacks.onAssistantMessageStarted(assistantMsgId);
+          callbacks.onAssistantMessageStarted(
+            assistantMsgId,
+            (data.parentMessageId as string | null) ?? null,
+            (data.branchIndex as number) ?? 0,
+          );
           break;
         case 'token':
           accumulatedContent += data.text as string;
@@ -135,6 +138,7 @@ export default function ChatView({ chatId, onBack }: Props) {
 
   const [composerText, setComposerText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isRequestInFlight, setIsRequestInFlight] = useState(false);
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const accumulatorRef = useRef('');
@@ -251,7 +255,7 @@ export default function ChatView({ chatId, onBack }: Props) {
   }
 
   function handleComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isSending && composerText.trim()) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isActive && composerText.trim()) {
       e.preventDefault();
       handleSend();
     }
@@ -259,11 +263,14 @@ export default function ChatView({ chatId, onBack }: Props) {
 
   // ── Streaming helpers ─────────────────────────────────────────────────────
 
+  const isActive = isSending || isRequestInFlight;
+
   function beginStream(controller: AbortController) {
     abortControllerRef.current = controller;
     accumulatorRef.current = '';
     setStreamingContent('');
     setIsSending(true);
+    setIsRequestInFlight(true);
   }
 
   function onToken(text: string) {
@@ -276,7 +283,7 @@ export default function ChatView({ chatId, onBack }: Props) {
     }
   }
 
-  function onStreamDone(msgId: string, finalContent: string, tokenCount: number) {
+  function onStreamDone(msgId: string, finalContent: string, newTokenCount: number) {
     if (renderTimerRef.current) {
       clearTimeout(renderTimerRef.current);
       renderTimerRef.current = null;
@@ -287,7 +294,7 @@ export default function ChatView({ chatId, onBack }: Props) {
     setStreamingMsgId(null);
     setStreamingContent('');
     accumulatorRef.current = '';
-    setTokenCount(tokenCount);
+    setTokenCount(newTokenCount);
   }
 
   function onStreamError() {
@@ -308,16 +315,16 @@ export default function ChatView({ chatId, onBack }: Props) {
 
   function endStream() {
     setIsSending(false);
+    setIsRequestInFlight(false);
     abortControllerRef.current = null;
   }
 
   // ── Send new message ──────────────────────────────────────────────────────
 
   async function handleSend() {
-    if (!composerText.trim() || isSending) return;
+    if (!composerText.trim() || isActive) return;
 
     const msgText = composerText.trim();
-    // Use the last message in the active path as parent
     const lastMsg = activePath[activePath.length - 1] ?? null;
     const parentMessageId = lastMsg?.id ?? null;
 
@@ -351,14 +358,14 @@ export default function ChatView({ chatId, onBack }: Props) {
           };
           setAllMessages((prev) => [...prev, userMsg]);
         },
-        onAssistantMessageStarted: (id) => {
+        onAssistantMessageStarted: (id, parentMsgId, branchIndex) => {
           const assMsg: MessageRecord = {
             id,
             chatId,
             role: 'assistant',
             content: '',
-            parentMessageId: null,
-            branchIndex: 0,
+            parentMessageId: parentMsgId,
+            branchIndex,
             createdAt: new Date().toISOString(),
           };
           setAllMessages((prev) => [...prev, assMsg]);
@@ -373,7 +380,6 @@ export default function ChatView({ chatId, onBack }: Props) {
       onStreamError();
     } finally {
       endStream();
-      // Refetch to sync activeBranchesJson and any server-side changes
       await loadChat();
     }
   }
@@ -381,7 +387,9 @@ export default function ChatView({ chatId, onBack }: Props) {
   // ── Regenerate assistant message ──────────────────────────────────────────
 
   async function handleRegenerate(messageId: string) {
-    if (isSending) return;
+    if (isActive) return;
+
+    const targetMsg = allMessages.find((m) => m.id === messageId);
     const controller = new AbortController();
     beginStream(controller);
 
@@ -396,14 +404,31 @@ export default function ChatView({ chatId, onBack }: Props) {
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
       await consumeChatStream(res.body, {
-        onAssistantMessageStarted: (id) => {
-          // Will be added to allMessages after refetch; for now just track streaming
+        onAssistantMessageStarted: (id, parentMsgId, branchIndex) => {
+          const newMsg: MessageRecord = {
+            id,
+            chatId,
+            role: 'assistant',
+            content: '',
+            parentMessageId: parentMsgId ?? targetMsg?.parentMessageId ?? null,
+            branchIndex,
+            createdAt: new Date().toISOString(),
+          };
+          setAllMessages((prev) => [...prev, newMsg]);
+          // Switch active branch to the new one so it appears in the active path
+          if (parentMsgId !== null) {
+            setChat((c) => {
+              if (!c) return c;
+              const existing = (c.activeBranchesJson as Record<string, number> | null) ?? {};
+              return { ...c, activeBranchesJson: { ...existing, [parentMsgId]: branchIndex } };
+            });
+          }
           setStreamingMsgId(id);
           setAutoScroll(true);
         },
         onToken,
-        onDone: (id, finalContent, tokenCount) => {
-          onStreamDone(id, finalContent, tokenCount);
+        onDone: (id, finalContent, newTokenCount) => {
+          onStreamDone(id, finalContent, newTokenCount);
         },
         onError: onStreamError,
       });
@@ -418,10 +443,30 @@ export default function ChatView({ chatId, onBack }: Props) {
   // ── Edit message ──────────────────────────────────────────────────────────
 
   async function handleEditSave(messageId: string, content: string, andContinue: boolean) {
-    if (isSending) return;
+    if (isActive) return;
 
-    if (andContinue) {
-      // SSE streaming response
+    const targetMsg = allMessages.find((m) => m.id === messageId);
+    const isUserMessage = targetMsg?.role === 'user';
+
+    if (andContinue || isUserMessage) {
+      // For user message edits: optimistically remove descendants + update content
+      if (isUserMessage) {
+        setAllMessages((prev) => {
+          const descendantIds = new Set<string>();
+          const queue = [messageId];
+          while (queue.length > 0) {
+            const curr = queue.shift()!;
+            prev.filter((m) => m.parentMessageId === curr).forEach((c) => {
+              descendantIds.add(c.id);
+              queue.push(c.id);
+            });
+          }
+          return prev
+            .filter((m) => !descendantIds.has(m.id))
+            .map((m) => (m.id === messageId ? { ...m, content } : m));
+        });
+      }
+
       const controller = new AbortController();
       beginStream(controller);
 
@@ -429,21 +474,37 @@ export default function ChatView({ chatId, onBack }: Props) {
         const res = await fetch(`/api/chats/${chatId}/messages/${messageId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, andContinue: true }),
+          body: JSON.stringify({ content, ...(andContinue ? { andContinue: true } : {}) }),
           signal: controller.signal,
         });
 
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
         await consumeChatStream(res.body, {
-          onAssistantMessageStarted: (id) => {
+          onAssistantMessageStarted: (id, parentMsgId, branchIndex) => {
+            const newMsg: MessageRecord = {
+              id,
+              chatId,
+              role: 'assistant',
+              content: '',
+              parentMessageId: parentMsgId,
+              branchIndex,
+              createdAt: new Date().toISOString(),
+            };
+            setAllMessages((prev) => [...prev, newMsg]);
+            // For assistant edit-and-continue: switch active branch to the new one
+            if (!isUserMessage && parentMsgId !== null) {
+              setChat((c) => {
+                if (!c) return c;
+                const existing = (c.activeBranchesJson as Record<string, number> | null) ?? {};
+                return { ...c, activeBranchesJson: { ...existing, [parentMsgId]: branchIndex } };
+              });
+            }
             setStreamingMsgId(id);
             setAutoScroll(true);
           },
           onToken,
-          onDone: (id, finalContent, tokenCount) => {
-            onStreamDone(id, finalContent, tokenCount);
-          },
+          onDone: onStreamDone,
           onError: onStreamError,
         });
       } catch {
@@ -453,7 +514,7 @@ export default function ChatView({ chatId, onBack }: Props) {
         await loadChat();
       }
     } else {
-      // JSON response (plain edit or user message hard-truncate)
+      // JSON response (assistant plain save — no continuation)
       try {
         const res = await fetch(`/api/chats/${chatId}/messages/${messageId}`, {
           method: 'PATCH',
@@ -469,10 +530,28 @@ export default function ChatView({ chatId, onBack }: Props) {
     }
   }
 
+  // ── Delete assistant message ──────────────────────────────────────────────
+
+  async function handleDeleteMessage(messageId: string) {
+    if (isActive) return;
+    try {
+      const res = await fetch(`/api/chats/${chatId}/messages/${messageId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        const d = (await res.json()) as { chat: ChatRecord };
+        setChat(d.chat);
+        setAllMessages(d.chat.messages);
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
   // ── Branch switch ─────────────────────────────────────────────────────────
 
   async function handleBranchSwitch(parentMessageId: string, branchIndex: number) {
-    if (isSending) return;
+    if (isActive) return;
     try {
       const res = await fetch(`/api/chats/${chatId}/branch`, {
         method: 'POST',
@@ -483,7 +562,6 @@ export default function ChatView({ chatId, onBack }: Props) {
         const d = (await res.json()) as { chat: ChatRecord };
         setChat(d.chat);
         setAllMessages(d.chat.messages);
-        // Don't auto-scroll on branch switch
       }
     } catch {
       // Non-fatal
@@ -644,10 +722,10 @@ export default function ChatView({ chatId, onBack }: Props) {
       <div
         ref={listRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 pt-6 pb-4"
+        className="flex-1 overflow-y-auto pt-6 pb-4"
       >
-        <div className="chat-message-list">
-          {activePath.length === 0 && !isSending && (
+        <div className="chat-message-list px-4">
+          {activePath.length === 0 && !isActive && (
             <div className="text-center text-zinc-600 text-sm mt-12">
               <p>Direct the story. The LLM writes the prose.</p>
               <p className="mt-1 text-xs">Type an instruction and tap Send.</p>
@@ -664,7 +742,8 @@ export default function ChatView({ chatId, onBack }: Props) {
               onBranchSwitch={handleBranchSwitch}
               onRegenerate={handleRegenerate}
               onEditSave={handleEditSave}
-              isActionDisabled={isSending}
+              onDelete={handleDeleteMessage}
+              isActionDisabled={isActive}
             />
           ))}
 
@@ -673,30 +752,32 @@ export default function ChatView({ chatId, onBack }: Props) {
       </div>
 
       {/* Composer */}
-      <div className="sticky bottom-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 px-4 py-3">
-        <div className="flex gap-3 items-end">
-          <textarea
-            value={composerText}
-            onChange={handleComposerChange}
-            onKeyDown={handleComposerKeyDown}
-            disabled={isSending}
-            placeholder="What happens next?"
-            rows={2}
-            className="flex-1 input-base resize-none max-h-48 min-h-[56px] py-3 disabled:opacity-60"
-          />
-          <button
-            onClick={isSending ? handleStop : handleSend}
-            disabled={!isSending && !composerText.trim()}
-            className={`min-h-12 min-w-12 rounded-xl font-medium text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              isSending
-                ? 'bg-red-600 hover:bg-red-500 text-white px-4'
-                : 'bg-violet-600 hover:bg-violet-500 text-white px-4'
-            }`}
-          >
-            {isSending ? '■' : 'Send'}
-          </button>
+      <div className="sticky bottom-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 py-3">
+        <div className="chat-message-list px-4">
+          <div className="flex gap-3 items-end">
+            <textarea
+              value={composerText}
+              onChange={handleComposerChange}
+              onKeyDown={handleComposerKeyDown}
+              disabled={isActive}
+              placeholder="What happens next?"
+              rows={2}
+              className="flex-1 input-base resize-none max-h-48 min-h-[56px] py-3 disabled:opacity-60"
+            />
+            <button
+              onClick={isActive ? handleStop : handleSend}
+              disabled={!isActive && !composerText.trim()}
+              className={`min-h-12 min-w-12 rounded-xl font-medium text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                isActive
+                  ? 'bg-red-600 hover:bg-red-500 text-white px-4'
+                  : 'bg-violet-600 hover:bg-violet-500 text-white px-4'
+              }`}
+            >
+              {isActive ? '■' : 'Send'}
+            </button>
+          </div>
+          <p className="text-xs text-zinc-600 mt-1.5 text-right">Ctrl+Enter to send</p>
         </div>
-        <p className="text-xs text-zinc-600 mt-1.5 text-right">Ctrl+Enter to send</p>
       </div>
 
       {/* Settings sheet */}

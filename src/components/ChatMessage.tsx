@@ -13,6 +13,7 @@ interface Props {
   onBranchSwitch: (parentMessageId: string, branchIndex: number) => void;
   onRegenerate: (messageId: string) => void;
   onEditSave: (messageId: string, content: string, andContinue: boolean) => void;
+  onDelete?: (messageId: string) => void;
   isActionDisabled?: boolean; // true while streaming — disables regenerate/edit
 }
 
@@ -22,7 +23,7 @@ function trimToLastCompleteSentence(text: string): string {
   // Match everything up to the last sentence-ending punctuation + optional closing chars.
   // \s*\S*$ matches a single trailing word-fragment; if more than one word follows the
   // last terminator the regex fails and we fall back to showing full content.
-  const match = text.match(/^([\s\S]*[.!?…][\s”“”')]*)\s*\S*$/);
+  const match = text.match(/^([\s\S]*[.!?…][\s"""')]*)\s*\S*$/);
   if (match) return match[1];
   return '';
 }
@@ -102,7 +103,6 @@ function applyDialogueToChildren(children: React.ReactNode): React.ReactNode {
 }
 
 const MARKDOWN_COMPONENTS = {
-  // Paragraph spacing handled by .chat-prose p CSS; keep leading-relaxed for fallback contexts
   p: ({ children }: { children?: React.ReactNode }) => (
     <p className="leading-relaxed">{applyDialogueToChildren(children)}</p>
   ),
@@ -282,11 +282,11 @@ export default function ChatMessage({
   onBranchSwitch,
   onRegenerate,
   onEditSave,
+  onDelete,
   isActionDisabled,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
-  const [confirmingUserEdit, setConfirmingUserEdit] = useState(false);
 
   // For assistant messages, apply streaming trim during active streaming
   const rawContent = isStreaming ? (streamingContent ?? '') : message.content;
@@ -311,22 +311,15 @@ export default function ChatMessage({
   function startEdit() {
     setEditValue(message.content);
     setEditing(true);
-    setConfirmingUserEdit(false);
   }
 
   function cancelEdit() {
     setEditing(false);
-    setConfirmingUserEdit(false);
   }
 
   function handleUserSave() {
     if (!editValue.trim()) return;
-    if (!confirmingUserEdit) {
-      setConfirmingUserEdit(true);
-      return;
-    }
     setEditing(false);
-    setConfirmingUserEdit(false);
     onEditSave(message.id, editValue.trim(), false);
   }
 
@@ -334,6 +327,12 @@ export default function ChatMessage({
     if (!editValue.trim()) return;
     setEditing(false);
     onEditSave(message.id, editValue.trim(), andContinue);
+  }
+
+  function handleDeleteClick() {
+    if (confirm('Delete this response? Any messages after it will also be deleted.')) {
+      onDelete?.(message.id);
+    }
   }
 
   // ── User message ──────────────────────────────────────────────────────────
@@ -346,18 +345,13 @@ export default function ChatMessage({
           {editing ? (
             <div className="bg-zinc-800/60 rounded-2xl px-4 py-3">
               <AutoGrowTextarea
-                className="input-base resize-none w-full"
+                className="prose-textarea input-base resize-none w-full"
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
-                minRows={4}
-                maxRows={20}
+                minRows={8}
+                maxRows={40}
                 autoFocus
               />
-              {confirmingUserEdit && (
-                <p className="text-xs text-amber-400 mt-2 mb-1">
-                  Edit this message? Everything after it will be removed.
-                </p>
-              )}
               <div className="flex gap-2 mt-2 justify-end">
                 <button
                   onClick={cancelEdit}
@@ -367,13 +361,9 @@ export default function ChatMessage({
                 </button>
                 <button
                   onClick={handleUserSave}
-                  className={`text-xs min-h-9 px-3 rounded-lg font-medium transition-colors ${
-                    confirmingUserEdit
-                      ? 'bg-red-600 hover:bg-red-500 text-white'
-                      : 'bg-violet-600 hover:bg-violet-500 text-white'
-                  }`}
+                  className="text-xs min-h-9 px-3 rounded-lg font-medium transition-colors bg-violet-600 hover:bg-violet-500 text-white"
                 >
-                  {confirmingUserEdit ? 'Confirm edit' : 'Save'}
+                  Save
                 </button>
               </div>
             </div>
@@ -385,7 +375,9 @@ export default function ChatMessage({
                   <button
                     onClick={startEdit}
                     aria-label="Edit message"
-                    className="text-xs text-zinc-600 hover:text-zinc-400 min-h-9 min-w-9 flex items-center justify-center rounded-lg hover:bg-zinc-700 transition-colors px-2"
+                    className="min-h-12 min-w-12 flex items-center justify-center rounded-lg
+                               bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600
+                               text-zinc-100 transition-colors"
                   >
                     ✏
                   </button>
@@ -416,7 +408,7 @@ export default function ChatMessage({
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             minRows={12}
-            maxRows={40}
+            maxRows={50}
             autoFocus
           />
           <div className="flex gap-2 mt-3 flex-wrap">
@@ -457,22 +449,36 @@ export default function ChatMessage({
           </div>
 
           {!isStreaming && !isActionDisabled && (
-            <div className="flex gap-1 mt-2">
+            <div className="flex items-center gap-2 mt-3" role="group" aria-label="Message actions">
               <button
                 onClick={startEdit}
                 aria-label="Edit message"
                 title="Edit"
-                className="text-xs text-zinc-600 hover:text-zinc-400 min-h-9 min-w-9 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors px-2"
+                className="min-h-12 min-w-12 flex items-center justify-center rounded-lg
+                           bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600
+                           text-zinc-100 transition-colors"
               >
                 ✏
               </button>
               <button
                 onClick={() => onRegenerate(message.id)}
-                aria-label="Regenerate"
+                aria-label="Regenerate response"
                 title="Regenerate"
-                className="text-xs text-zinc-600 hover:text-zinc-400 min-h-9 min-w-9 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors px-2"
+                className="min-h-12 min-w-12 flex items-center justify-center rounded-lg
+                           bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600
+                           text-zinc-100 transition-colors"
               >
                 ↺
+              </button>
+              <button
+                onClick={handleDeleteClick}
+                aria-label="Delete response"
+                title="Delete"
+                className="min-h-12 min-w-12 flex items-center justify-center rounded-lg
+                           bg-zinc-800 hover:bg-zinc-700 active:bg-red-900/50
+                           text-zinc-100 hover:text-red-400 transition-colors"
+              >
+                🗑
               </button>
             </div>
           )}
