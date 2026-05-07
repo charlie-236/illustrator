@@ -1341,6 +1341,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const [batchKeyframeScenes, setBatchKeyframeScenes] = useState<Set<string>>(new Set());
   const [canonicalKeyframePickerScene, setCanonicalKeyframePickerScene] = useState<StoryboardScene | null>(null);
   const [showBatchKeyframeConfirm, setShowBatchKeyframeConfirm] = useState(false);
+  const [showRegenerateAllConfirm, setShowRegenerateAllConfirm] = useState(false);
 
   const { data: modelLists } = useModelLists();
 
@@ -1530,12 +1531,26 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         // Handle keyframe in-flight completions
         const keyframeToRemove: string[] = [];
         const keyframeStaleIds: string[] = [];
+        // Accumulate per-storyboard canonical updates (batched to handle multiple completions)
+        const storyboardCanonicalUpdates = new Map<string, Storyboard>();
+        const freshStoryboards: Storyboard[] = (data.project?.storyboards ?? []) as Storyboard[];
         for (const [sceneId, entry] of currentKeyframeInFlight.entries()) {
           const newKeyframe = freshClips.find(
             (c) => c.sceneId === sceneId && c.mediaType === 'image' && new Date(c.createdAt).getTime() > entry.startedAt,
           );
           if (newKeyframe) {
             keyframeToRemove.push(sceneId);
+            // Auto-promote to canonical: find the storyboard containing this scene
+            for (const sb of freshStoryboards) {
+              const targetScene = sb.scenes.find((s) => s.id === sceneId);
+              if (!targetScene) continue;
+              const base = storyboardCanonicalUpdates.get(sb.id) ?? sb;
+              const updatedScenes = base.scenes.map((s) =>
+                s.id === sceneId ? { ...s, canonicalKeyframeId: newKeyframe.id } : s,
+              );
+              storyboardCanonicalUpdates.set(sb.id, { ...base, scenes: updatedScenes });
+              break;
+            }
           } else if (now - entry.startedAt > STALE_INFLIGHT_MS) {
             keyframeToRemove.push(sceneId);
             keyframeStaleIds.push(sceneId);
@@ -1557,6 +1572,16 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         }
         if (keyframeStaleIds.length > 0) {
           setKeyframeError({ sceneId: keyframeStaleIds[0], message: 'Keyframe generation appears to have timed out' });
+        }
+        // Fire canonical auto-promote PUTs (fire-and-forget; failure just means manual re-promote needed)
+        for (const [sbId, updatedSb] of storyboardCanonicalUpdates) {
+          void fetch(`/api/storyboards/${sbId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ storyboard: updatedSb }),
+          }).then((res) => {
+            if (res.ok) setStoryboards((prev) => prev.map((s) => s.id === sbId ? updatedSb : s));
+          }).catch((err) => console.warn('Failed to auto-promote keyframe to canonical:', err));
         }
 
         // Refresh project data so scene cards update
@@ -1925,6 +1950,37 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     setBatchKeyframeScenes(new Set(scenesNeedingKeyframes.map((s) => s.id)));
 
     for (const scene of scenesNeedingKeyframes) {
+      void handleGenerateKeyframe(scene);
+    }
+  }
+
+  async function clearCanonicalKeyframeIfNeeded(deletedId: string) {
+    const affectedSb = storyboards.find((sb) => sb.scenes.some((s) => s.canonicalKeyframeId === deletedId));
+    if (!affectedSb) return;
+    const updatedScenes = affectedSb.scenes.map((s) =>
+      s.canonicalKeyframeId === deletedId ? { ...s, canonicalKeyframeId: null } : s,
+    );
+    const updatedSb = { ...affectedSb, scenes: updatedScenes };
+    setStoryboards((prev) => prev.map((s) => s.id === updatedSb.id ? updatedSb : s));
+    void fetch(`/api/storyboards/${affectedSb.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storyboard: updatedSb }),
+    }).catch((err) => console.warn('Failed to clear canonicalKeyframeId after delete:', err));
+  }
+
+  async function handleDeleteKeyframe(id: string) {
+    const res = await fetch(`/api/generation/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    setClips((prev) => prev.filter((c) => c.id !== id));
+    void clearCanonicalKeyframeIfNeeded(id);
+  }
+
+  async function handleRegenerateAllKeyframes() {
+    if (!storyboard) return;
+    setShowRegenerateAllConfirm(false);
+    setBatchKeyframeScenes(new Set(storyboard.scenes.map((s) => s.id)));
+    for (const scene of storyboard.scenes) {
       void handleGenerateKeyframe(scene);
     }
   }
@@ -2619,25 +2675,53 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
                   const scenesNeedingKeyframes = storyboard.scenes.filter(
                     (s) => resolveCanonicalKeyframeId(s, clips) === null,
                   );
+                  const anyCanonicalExists = storyboard.scenes.some(
+                    (s) => resolveCanonicalKeyframeId(s, clips) !== null,
+                  );
                   const batchTotal = batchKeyframeScenes.size;
                   const batchCompleted = Array.from(batchKeyframeScenes).filter(
                     (id) => !inFlightKeyframeScenes.has(id),
                   ).length;
                   const batchInProgress = batchTotal > 0 && batchCompleted < batchTotal;
 
-                  if (scenesNeedingKeyframes.length === 0 && !batchInProgress) return null;
+                  if (scenesNeedingKeyframes.length === 0 && !anyCanonicalExists && !batchInProgress) return null;
 
                   return (
-                    <button
-                      type="button"
-                      disabled={batchInProgress}
-                      onClick={() => setShowBatchKeyframeConfirm(true)}
-                      className="w-full min-h-12 rounded-xl bg-sky-600/15 hover:bg-sky-600/25 border border-sky-600/25 hover:border-sky-600/45 text-sky-300 text-sm font-medium transition-colors disabled:opacity-60 disabled:pointer-events-none flex items-center justify-center gap-2"
-                    >
-                      {batchInProgress
-                        ? `Generating keyframes (${batchCompleted}/${batchTotal})`
-                        : `🖼 Generate keyframes (${scenesNeedingKeyframes.length} needed)`}
-                    </button>
+                    <div className="space-y-2">
+                      {batchInProgress ? (
+                        <div className="w-full min-h-12 rounded-xl bg-sky-600/15 border border-sky-600/25 text-sky-300 text-sm font-medium flex items-center justify-center gap-2 px-4">
+                          <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Generating keyframes ({batchCompleted}/{batchTotal})
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          {scenesNeedingKeyframes.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowBatchKeyframeConfirm(true)}
+                              className="flex-1 min-h-12 rounded-xl bg-sky-600/15 hover:bg-sky-600/25 border border-sky-600/25 hover:border-sky-600/45 text-sky-300 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                              🖼 Generate keyframes ({scenesNeedingKeyframes.length} needed)
+                            </button>
+                          )}
+                          {anyCanonicalExists && (
+                            <button
+                              type="button"
+                              onClick={() => setShowRegenerateAllConfirm(true)}
+                              className={`${scenesNeedingKeyframes.length > 0 ? 'min-w-[9.5rem]' : 'flex-1'} min-h-12 px-3 rounded-xl bg-zinc-700/60 hover:bg-zinc-700 border border-zinc-600/40 text-zinc-300 text-sm font-medium transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap`}
+                            >
+                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              Regenerate all
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })()}
 
@@ -2873,6 +2957,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
             if (!res.ok) throw new Error('Delete failed');
             setClips((prev) => prev.filter((c) => c.id !== id));
             setStitchedExports((prev) => prev.filter((e) => e.id !== id));
+            void clearCanonicalKeyframeIfNeeded(id);
           }}
           onFavoriteToggle={async (id) => {
             const clip = clips.find((c) => c.id === id);
@@ -3104,7 +3189,37 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
           onGenerateKeyframe={(scene) => { void handleGenerateKeyframe(scene); }}
           onPromoteToVideo={(keyframe, scene) => { void handlePromoteKeyframeToVideo(keyframe, scene); }}
           onOpenModal={(id) => setModalIdx(getModalIndexById(id))}
+          onDeleteKeyframe={handleDeleteKeyframe}
         />
+      )}
+
+      {/* ── Regenerate all keyframes confirm dialog ── */}
+      {showRegenerateAllConfirm && storyboard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowRegenerateAllConfirm(false)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-base font-semibold text-zinc-100">Regenerate keyframes for all {storyboard.scenes.length} scenes?</h2>
+            <p className="text-sm text-zinc-400 leading-relaxed">
+              This will queue {storyboard.scenes.length} image generation{storyboard.scenes.length !== 1 ? 's' : ''} on the GPU.
+              Existing keyframes are preserved as non-canonical alternates — new ones become canonical automatically.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRegenerateAllConfirm(false)}
+                className="flex-1 min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleRegenerateAllKeyframes(); }}
+                className="flex-1 min-h-12 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold transition-colors"
+              >
+                Regenerate all
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Batch keyframe confirm dialog ── */}
