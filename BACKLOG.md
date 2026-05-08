@@ -90,5 +90,6 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see prompts/fix-chat-scroll-and-width.md
 - [x] Phase 7 followup — suggested next prompts (three pills above composer) — see prompts/phase-7-suggested-next-prompts.md
 - [x] Move WAN high/low to Models tab + diagnose disappearing suggestions — `batch/fix-wan-toggle-and-suggestions` (PR #87)
-- [~] Suggestions diagnostics + robust parser — `batch/fix-suggestions-robust-parsing` (PR #88)
+- [x] Suggestions diagnostics + robust parser — `batch/fix-suggestions-robust-parsing` (PR #88)
+- [ ] Suggestions: independent SUGGESTIONS_LLM_* env vars — see prompts/fix-suggestions-independent-endpoint.md
 - [~] Suggestions persistence — surface swallowed Prisma error + fix Json cast — `batch/fix-suggestions-persistence` (PR #89)
