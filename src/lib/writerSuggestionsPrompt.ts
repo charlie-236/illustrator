@@ -31,4 +31,20 @@ Rules:
 
 5. Build naturally from where the story currently is. If the last assistant message ended with the protagonist arriving somewhere, the suggestions should be plausible next-actions from that point. Don't introduce out-of-context elements.
 
-6. Output nothing outside the three [SUGGESTION N] blocks. No preamble. No commentary.`;
+6. Output nothing outside the three [SUGGESTION N] blocks. No preamble. No commentary.
+
+EXAMPLE OUTPUT (follow this format exactly):
+
+[SUGGESTION 1]
+LABEL: She runs from the bar
+PROMPT: She bolts toward the back exit, weaving through tables and patrons. Her heart pounds as she shoves through the door into the alley, the cold night air slamming into her. She doesn't look back.
+
+[SUGGESTION 2]
+LABEL: Cut to next morning
+PROMPT: Skip ahead to the next morning. She wakes in her own bed, the events of last night blurry. Sunlight streams through the curtains. She tries to piece together what happened after she left the bar.
+
+[SUGGESTION 3]
+LABEL: She confronts him directly
+PROMPT: She stands her ground and locks eyes with him across the room. Her voice steady but quiet, she demands to know why he was watching her. The bartender pauses mid-pour. The room falls silent.
+
+Begin your response with "[SUGGESTION 1]" — no preamble.`;
