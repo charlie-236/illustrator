@@ -7,26 +7,131 @@ import type { MessageRecord, Suggestion } from '@/types';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function parseSuggestions(text: string): Suggestion[] {
-  const blocks = text.split(/\[SUGGESTION \d+\]/i).filter((b) => b.trim().length > 0);
+function cleanLabel(s: string): string {
+  return s
+    .trim()
+    .replace(/^[\*\_\-\#\d\.\)\s]+/, '')
+    .replace(/[\*\_]+/g, '')
+    .replace(/^["'"“‘]|["'"”’]$/g, '')
+    .replace(/\.$/, '')
+    .slice(0, 80)
+    .trim();
+}
+
+function cleanPrompt(s: string): string {
+  return s
+    .trim()
+    .replace(/^[\*\_\-\s]+/, '')
+    .replace(/[\*\_]{2,}/g, '')
+    .slice(0, 1000)
+    .trim();
+}
+
+function parseStrictFormat(text: string): Suggestion[] {
+  const blocks = text.split(/\[SUGGESTION\s*\d+\]/i).filter((b) => b.trim().length > 0);
   const suggestions: Suggestion[] = [];
-
   for (const block of blocks) {
-    const labelMatch = block.match(/LABEL:\s*(.+?)(?:\n|$)/i);
-    const promptMatch = block.match(/PROMPT:\s*([\s\S]+?)(?=\n\[SUGGESTION|$)/i);
-
+    const labelMatch = block.match(/LABEL\s*:\s*(.+?)(?:\n|$)/i);
+    const promptMatch = block.match(/PROMPT\s*:\s*([\s\S]+?)(?=\n\[SUGGESTION|\nLABEL\s*:|$)/i);
     if (labelMatch && promptMatch) {
-      const label = labelMatch[1].trim();
-      const prompt = promptMatch[1].trim();
-      if (label.length > 0 && prompt.length > 0) {
-        suggestions.push({ label, prompt });
-      }
+      const label = cleanLabel(labelMatch[1]);
+      const prompt = cleanPrompt(promptMatch[1]);
+      if (label && prompt) suggestions.push({ label, prompt });
     }
-
     if (suggestions.length === 3) break;
   }
-
   return suggestions;
+}
+
+function parseNumberedFormat(text: string): Suggestion[] {
+  const blocks = text.split(/\n\s*\d+[\.\)]\s+/).filter((b) => b.trim().length > 0);
+  const startIdx = blocks[0]?.match(/LABEL\s*:/i) ? 0 : 1;
+  const suggestions: Suggestion[] = [];
+  for (let i = startIdx; i < blocks.length; i++) {
+    const block = blocks[i];
+    const labelMatch = block.match(/LABEL\s*:\s*(.+?)(?:\n|$)/i);
+    const promptMatch = block.match(/PROMPT\s*:\s*([\s\S]+?)(?=\n\s*\d+[\.\)]|\nLABEL\s*:|$)/i);
+    if (labelMatch && promptMatch) {
+      const label = cleanLabel(labelMatch[1]);
+      const prompt = cleanPrompt(promptMatch[1]);
+      if (label && prompt) suggestions.push({ label, prompt });
+    } else {
+      const lines = block.trim().split(/\n+/);
+      if (lines.length >= 2) {
+        const label = cleanLabel(lines[0]);
+        const prompt = cleanPrompt(lines.slice(1).join(' '));
+        if (label && prompt) suggestions.push({ label, prompt });
+      }
+    }
+    if (suggestions.length === 3) break;
+  }
+  return suggestions;
+}
+
+function parseMarkdownFormat(text: string): Suggestion[] {
+  const blocks = text
+    .split(/\n+(?:#{1,3}\s+|^\*\*)\s*(?:Suggestion\s*)?\d+[\.\):\*]*\s*\*?\*?/im)
+    .filter((b) => b.trim().length > 0);
+  const suggestions: Suggestion[] = [];
+  for (const block of blocks) {
+    const labelMatch = block.match(/LABEL\s*:\s*(.+?)(?:\n|$)/i) ?? block.match(/^(.+?)(?:\n|$)/);
+    const promptMatch = block.match(/PROMPT\s*:\s*([\s\S]+?)$/i);
+    if (labelMatch && promptMatch) {
+      const label = cleanLabel(labelMatch[1]);
+      const prompt = cleanPrompt(promptMatch[1]);
+      if (label && prompt) suggestions.push({ label, prompt });
+    } else if (labelMatch) {
+      const lines = block.trim().split(/\n+/);
+      if (lines.length >= 2) {
+        const label = cleanLabel(lines[0]);
+        const prompt = cleanPrompt(lines.slice(1).join(' '));
+        if (label && prompt) suggestions.push({ label, prompt });
+      }
+    }
+    if (suggestions.length === 3) break;
+  }
+  return suggestions;
+}
+
+function parseParagraphFallback(text: string): Suggestion[] {
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 20);
+  const suggestions: Suggestion[] = [];
+  for (const para of paragraphs) {
+    const cleaned = para.replace(/^[\d\.\-\*\s]+/, '').trim();
+    const sentenceMatch = cleaned.match(/^([^.!?\n]+[.!?])/);
+    if (sentenceMatch) {
+      const label = cleanLabel(sentenceMatch[1]);
+      const prompt = cleanPrompt(cleaned);
+      if (label && prompt) suggestions.push({ label, prompt });
+    } else {
+      const label = cleanLabel(cleaned.slice(0, 60));
+      const prompt = cleanPrompt(cleaned);
+      if (label && prompt) suggestions.push({ label, prompt });
+    }
+    if (suggestions.length === 3) break;
+  }
+  return suggestions;
+}
+
+function parseSuggestions(text: string): Suggestion[] {
+  if (!text || text.trim().length === 0) return [];
+
+  const strict = parseStrictFormat(text);
+  if (strict.length >= 2) return strict.slice(0, 3);
+
+  const numbered = parseNumberedFormat(text);
+  if (numbered.length >= 2) return numbered.slice(0, 3);
+
+  const markdown = parseMarkdownFormat(text);
+  if (markdown.length >= 2) return markdown.slice(0, 3);
+
+  const paragraphs = parseParagraphFallback(text);
+  if (paragraphs.length >= 2) return paragraphs.slice(0, 3);
+
+  return [];
 }
 
 export async function POST(
@@ -124,7 +229,15 @@ export async function POST(
       clearTimeout(timeoutId);
     }
 
+    console.log('[suggestions] msgId:', msgId);
+    console.log('[suggestions] raw LLM response (first 1000 chars):', responseText.slice(0, 1000));
+
     const suggestions = parseSuggestions(responseText);
+
+    console.log('[suggestions] parsed count:', suggestions.length);
+    if (suggestions.length === 0 && responseText.length > 0) {
+      console.log('[suggestions] parse FAILED — full response:', responseText);
+    }
 
     // Persist to DB
     await prisma.message.update({

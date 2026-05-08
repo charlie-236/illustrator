@@ -836,6 +836,10 @@ export default function ChatView({ chatId, onBack }: Props) {
                     {s.label}
                   </button>
                 ))
+              ) : pillsAvailable && pillsAvailable.length === 0 ? (
+                <p className="text-xs text-zinc-600 italic px-2 py-2">
+                  Couldn&apos;t generate suggestions for this turn.
+                </p>
               ) : null}
             </div>
           )}

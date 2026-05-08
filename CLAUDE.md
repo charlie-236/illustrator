@@ -1468,6 +1468,14 @@ Activates the branching shape schemaed (but dormant) in 7a. Three new capabiliti
 >
 > **Width.** Chat prose fills available viewport width minus side padding (`px-4` = 16px each side). No `max-width` on `.chat-prose` or `.chat-message-list`. Media queries: 17px on narrow phones, 19px default, 20px/line-height 1.7 on `≥1280px`.
 
+### Suggestion pills — robust parsing, diagnostics, and empty-state
+
+**Robust parsing.** `parseSuggestions` in `src/app/api/chats/[id]/messages/[msgId]/suggestions/route.ts` cascades through four format strategies: strict `[SUGGESTION N]` blocks, numbered lists, markdown headers, paragraph fallback. First strategy with ≥2 results wins. Designed for local LLMs that don't follow strict structured-output instructions reliably.
+
+**Diagnostic logging.** The server logs `[suggestions]` with the raw LLM response (first 1000 chars) and parsed count on every suggestions request. Useful for tuning the system prompt or troubleshooting parser misses. Permanent — no toggle.
+
+**Empty-state UI.** When parsing returns 0 suggestions (LLM didn't follow any parseable format), the UI shows "Couldn't generate suggestions for this turn" instead of silently rendering nothing. Distinguishes `pillsAvailable === null` (never fetched) from `pillsAvailable.length === 0` (fetched but unparseable).
+
 ---
 
 ## Not yet implemented (planned features)
