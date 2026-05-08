@@ -89,4 +89,5 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Cross-cutting bundle followups (queue auto-clear, WAN toggle, queue timer) — `batch/fix-cross-cutting-followups` (PR #84)
 - [x] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see prompts/fix-chat-scroll-and-width.md
 - [x] Phase 7 followup — suggested next prompts (three pills above composer) — see prompts/phase-7-suggested-next-prompts.md
-- [~] Move WAN high/low to Models tab + diagnose disappearing suggestions — `batch/fix-wan-toggle-and-suggestions` (PR #87)
+- [x] Move WAN high/low to Models tab + diagnose disappearing suggestions — `batch/fix-wan-toggle-and-suggestions` (PR #87)
+- [ ] Suggestions diagnostics + robust parser — see prompts/fix-suggestions-robust-parsing.md
