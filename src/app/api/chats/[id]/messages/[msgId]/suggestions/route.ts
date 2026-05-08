@@ -235,11 +235,6 @@ export async function POST(
 
     const parsed = parseSuggestions(responseText);
 
-    console.log('[suggestions] parsed count:', parsed.length);
-    if (parsed.length === 0 && responseText.length > 0) {
-      console.log('[suggestions] parse FAILED — full response:', responseText);
-    }
-
     // Sanitize before persistence — strip anything not in the Suggestion shape
     const sanitized = parsed
       .filter((s) => typeof s.label === 'string' && typeof s.prompt === 'string')
