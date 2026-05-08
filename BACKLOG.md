@@ -91,3 +91,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 7 followup — suggested next prompts (three pills above composer) — see prompts/phase-7-suggested-next-prompts.md
 - [x] Move WAN high/low to Models tab + diagnose disappearing suggestions — `batch/fix-wan-toggle-and-suggestions` (PR #87)
 - [ ] Suggestions diagnostics + robust parser — see prompts/fix-suggestions-robust-parsing.md
+- [ ] Suggestions persistence — surface swallowed Prisma error + fix Json cast — see prompts/fix-suggestions-persistence.md
