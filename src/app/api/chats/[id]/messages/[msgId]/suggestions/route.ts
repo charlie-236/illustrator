@@ -199,7 +199,7 @@ export async function POST(
     ];
 
     const abort = new AbortController();
-    const timeoutId = setTimeout(() => abort.abort(), 10000);
+    const timeoutId = setTimeout(() => abort.abort(), 120000);
 
     let responseText = '';
     try {
@@ -224,7 +224,8 @@ export async function POST(
         choices?: Array<{ message?: { content?: string } }>;
       };
       responseText = data.choices?.[0]?.message?.content ?? '';
-    } catch {
+    } catch (err) {
+      console.error('[suggestions] LLM call failed:', err instanceof Error ? err.message : String(err));
       return NextResponse.json({ suggestions: [] });
     } finally {
       clearTimeout(timeoutId);
@@ -247,11 +248,6 @@ export async function POST(
       parsed: parsed.length,
       sanitized: sanitized.length,
     });
-
-    console.log('[suggestions] parsed count:', suggestions.length);
-    if (suggestions.length === 0 && responseText.length > 0) {
-      console.log('[suggestions] parse FAILED — full response:', responseText);
-    }
 
     // Persist to DB
     try {
