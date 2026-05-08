@@ -167,10 +167,11 @@ export async function POST(
       return NextResponse.json({ suggestions: target.suggestionsJson as unknown as Suggestion[] });
     }
 
-    const endpoint = process.env.WRITER_LLM_ENDPOINT;
-    const model = process.env.WRITER_LLM_MODEL;
+    const endpoint = process.env.SUGGESTIONS_LLM_ENDPOINT;
+    const model = process.env.SUGGESTIONS_LLM_MODEL;
 
     if (!endpoint || !model) {
+      console.warn('[suggestions] SUGGESTIONS_LLM_ENDPOINT or SUGGESTIONS_LLM_MODEL not set; suggestions disabled');
       return NextResponse.json({ suggestions: [] });
     }
 
@@ -199,7 +200,8 @@ export async function POST(
     ];
 
     const abort = new AbortController();
-    const timeoutId = setTimeout(() => abort.abort(), 120000);
+    const timeoutMs = parseInt(process.env.SUGGESTIONS_TIMEOUT_MS ?? '30000', 10);
+    const timeoutId = setTimeout(() => abort.abort(), timeoutMs);
 
     let responseText = '';
     try {
@@ -211,8 +213,8 @@ export async function POST(
           model,
           messages: history,
           stream: false,
-          temperature: 0.9,
-          max_tokens: 500,
+          temperature: parseFloat(process.env.SUGGESTIONS_TEMPERATURE ?? '0.7'),
+          max_tokens: parseInt(process.env.SUGGESTIONS_MAX_TOKENS ?? '500', 10),
         }),
       });
 
