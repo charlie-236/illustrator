@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { SUGGESTIONS_SYSTEM_PROMPT } from '@/lib/writerSuggestionsPrompt';
 import { resolveActivePath } from '@/lib/chatBranches';
@@ -232,21 +233,65 @@ export async function POST(
     console.log('[suggestions] msgId:', msgId);
     console.log('[suggestions] raw LLM response (first 1000 chars):', responseText.slice(0, 1000));
 
-    const suggestions = parseSuggestions(responseText);
+    const parsed = parseSuggestions(responseText);
 
-    console.log('[suggestions] parsed count:', suggestions.length);
-    if (suggestions.length === 0 && responseText.length > 0) {
+    console.log('[suggestions] parsed count:', parsed.length);
+    if (parsed.length === 0 && responseText.length > 0) {
       console.log('[suggestions] parse FAILED — full response:', responseText);
     }
 
-    // Persist to DB
-    await prisma.message.update({
-      where: { id: msgId },
-      data: { suggestionsJson: suggestions as object[] },
-    }).catch(() => {});
+    // Sanitize before persistence — strip anything not in the Suggestion shape
+    const sanitized = parsed
+      .filter((s) => typeof s.label === 'string' && typeof s.prompt === 'string')
+      .map((s) => ({
+        label: s.label.slice(0, 200),
+        prompt: s.prompt.slice(0, 2000),
+      }));
 
-    return NextResponse.json({ suggestions });
+    console.log('[suggestions] parsed/sanitized counts:', {
+      parsed: parsed.length,
+      sanitized: sanitized.length,
+    });
+
+    // Persist to DB
+    try {
+      const updateResult = await prisma.message.update({
+        where: { id: msgId },
+        data: {
+          suggestionsJson: sanitized as unknown as Prisma.InputJsonValue,
+        },
+      });
+      console.log('[suggestions] persisted:', {
+        msgId,
+        suggestionCount: sanitized.length,
+        persistedJson: updateResult.suggestionsJson,
+      });
+    } catch (err) {
+      console.error('[suggestions] PERSISTENCE FAILED:', {
+        msgId,
+        suggestionCount: sanitized.length,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+        suggestionsShape: JSON.stringify(sanitized).slice(0, 500),
+      });
+      // Continue to return suggestions to client — the API call itself succeeded;
+      // persistence is the problem.
+    }
+
+    return NextResponse.json({ suggestions: sanitized });
   } catch {
     return NextResponse.json({ suggestions: [] });
   }
+}
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string; msgId: string } },
+) {
+  const { msgId } = params;
+  const msg = await prisma.message.findUnique({
+    where: { id: msgId },
+    select: { id: true, suggestionsJson: true, role: true, createdAt: true },
+  });
+  return NextResponse.json({ message: msg });
 }
