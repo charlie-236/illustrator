@@ -1470,6 +1470,8 @@ Activates the branching shape schemaed (but dormant) in 7a. Three new capabiliti
 
 ### Suggestion pills — robust parsing, diagnostics, and empty-state
 
+**Suggester model.** Suggestions use `SUGGESTIONS_LLM_ENDPOINT` / `SUGGESTIONS_LLM_MODEL` — independent from polish, storyboard, and writer endpoints. Best fit is a small instruction-tuned model (Qwen Coder, Llama Instruct, etc.) for 5-10s response times; creative-writing models work but are slow at structured output. Sampling defaults (`SUGGESTIONS_TEMPERATURE=0.7`, `SUGGESTIONS_MAX_TOKENS=500`) tuned for structured output. Timeout default 30s via `SUGGESTIONS_TIMEOUT_MS`.
+
 **Robust parsing.** `parseSuggestions` in `src/app/api/chats/[id]/messages/[msgId]/suggestions/route.ts` cascades through four format strategies: strict `[SUGGESTION N]` blocks, numbered lists, markdown headers, paragraph fallback. First strategy with ≥2 results wins. Designed for local LLMs that don't follow strict structured-output instructions reliably.
 
 **Diagnostic logging.** The server logs `[suggestions]` with the raw LLM response (first 1000 chars) and parsed count on every suggestions request. Useful for tuning the system prompt or troubleshooting parser misses. Permanent — no toggle.
