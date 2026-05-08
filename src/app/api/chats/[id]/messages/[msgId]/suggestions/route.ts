@@ -253,6 +253,11 @@ export async function POST(
       sanitized: sanitized.length,
     });
 
+    console.log('[suggestions] parsed count:', suggestions.length);
+    if (suggestions.length === 0 && responseText.length > 0) {
+      console.log('[suggestions] parse FAILED — full response:', responseText);
+    }
+
     // Persist to DB
     try {
       const updateResult = await prisma.message.update({
