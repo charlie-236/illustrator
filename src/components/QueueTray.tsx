@@ -13,7 +13,7 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
   const trayRef = useRef<HTMLDivElement>(null);
 
   const activeCount = jobs.filter(
-    (j) => j.status === 'queued' || j.status === 'running' || j.status === 'completing',
+    (j) => j.status === 'pending' || j.status === 'queued' || j.status === 'running' || j.status === 'completing',
   ).length;
 
   // Close on click outside
@@ -92,21 +92,15 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
           {/* Job rows */}
           <div className="max-h-96 overflow-y-auto divide-y divide-zinc-800/60">
             {jobs.map((job) => {
-              const queuedJobs = jobs.filter((j) => j.status === 'queued');
-              const queuePosition = job.status === 'queued'
-                ? queuedJobs.findIndex((j) => j.promptId === job.promptId) + 1
-                : 0;
+              const pendingJobs = jobs.filter((j) => j.status === 'pending');
               return (
                 <JobRow
-                  key={job.promptId}
+                  key={job.queuedJobId}
                   job={job}
-                  queuePosition={queuePosition}
-                  queuedTotal={queuedJobs.length}
-                  onRemove={() => removeJob(job.promptId)}
+                  pendingTotal={pendingJobs.length}
+                  onRemove={() => removeJob(job.queuedJobId)}
                   onAbort={async () => {
-                    await fetch(`/api/jobs/${job.promptId}`, { method: 'DELETE' });
-                    // The SSE error event fires failJob in the generating tab's handler;
-                    // for post-refresh polling the recentlyCompleted cache covers it.
+                    await fetch(`/api/queue/${job.queuedJobId}`, { method: 'DELETE' });
                   }}
                   onView={() => {
                     onNavigateToGallery();
@@ -126,28 +120,24 @@ export default function QueueTray({ onNavigateToGallery }: QueueTrayProps) {
 
 function JobRow({
   job,
-  queuePosition,
-  queuedTotal,
+  pendingTotal,
   onRemove,
   onAbort,
   onView,
 }: {
   job: ActiveJob;
-  queuePosition: number;
-  queuedTotal: number;
+  pendingTotal: number;
   onRemove: () => void;
   onAbort: () => Promise<void>;
   onView: () => void;
 }) {
-  // Elapsed counts from execution start (runningSince), not submission time.
-  // For queued jobs we don't display elapsed at all.
   const [liveElapsed, setLiveElapsed] = useState(() =>
     Math.floor((Date.now() - (job.runningSince ?? job.startedAt)) / 1000),
   );
   const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
-    if (job.status === 'done' || job.status === 'error' || job.status === 'queued') return;
+    if (job.status === 'done' || job.status === 'error' || job.status === 'pending' || job.status === 'queued') return;
     const base = job.runningSince ?? job.startedAt;
     const id = setInterval(() => {
       setLiveElapsed(Math.floor((Date.now() - base) / 1000));
@@ -155,19 +145,17 @@ function JobRow({
     return () => clearInterval(id);
   }, [job.runningSince, job.startedAt, job.status]);
 
-  // Snap elapsed to 0 when the job transitions from queued → running.
   useEffect(() => {
     if (job.status === 'running' && job.runningSince !== null) {
       setLiveElapsed(Math.floor((Date.now() - job.runningSince) / 1000));
     }
   }, [job.status, job.runningSince]);
 
-  // Frozen elapsed for terminal states: use terminalAt for accuracy; fall back to last live value.
   const elapsed = (job.status === 'done' || job.status === 'error')
     ? Math.floor(((job.terminalAt ?? Date.now()) - (job.runningSince ?? job.startedAt)) / 1000)
     : liveElapsed;
 
-  const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'completing';
+  const isActive = job.status === 'pending' || job.status === 'queued' || job.status === 'running' || job.status === 'completing';
 
   return (
     <div className="px-4 py-3 space-y-1.5">
@@ -239,11 +227,23 @@ function JobRow({
         </div>
       </div>
 
-      {/* Queued status — no progress bar, no elapsed counter */}
+      {/* Pending (in our DB queue, not yet submitted to ComfyUI) */}
+      {job.status === 'pending' && (
+        <div className="space-y-1">
+          <p className="text-xs text-zinc-500">
+            {pendingTotal > 1 && job.queuePosition != null
+              ? `Pending (${job.queuePosition} of ${pendingTotal})`
+              : 'Pending'}
+          </p>
+          {job.retryCount > 0 && (
+            <p className="text-xs text-amber-500/80">Retry {job.retryCount} · {job.lastFailReason ?? 'retrying'}</p>
+          )}
+        </div>
+      )}
+
+      {/* Queued in ComfyUI (submitted but not yet executing) */}
       {job.status === 'queued' && (
-        <p className="text-xs text-zinc-500">
-          {queuedTotal > 1 ? `Queued (${queuePosition} of ${queuedTotal})` : 'Queued'}
-        </p>
+        <p className="text-xs text-zinc-500">Queued at GPU</p>
       )}
 
       {/* Progress bar / status line for running/completing */}

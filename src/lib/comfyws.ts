@@ -433,6 +433,7 @@ class ComfyWSManager {
           if (this.activePromptId === promptId) this.activePromptId = null;
           const msg = 'Generation completed during reconnection but the output was lost. Please retry.';
           this.addToRecentlyCompleted(job, 'error', msg);
+          void this.syncQueuedJobStatus(promptId, 'failed', { lastFailReason: 'vm_lost' });
           pushSSE(job.controller, 'error', { message: msg });
           closeSSE(job.controller);
           this.jobs.delete(promptId);
@@ -443,6 +444,7 @@ class ComfyWSManager {
           if (this.activePromptId === promptId) this.activePromptId = null;
           const msg = 'Generation failed on the GPU server.';
           this.addToRecentlyCompleted(job, 'error', msg);
+          void this.syncQueuedJobStatus(promptId, 'failed', { lastFailReason: 'workflow_error' });
           pushSSE(job.controller, 'error', { message: msg });
           closeSSE(job.controller);
           this.jobs.delete(promptId);
@@ -553,6 +555,7 @@ class ComfyWSManager {
         if (this.activePromptId === promptId) this.activePromptId = null;
         const message = data.exception_message != null ? String(data.exception_message) : 'Generation failed';
         this.addToRecentlyCompleted(job, 'error', message);
+        void this.syncQueuedJobStatus(promptId, 'failed', { lastFailReason: 'workflow_error' });
         pushSSE(job.controller, 'error', { message });
         closeSSE(job.controller);
         this.jobs.delete(promptId);
@@ -654,10 +657,12 @@ class ComfyWSManager {
       );
 
       this.addToRecentlyCompleted(job, 'done', undefined, records[0].id);
+      void this.syncQueuedJobStatus(job.promptId, 'complete', { generationId: records[0].id });
       pushSSE(controller, 'complete', { records });
     } catch (err) {
       console.error('[ComfyWS] finalizeImageJob error', err);
       this.addToRecentlyCompleted(job, 'error', String(err));
+      void this.syncQueuedJobStatus(job.promptId, 'failed', { lastFailReason: 'workflow_error' });
       pushSSE(controller, 'error', { message: String(err) });
     } finally {
       closeSSE(controller);
@@ -741,6 +746,7 @@ class ComfyWSManager {
       });
 
       this.addToRecentlyCompleted(job, 'done', undefined, record.id);
+      void this.syncQueuedJobStatus(job.promptId, 'complete', { generationId: record.id });
       pushSSE(controller, 'complete', {
         records: [{
           ...record,
@@ -751,6 +757,7 @@ class ComfyWSManager {
     } catch (err) {
       console.error('[ComfyWS] finalizeVideoJob error', err);
       this.addToRecentlyCompleted(job, 'error', String(err));
+      void this.syncQueuedJobStatus(job.promptId, 'failed', { lastFailReason: 'workflow_error' });
       pushSSE(controller, 'error', { message: String(err) });
     } finally {
       // SSH cleanup always runs — globs by prefix so partial files are removed too
@@ -788,6 +795,7 @@ class ComfyWSManager {
     const mins = this.getJobTimeoutMinutes(job);
     const message = `Generation timed out after ${mins} minutes`;
     this.addToRecentlyCompleted(job, 'error', message);
+    void this.syncQueuedJobStatus(promptId, 'failed', { lastFailReason: 'timeout' });
     pushSSE(job.controller, 'error', { message });
     closeSSE(job.controller);
     this.jobs.delete(promptId);
@@ -814,13 +822,32 @@ class ComfyWSManager {
 
   // ─── public register methods ──────────────────────────────────────────────
 
+  // ─── QueuedJob status helper ──────────────────────────────────────────────
+
+  /** Updates the QueuedJob row matching promptId. Non-critical — errors are swallowed. */
+  private async syncQueuedJobStatus(
+    promptId: string,
+    status: 'complete' | 'failed' | 'cancelled',
+    extra?: { generationId?: string; lastFailReason?: string },
+  ): Promise<void> {
+    await prisma.queuedJob.updateMany({
+      where: { promptId },
+      data: {
+        status,
+        finishedAt: new Date(),
+        ...(extra?.generationId ? { generationId: extra.generationId } : {}),
+        ...(extra?.lastFailReason ? { lastFailReason: extra.lastFailReason } : {}),
+      },
+    }).catch(() => { /* non-critical */ });
+  }
+
   registerJob(
     promptId: string,
     params: GenerationParams,
     resolvedSeed: number,
     assembledPos: string,
     assembledNeg: string,
-    controller: ReadableStreamDefaultController<Uint8Array>,
+    controller: ReadableStreamDefaultController<Uint8Array> | null,
   ) {
     const promptSummary = params.positivePrompt.slice(0, 60).trim() || 'Image generation';
     this.addJob({
@@ -846,7 +873,7 @@ class ComfyWSManager {
   registerVideoJob(
     promptId: string,
     videoParams: VideoJobParams,
-    controller: ReadableStreamDefaultController<Uint8Array>,
+    controller: ReadableStreamDefaultController<Uint8Array> | null,
     timeoutMs = VIDEO_JOB_TIMEOUT_MS,
   ) {
     const promptSummary = videoParams.prompt.slice(0, 60).trim() || 'Video generation';
@@ -963,7 +990,7 @@ class ComfyWSManager {
     promptId: string,
     generationId: string,
     outputPath: string,
-    controller: ReadableStreamDefaultController<Uint8Array>,
+    controller: ReadableStreamDefaultController<Uint8Array> | null,
     promptSummary: string,
     timeoutMs = STITCH_JOB_TIMEOUT_MS,
     projectId?: string,
@@ -1012,6 +1039,7 @@ class ComfyWSManager {
     if (job.timeoutId !== null) clearTimeout(job.timeoutId);
     this.jobs.delete(promptId);
     this.addToRecentlyCompleted(job, 'done', undefined, generationId);
+    void this.syncQueuedJobStatus(promptId, 'complete', { generationId });
     pushSSE(job.controller, 'completing', {});
     pushSSE(job.controller, 'complete', { records: [record] });
     closeSSE(job.controller);
@@ -1024,6 +1052,7 @@ class ComfyWSManager {
     if (job.timeoutId !== null) clearTimeout(job.timeoutId);
     this.jobs.delete(promptId);
     this.addToRecentlyCompleted(job, 'error', message);
+    void this.syncQueuedJobStatus(promptId, 'failed', { lastFailReason: 'workflow_error' });
     pushSSE(job.controller, 'error', { message });
     closeSSE(job.controller);
   }

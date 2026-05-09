@@ -1,16 +1,9 @@
-import { NextRequest } from 'next/server';
-import { randomBytes } from 'crypto';
-import { v4 as uuidv4 } from 'uuid';
-import { buildT2VWorkflow, buildI2VWorkflow, WAN22_DEFAULT_NEGATIVE_PROMPT } from '@/lib/wan22-workflow';
-import { getComfyWSManager } from '@/lib/comfyws';
-import type { ComfyWorkflow } from '@/lib/wan22-workflow';
-import type { WanLoraSpec } from '@/types';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { WanLoraSpec } from '@/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const COMFYUI = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 
 interface VideoRequest {
   mode: 't2v' | 'i2v';
@@ -30,230 +23,80 @@ interface VideoRequest {
   sceneId?: string;
 }
 
-const SSE_HEADERS = {
-  'Content-Type': 'text/event-stream',
-  'Cache-Control': 'no-cache, no-transform',
-  Connection: 'keep-alive',
-  'X-Accel-Buffering': 'no',
-};
-
-// Video runtime guard — parallel to /api/generate's image guard.
-// SaveWEBM is the explicit exception allowed only in the video path.
-function validateVideoWorkflow(wf: ComfyWorkflow): void {
-  for (const [nodeId, node] of Object.entries(wf)) {
-    const cls = node.class_type;
-    if (cls === 'SaveImage') throw new Error(`SaveImage forbidden (node ${nodeId})`);
-    if (cls === 'LoadImage') throw new Error(`LoadImage forbidden — use ETN_LoadImageBase64 (node ${nodeId})`);
-    if (cls === 'SaveAnimatedWEBP') throw new Error(`SaveAnimatedWEBP should have been stripped (node ${nodeId})`);
-  }
-}
-
 export async function POST(req: NextRequest) {
-  const outputDir = process.env.VIDEO_OUTPUT_DIR;
-  if (!outputDir) {
-    return new Response(
-      JSON.stringify({ error: 'VIDEO_OUTPUT_DIR is not configured' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
-    );
+  if (!process.env.VIDEO_OUTPUT_DIR) {
+    return NextResponse.json({ error: 'VIDEO_OUTPUT_DIR is not configured' }, { status: 500 });
   }
 
   let body: VideoRequest;
   try {
     body = await req.json() as VideoRequest;
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400 });
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  // ─── validation ───────────────────────────────────────────────────────────
-
-  const { mode, prompt, negativePrompt, width, height, frames, steps, cfg, startImageB64 } = body;
+  const { mode, prompt, width, height, frames, steps, cfg, startImageB64 } = body;
   const lightning = body.lightning === true;
-  const loras: WanLoraSpec[] = Array.isArray(body.loras) ? body.loras : [];
 
   if (mode !== 't2v' && mode !== 'i2v') {
-    return new Response(JSON.stringify({ error: "mode must be 't2v' or 'i2v'" }), { status: 400 });
+    return NextResponse.json({ error: "mode must be 't2v' or 'i2v'" }, { status: 400 });
   }
   if (typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return new Response(JSON.stringify({ error: 'prompt must be a non-empty string' }), { status: 400 });
+    return NextResponse.json({ error: 'prompt must be a non-empty string' }, { status: 400 });
   }
   if (!Number.isInteger(width) || width < 256 || width > 1280 || width % 32 !== 0) {
-    return new Response(JSON.stringify({ error: 'width must be an integer multiple of 32, 256–1280 inclusive' }), { status: 400 });
+    return NextResponse.json({ error: 'width must be an integer multiple of 32, 256–1280 inclusive' }, { status: 400 });
   }
   if (!Number.isInteger(height) || height < 256 || height > 1280 || height % 32 !== 0) {
-    return new Response(JSON.stringify({ error: 'height must be an integer multiple of 32, 256–1280 inclusive' }), { status: 400 });
+    return NextResponse.json({ error: 'height must be an integer multiple of 32, 256–1280 inclusive' }, { status: 400 });
   }
   if (!Number.isInteger(frames) || frames < 17 || frames > 121 || (frames - 1) % 8 !== 0) {
-    return new Response(JSON.stringify({ error: 'frames must be an integer satisfying (frames-1) % 8 === 0, range 17–121 (e.g. 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121)' }), { status: 400 });
+    return NextResponse.json({ error: 'frames must be an integer satisfying (frames-1) % 8 === 0, range 17–121' }, { status: 400 });
   }
-  // When lightning=true, steps and cfg are silently overridden to 4 and 1 below.
-  // Skip strict validation for those fields so non-UI callers aren't rejected.
   if (!lightning) {
     if (!Number.isInteger(steps) || steps < 4 || steps > 40 || steps % 2 !== 0) {
-      return new Response(JSON.stringify({ error: 'steps must be an even integer, 4–40 inclusive' }), { status: 400 });
+      return NextResponse.json({ error: 'steps must be an even integer, 4–40 inclusive' }, { status: 400 });
     }
     if (typeof cfg !== 'number' || !Number.isFinite(cfg) || cfg < 1.0 || cfg > 10.0) {
-      return new Response(JSON.stringify({ error: 'cfg must be a number 1.0–10.0 inclusive' }), { status: 400 });
+      return NextResponse.json({ error: 'cfg must be a number 1.0–10.0 inclusive' }, { status: 400 });
     }
   }
   if (mode === 'i2v' && !startImageB64) {
-    return new Response(JSON.stringify({ error: "startImageB64 is required for mode='i2v'" }), { status: 400 });
+    return NextResponse.json({ error: "startImageB64 is required for mode='i2v'" }, { status: 400 });
   }
   if (mode === 't2v' && startImageB64) {
-    return new Response(JSON.stringify({ error: "startImageB64 is not allowed for mode='t2v'" }), { status: 400 });
+    return NextResponse.json({ error: "startImageB64 is not allowed for mode='t2v'" }, { status: 400 });
   }
 
-  // Validate projectId if provided
   if (body.projectId !== undefined) {
     if (typeof body.projectId !== 'string' || !body.projectId.trim()) {
-      return new Response(JSON.stringify({ error: 'projectId must be a non-empty string' }), { status: 400 });
+      return NextResponse.json({ error: 'projectId must be a non-empty string' }, { status: 400 });
     }
     const project = await prisma.project.findUnique({ where: { id: body.projectId }, select: { id: true } });
     if (!project) {
-      return new Response(JSON.stringify({ error: 'projectId does not reference an existing project' }), { status: 400 });
+      return NextResponse.json({ error: 'projectId does not reference an existing project' }, { status: 400 });
     }
   }
 
-  // Validate batchSize if provided (Studio sends 1 per request; this enforces the API contract)
   const batchSize = body.batchSize ?? 1;
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 4) {
-    return new Response(JSON.stringify({ error: 'batchSize must be an integer between 1 and 4 inclusive' }), { status: 400 });
+    return NextResponse.json({ error: 'batchSize must be an integer between 1 and 4 inclusive' }, { status: 400 });
   }
 
-  // Validate sceneId if provided (soft ref — no DB lookup; trust the client)
   if (body.sceneId !== undefined && (typeof body.sceneId !== 'string' || body.sceneId.trim().length === 0)) {
-    return new Response(JSON.stringify({ error: 'sceneId must be a non-empty string' }), { status: 400 });
+    return NextResponse.json({ error: 'sceneId must be a non-empty string' }, { status: 400 });
   }
 
-  // ─── prepare ──────────────────────────────────────────────────────────────
-
-  // Match the image-side contract: seed === -1 means random, anything else is literal.
-  // Treat missing/non-integer body.seed the same as -1 for backward compatibility with
-  // callers that omit the field. Fall back to random in any case where the value
-  // can't be used as a literal seed.
-  const explicitSeed =
-    typeof body.seed === 'number' && Number.isInteger(body.seed) && body.seed !== -1
-      ? body.seed
-      : null;
-  const seed = explicitSeed ?? Math.floor(Math.random() * 2 ** 32);
-
-  console.debug('[generate-video] resolved seed', { received: body.seed, resolved: seed });
-
-  const generationId = uuidv4();
-  const filenamePrefix = randomBytes(8).toString('hex'); // 16 hex chars, ~64 bits entropy
-
-  // Lightning mode overrides steps and CFG regardless of what the caller sent.
-  const effectiveSteps = lightning ? 4 : steps;
-  const effectiveCfg = lightning ? 1 : cfg;
-  if (lightning && steps !== 4) console.debug('[generate-video] lightning: overriding steps', steps, '→ 4');
-  if (lightning && cfg !== 1) console.debug('[generate-video] lightning: overriding cfg', cfg, '→ 1');
-
-  const videoParams = {
-    generationId,
-    filenamePrefix,
-    prompt: prompt.trim(),
-    negativePrompt:
-      negativePrompt && negativePrompt.trim().length > 0
-        ? negativePrompt
-        : WAN22_DEFAULT_NEGATIVE_PROMPT,
-    width,
-    height,
-    frames,
-    steps: effectiveSteps,
-    cfg: effectiveCfg,
-    seed,
-    mode,
-    outputDir,
-    lightning,
-    loras,
-    ...(body.projectId ? { projectId: body.projectId } : {}),
-    ...(body.sceneId ? { sceneId: body.sceneId } : {}),
-  };
-
-  let workflow: ComfyWorkflow;
-  try {
-    if (mode === 'i2v') {
-      workflow = buildI2VWorkflow({ ...videoParams, startImageB64: startImageB64! });
-    } else {
-      workflow = buildT2VWorkflow(videoParams);
-    }
-  } catch (err) {
-    return new Response(JSON.stringify({ error: `Workflow build error: ${String(err)}` }), { status: 500 });
-  }
-
-  // Video runtime guard — SaveWEBM allowed; SaveImage/LoadImage/SaveAnimatedWEBP forbidden
-  try {
-    validateVideoWorkflow(workflow);
-  } catch (err) {
-    console.error('[generate-video] FORBIDDEN node in workflow:', err);
-    return new Response(
-      JSON.stringify({ error: `Internal error: ${String(err)}. This is a bug.` }),
-      { status: 500 },
-    );
-  }
-
-  // ─── submit to ComfyUI ────────────────────────────────────────────────────
-
-  const manager = getComfyWSManager();
-
-  let comfyRes: Response;
-  try {
-    comfyRes = await fetch(`${COMFYUI}/prompt`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: workflow, client_id: manager.getClientId() }),
-    });
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: `ComfyUI unreachable: ${String(err)}` }),
-      { status: 502 },
-    );
-  }
-
-  if (!comfyRes.ok) {
-    const body = await comfyRes.text();
-    return new Response(JSON.stringify({ error: body }), { status: comfyRes.status });
-  }
-
-  const { prompt_id: promptId } = await comfyRes.json() as { prompt_id: string };
-  if (!promptId) {
-    return new Response(JSON.stringify({ error: 'No prompt_id in ComfyUI response' }), { status: 500 });
-  }
-
-  // ─── SSE stream ───────────────────────────────────────────────────────────
-
-  const sseEncoder = new TextEncoder();
-
-  // Capture controller for use in cancel() where it isn't a parameter.
-  let capturedController: ReadableStreamDefaultController<Uint8Array> | null = null;
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      capturedController = controller;
-
-      // Emit init event first so the client can obtain promptId + generationId
-      // before any progress events arrive.
-      controller.enqueue(
-        sseEncoder.encode(`event: init\ndata: ${JSON.stringify({ promptId, generationId, resolvedSeed: seed })}\n\n`),
-      );
-
-      manager.registerVideoJob(promptId, videoParams, controller);
-
-      // SSE stream close means the browser disconnected (refresh, tab close, network drop).
-      // It does NOT mean the user pressed Abort. The job stays alive on the server so
-      // that the next /api/jobs/active poll can reattach. Explicit abort goes through
-      // POST /api/jobs/[promptId]/abort instead.
-      req.signal.addEventListener('abort', () => {
-        manager.removeSubscriber(promptId, controller);
-        try { controller.close(); } catch { /* already closed */ }
-      });
-    },
-    cancel() {
-      // Same reasoning as the abort handler above — stream cancel is not user intent.
-      if (capturedController) {
-        manager.removeSubscriber(promptId, capturedController);
-      }
+  // Enqueue; runner resolves seed, builds workflow, submits to ComfyUI
+  const job = await prisma.queuedJob.create({
+    data: {
+      mediaType: 'video',
+      payloadJson: body as unknown as Parameters<typeof prisma.queuedJob.create>[0]['data']['payloadJson'],
+      projectId: body.projectId ?? null,
+      sceneId: body.sceneId ?? null,
+      status: 'pending',
     },
   });
 
-  return new Response(stream, { headers: SSE_HEADERS });
+  return NextResponse.json({ queuedJobId: job.id, status: 'pending' }, { status: 202 });
 }

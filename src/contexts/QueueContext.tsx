@@ -10,23 +10,31 @@ import {
   type ReactNode,
 } from 'react';
 import { playChime, requestNotificationPermission, sendBrowserNotification } from '@/lib/notification';
-import type { ActiveJobInfo } from '@/lib/comfyws';
+import type { ActiveQueueJobInfo } from '@/types';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
 export interface ActiveJob {
-  promptId: string;
+  /** Stable primary key — set immediately on submit, before ComfyUI accepts the job. */
+  queuedJobId: string;
+  /** Set once the runner submits to ComfyUI; null while pending in our DB queue. */
+  promptId: string | null;
   generationId: string;
   mediaType: 'image' | 'video' | 'stitch';
   promptSummary: string;
+  /** Unix ms when the job was added to the client queue. */
   startedAt: number;
-  /** Unix ms when ComfyUI began executing this job. Null while in ComfyUI's queue. */
+  /** Unix ms when ComfyUI began executing. Null while pending or queued at ComfyUI. */
   runningSince: number | null;
-  /** Unix ms when the job entered a terminal state (done/error). Used to freeze the elapsed display. */
+  /** Unix ms when the job entered a terminal state. Used to freeze elapsed display. */
   terminalAt?: number;
   progress: { current: number; total: number } | null;
-  status: 'queued' | 'running' | 'completing' | 'done' | 'error';
+  status: 'pending' | 'queued' | 'running' | 'completing' | 'done' | 'error';
   errorMessage?: string;
+  /** 1-indexed position in the pending DB queue; null if not pending. */
+  queuePosition: number | null;
+  retryCount: number;
+  lastFailReason: string | null;
 }
 
 export interface ToastEntry {
@@ -43,13 +51,8 @@ interface QueueState {
 }
 
 type QueueAction =
-  | { type: 'ADD_JOB'; job: ActiveJob }
-  | { type: 'UPDATE_PROGRESS'; promptId: string; progress: { current: number; total: number } }
-  | { type: 'TRANSITION_TO_RUNNING'; promptId: string; runningSince: number }
-  | { type: 'SET_COMPLETING'; promptId: string }
-  | { type: 'COMPLETE_JOB'; promptId: string; generationId: string }
-  | { type: 'FAIL_JOB'; promptId: string; errorMessage: string }
-  | { type: 'REMOVE_JOB'; promptId: string }
+  | { type: 'UPSERT_JOB'; job: ActiveJob }
+  | { type: 'REMOVE_JOB'; queuedJobId: string }
   | { type: 'TOGGLE_MUTE' }
   | { type: 'DISMISS_TOAST'; id: string };
 
@@ -57,87 +60,38 @@ type QueueAction =
 
 function reducer(state: QueueState, action: QueueAction): QueueState {
   switch (action.type) {
-    case 'ADD_JOB': {
-      if (state.jobs.some((j) => j.promptId === action.job.promptId)) return state;
-      return { ...state, jobs: [action.job, ...state.jobs] };
-    }
-
-    case 'UPDATE_PROGRESS': {
-      return {
-        ...state,
-        jobs: state.jobs.map((j) => {
-          if (j.promptId !== action.promptId) return j;
-          // First progress event while queued → auto-transition to running
-          if (j.status === 'queued') {
-            return { ...j, status: 'running', runningSince: j.runningSince ?? Date.now(), progress: action.progress };
-          }
-          if (j.status === 'running') {
-            return { ...j, progress: action.progress };
-          }
-          return j;
-        }),
-      };
-    }
-
-    case 'TRANSITION_TO_RUNNING': {
-      return {
-        ...state,
-        jobs: state.jobs.map((j) =>
-          j.promptId === action.promptId && j.status === 'queued'
-            ? { ...j, status: 'running', runningSince: action.runningSince }
-            : j,
-        ),
-      };
-    }
-
-    case 'SET_COMPLETING': {
-      return {
-        ...state,
-        jobs: state.jobs.map((j) =>
-          j.promptId === action.promptId &&
-          (j.status === 'queued' || j.status === 'running' || j.status === 'completing')
-            ? { ...j, status: 'completing', runningSince: j.runningSince ?? Date.now() }
-            : j,
-        ),
-      };
-    }
-
-    case 'COMPLETE_JOB': {
-      const job = state.jobs.find((j) => j.promptId === action.promptId);
-      if (!job || job.status === 'done') return state;
-      const toast: ToastEntry = {
-        id: `${action.promptId}-${Date.now()}`,
-        mediaType: job.mediaType,
-        promptSummary: job.promptSummary,
-        generationId: action.generationId,
-      };
-      return {
-        ...state,
-        jobs: state.jobs.map((j) =>
-          j.promptId === action.promptId
-            ? { ...j, status: 'done', generationId: action.generationId, progress: null, terminalAt: Date.now() }
-            : j,
-        ),
-        toasts: [...state.toasts, toast],
-      };
-    }
-
-    case 'FAIL_JOB': {
-      if (!state.jobs.some((j) => j.promptId === action.promptId && j.status !== 'error')) {
-        return state;
+    case 'UPSERT_JOB': {
+      const idx = state.jobs.findIndex((j) => j.queuedJobId === action.job.queuedJobId);
+      if (idx === -1) {
+        // New job — prepend
+        return { ...state, jobs: [action.job, ...state.jobs] };
       }
-      return {
-        ...state,
-        jobs: state.jobs.map((j) =>
-          j.promptId === action.promptId
-            ? { ...j, status: 'error', errorMessage: action.errorMessage, terminalAt: Date.now() }
-            : j,
-        ),
-      };
+      const existing = state.jobs[idx];
+
+      // Detect done transition before narrowing — TS2367 fires if we check after the terminal guard
+      const isDoneTransition = action.job.status === 'done' && existing.status !== 'done' && existing.status !== 'error';
+
+      // Never downgrade terminal state
+      if (existing.status === 'done' || existing.status === 'error') return state;
+
+      const jobs = [...state.jobs];
+      jobs[idx] = { ...existing, ...action.job };
+
+      if (isDoneTransition) {
+        const toast: ToastEntry = {
+          id: `${action.job.queuedJobId}-${Date.now()}`,
+          mediaType: action.job.mediaType,
+          promptSummary: action.job.promptSummary,
+          generationId: action.job.generationId,
+        };
+        return { ...state, jobs, toasts: [...state.toasts, toast] };
+      }
+
+      return { ...state, jobs };
     }
 
     case 'REMOVE_JOB': {
-      return { ...state, jobs: state.jobs.filter((j) => j.promptId !== action.promptId) };
+      return { ...state, jobs: state.jobs.filter((j) => j.queuedJobId !== action.queuedJobId) };
     }
 
     case 'TOGGLE_MUTE': {
@@ -161,12 +115,9 @@ interface QueueContextValue {
   jobs: ActiveJob[];
   muted: boolean;
   toasts: ToastEntry[];
+  /** Add a job immediately on submit (status='pending'). */
   addJob: (job: ActiveJob) => void;
-  updateProgress: (promptId: string, progress: { current: number; total: number }) => void;
-  setCompleting: (promptId: string) => void;
-  completeJob: (promptId: string, generationId: string) => void;
-  failJob: (promptId: string, errorMessage: string) => void;
-  removeJob: (promptId: string) => void;
+  removeJob: (queuedJobId: string) => void;
   toggleMute: () => void;
   dismissToast: (id: string) => void;
   requestPermissionIfNeeded: () => void;
@@ -181,6 +132,37 @@ function getInitialMuted(): boolean {
   try { return localStorage.getItem('queue-muted') === '1'; } catch { return false; }
 }
 
+function serverJobToActiveJob(sj: ActiveQueueJobInfo, existingStartedAt?: number): ActiveJob {
+  return {
+    queuedJobId: sj.queuedJobId,
+    promptId: sj.promptId,
+    generationId: sj.generationId,
+    mediaType: sj.mediaType,
+    promptSummary: sj.promptSummary,
+    startedAt: existingStartedAt ?? Date.now(),
+    runningSince: sj.runningSince ? new Date(sj.runningSince).getTime() : null,
+    progress: sj.progress,
+    status: mapStatus(sj.status),
+    queuePosition: sj.queuePosition,
+    retryCount: sj.retryCount,
+    lastFailReason: sj.lastFailReason,
+  };
+}
+
+type ServerStatus = ActiveQueueJobInfo['status'];
+function mapStatus(s: ServerStatus): ActiveJob['status'] {
+  switch (s) {
+    case 'pending': return 'pending';
+    case 'submitted': return 'queued';
+    case 'running': return 'running';
+    case 'completing': return 'completing';
+    case 'complete': return 'done';
+    case 'failed': return 'error';
+    case 'cancelled': return 'error';
+    default: return 'pending';
+  }
+}
+
 export function QueueProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, () => ({
     jobs: [] as ActiveJob[],
@@ -189,15 +171,13 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   }));
 
   // ── notification side effects ──────────────────────────────────────────────
-  // Track previous job statuses to detect transitions (not just new state)
   const prevJobsRef = useRef(new Map<string, ActiveJob>());
 
   useEffect(() => {
     const prev = prevJobsRef.current;
 
     for (const job of state.jobs) {
-      const prevJob = prev.get(job.promptId);
-      // Only notify for transitions observed within this session (prevJob existed as non-done)
+      const prevJob = prev.get(job.queuedJobId);
       if (job.status === 'done' && prevJob && prevJob.status !== 'done') {
         if (!state.muted) playChime();
         sendBrowserNotification({
@@ -206,19 +186,17 @@ export function QueueProvider({ children }: { children: ReactNode }) {
             job.mediaType === 'stitch' ? 'Project stitch' :
             job.mediaType === 'video' ? 'Video generation' : 'Image generation'
           ),
-          tag: job.promptId,
+          tag: job.queuedJobId,
         });
       }
     }
 
-    prevJobsRef.current = new Map(state.jobs.map((j) => [j.promptId, j]));
+    prevJobsRef.current = new Map(state.jobs.map((j) => [j.queuedJobId, j]));
   }, [state.jobs, state.muted]);
 
   // ── auto-dismiss completed/errored jobs after 60 s ────────────────────────
   const autoDismissRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  // Unmount-only cleanup — keeps the scheduling effect from cancelling active
-  // timers every time state.jobs changes (e.g., on each progress update).
   useEffect(() => {
     return () => {
       for (const timer of autoDismissRef.current.values()) clearTimeout(timer);
@@ -226,75 +204,54 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Schedule auto-dismiss for newly-terminal jobs (done or error)
     for (const job of state.jobs) {
-      if ((job.status === 'done' || job.status === 'error') && !autoDismissRef.current.has(job.promptId)) {
+      if ((job.status === 'done' || job.status === 'error') && !autoDismissRef.current.has(job.queuedJobId)) {
         const timer = setTimeout(() => {
-          dispatch({ type: 'REMOVE_JOB', promptId: job.promptId });
-          autoDismissRef.current.delete(job.promptId);
+          dispatch({ type: 'REMOVE_JOB', queuedJobId: job.queuedJobId });
+          autoDismissRef.current.delete(job.queuedJobId);
         }, 60_000);
-        autoDismissRef.current.set(job.promptId, timer);
+        autoDismissRef.current.set(job.queuedJobId, timer);
       }
     }
 
-    // Cancel timers for jobs no longer in state (manually dismissed)
-    for (const [promptId, timer] of autoDismissRef.current) {
-      if (!state.jobs.some((j) => j.promptId === promptId)) {
+    for (const [queuedJobId, timer] of autoDismissRef.current) {
+      if (!state.jobs.some((j) => j.queuedJobId === queuedJobId)) {
         clearTimeout(timer);
-        autoDismissRef.current.delete(promptId);
+        autoDismissRef.current.delete(queuedJobId);
       }
     }
   }, [state.jobs]);
 
-  // ── poll /api/jobs/active while any jobs are active (queued/running/completing)
-  // This provides refresh-survivability: after a page reload the client reattaches
-  // to in-flight jobs via the mount-recovery effect in Studio, and the polling
-  // here keeps progress updated and detects completions and queued→running transitions.
-  const activeJobIds = state.jobs
-    .filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'completing')
-    .map((j) => j.promptId)
-    .sort()
-    .join(',');
-
-  // Ref tracks queued job IDs without requiring an extra effect dependency.
-  // Updated every render so the polling closure always reads current queued IDs.
-  const queuedJobIdsRef = useRef<Set<string>>(new Set());
-  queuedJobIdsRef.current = new Set(
-    state.jobs.filter((j) => j.status === 'queued').map((j) => j.promptId),
+  // ── poll /api/queue/active ────────────────────────────────────────────────
+  // Poll while any jobs are non-terminal (pending/queued/running/completing)
+  const hasActiveJobs = state.jobs.some(
+    (j) => j.status === 'pending' || j.status === 'queued' || j.status === 'running' || j.status === 'completing',
   );
 
-  useEffect(() => {
-    if (!activeJobIds) return;
+  // Snapshot jobs map so the poll callback can read current startedAt without re-subscribing
+  const jobsMapRef = useRef(new Map<string, ActiveJob>());
+  jobsMapRef.current = new Map(state.jobs.map((j) => [j.queuedJobId, j]));
 
-    const knownActive = new Set(activeJobIds.split(',').filter(Boolean));
-    // Snapshot queued IDs at effect-fire time; updated in-place as transitions are dispatched.
-    const localQueuedIds = new Set(queuedJobIdsRef.current);
+  useEffect(() => {
+    // Always poll when we have any tracked jobs (active or recently terminal) so
+    // we can sync completed status from server without missing transitions
+    const shouldPoll = state.jobs.length > 0;
+    if (!shouldPoll) return;
 
     const poll = async () => {
       try {
-        const res = await fetch('/api/jobs/active');
+        const res = await fetch('/api/queue/active');
         if (!res.ok) return;
-        const { jobs: serverJobs } = await res.json() as { jobs: ActiveJobInfo[] };
+        const { jobs: serverJobs } = await res.json() as { jobs: ActiveQueueJobInfo[] };
 
         for (const sj of serverJobs) {
-          if (!knownActive.has(sj.promptId)) continue;
-
-          if (sj.status === 'running') {
-            // If client had this job as queued but server says running, transition it.
-            if (localQueuedIds.has(sj.promptId)) {
-              dispatch({ type: 'TRANSITION_TO_RUNNING', promptId: sj.promptId, runningSince: sj.runningSince ?? Date.now() });
-              localQueuedIds.delete(sj.promptId);
-            }
-            if (sj.progress) {
-              dispatch({ type: 'UPDATE_PROGRESS', promptId: sj.promptId, progress: sj.progress });
-            }
-          } else if (sj.status === 'done') {
-            dispatch({ type: 'COMPLETE_JOB', promptId: sj.promptId, generationId: sj.generationId });
-            knownActive.delete(sj.promptId);
-          } else if (sj.status === 'error') {
-            dispatch({ type: 'FAIL_JOB', promptId: sj.promptId, errorMessage: sj.errorMessage ?? 'Failed' });
-            knownActive.delete(sj.promptId);
-          }
+          const existing = jobsMapRef.current.get(sj.queuedJobId);
+          // Only update jobs the client is already tracking (prevents phantom jobs appearing after dismiss)
+          if (!existing) continue;
+          dispatch({
+            type: 'UPSERT_JOB',
+            job: serverJobToActiveJob(sj, existing.startedAt),
+          });
         }
       } catch { /* ignore poll errors */ }
     };
@@ -302,9 +259,10 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     const pollInterval = Number(process.env.NEXT_PUBLIC_QUEUE_POLL_INTERVAL_MS) || 5_000;
     const interval = setInterval(poll, pollInterval);
     return () => clearInterval(interval);
-  }, [activeJobIds]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasActiveJobs, state.jobs.length]);
 
-  // ── permission request (called on first submit) ────────────────────────────
+  // ── permission request ─────────────────────────────────────────────────────
   const permRequestedRef = useRef(false);
   const requestPermissionIfNeeded = useCallback(() => {
     if (permRequestedRef.current) return;
@@ -313,15 +271,8 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── stable action creators ─────────────────────────────────────────────────
-  const addJob = useCallback((job: ActiveJob) => dispatch({ type: 'ADD_JOB', job }), []);
-  const updateProgress = useCallback((promptId: string, progress: { current: number; total: number }) =>
-    dispatch({ type: 'UPDATE_PROGRESS', promptId, progress }), []);
-  const setCompleting = useCallback((promptId: string) => dispatch({ type: 'SET_COMPLETING', promptId }), []);
-  const completeJob = useCallback((promptId: string, generationId: string) =>
-    dispatch({ type: 'COMPLETE_JOB', promptId, generationId }), []);
-  const failJob = useCallback((promptId: string, errorMessage: string) =>
-    dispatch({ type: 'FAIL_JOB', promptId, errorMessage }), []);
-  const removeJob = useCallback((promptId: string) => dispatch({ type: 'REMOVE_JOB', promptId }), []);
+  const addJob = useCallback((job: ActiveJob) => dispatch({ type: 'UPSERT_JOB', job }), []);
+  const removeJob = useCallback((queuedJobId: string) => dispatch({ type: 'REMOVE_JOB', queuedJobId }), []);
   const toggleMute = useCallback(() => dispatch({ type: 'TOGGLE_MUTE' }), []);
   const dismissToast = useCallback((id: string) => dispatch({ type: 'DISMISS_TOAST', id }), []);
 
@@ -331,10 +282,6 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       muted: state.muted,
       toasts: state.toasts,
       addJob,
-      updateProgress,
-      setCompleting,
-      completeJob,
-      failJob,
       removeJob,
       toggleMute,
       dismissToast,
