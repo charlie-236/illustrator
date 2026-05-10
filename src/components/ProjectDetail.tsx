@@ -148,29 +148,6 @@ function readLastUsedImageCheckpoint(): string | null {
   try { return sessionStorage.getItem('studio-last-image-checkpoint'); } catch { return null; }
 }
 
-async function readInitEvent(body: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) throw new Error('Stream ended before init event');
-      buffer += decoder.decode(value, { stream: true });
-      const messages = buffer.split('\n\n');
-      buffer = messages.pop() ?? '';
-      for (const message of messages) {
-        if (!message.includes('event: init')) continue;
-        const dataLine = message.split('\n').find((l) => l.startsWith('data: '));
-        if (!dataLine) continue;
-        const data = JSON.parse(dataLine.slice(6)) as { promptId: string };
-        return data.promptId;
-      }
-    }
-  } finally {
-    reader.cancel().catch(() => { /* ignore */ });
-  }
-}
 
 function stitchedExportToRecord(e: ProjectStitchedExport, projectId: string, projectName: string): GenerationRecord {
   return {
@@ -225,9 +202,9 @@ interface SortableSceneCardProps {
   compactMode: boolean;
   showFull: boolean;
   isInFlight: boolean;
-  inFlightEntry: { startedAt: number; promptId: string } | undefined;
+  inFlightEntry: { startedAt: number; queuedJobId: string } | undefined;
   isKeyframeInFlight: boolean;
-  keyframeInFlightEntry: { startedAt: number; promptId: string } | undefined;
+  keyframeInFlightEntry: { startedAt: number; queuedJobId: string } | undefined;
   nowTick: number;
   quickGenerateError: { sceneId: string; message: string } | null;
   keyframeError: { sceneId: string; message: string } | null;
@@ -592,7 +569,7 @@ function StitchModal({ projectId, projectName, videoClips, allClips, initialClip
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const { addJob, setCompleting, completeJob, failJob } = useQueue();
+  const { addJob } = useQueue();
 
   const selectedClips = videoClips.filter((c) => selectedIds.has(c.id));
   const totalDurationSec = selectedClips.reduce(
@@ -637,78 +614,29 @@ function StitchModal({ projectId, projectName, videoClips, allClips, initialClip
         signal: ac.signal,
       });
 
-      if (!res.ok || !res.body) {
+      if (res.status !== 202) {
+        const body = await res.json().catch(() => ({}) as Record<string, unknown>);
         setStatus('error');
-        setErrorMsg('Failed to start stitch');
+        setErrorMsg((body as { error?: string }).error ?? 'Failed to start stitch');
         return;
       }
 
-      let promptId: string | null = null;
-      let generationId: string | null = null;
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() ?? '';
-        let eventName = '';
-        for (const line of lines) {
-          if (line.startsWith('event:')) { eventName = line.slice(6).trim(); continue; }
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (eventName === 'init') {
-            const parsed = JSON.parse(data) as { promptId: string; generationId: string };
-            promptId = parsed.promptId;
-            generationId = parsed.generationId;
-            addJob({
-              promptId,
-              generationId,
-              mediaType: 'stitch',
-              promptSummary: `Stitched: ${projectName}`.slice(0, 60),
-              startedAt: Date.now(),
-              runningSince: Date.now(),
-              progress: null,
-              status: 'running',
-            });
-          } else if (eventName === 'progress') {
-            const parsed = JSON.parse(data) as { value: number; max: number };
-            setProgress({ current: parsed.value, total: parsed.max });
-          } else if (eventName === 'completing') {
-            if (promptId) setCompleting(promptId);
-          } else if (eventName === 'complete') {
-            const parsed = JSON.parse(data) as { records: GenerationRecord[] };
-            const record = parsed.records[0];
-            if (!record) {
-              setStatus('error');
-              setErrorMsg('Stitch completed but no record returned');
-              return;
-            }
-            if (promptId && generationId) completeJob(promptId, generationId);
-            setStatus('done');
-            onStitched({
-              id: record.id,
-              filePath: record.filePath,
-              frames: record.frames ?? 0,
-              fps: record.fps ?? 0,
-              width: record.width,
-              height: record.height,
-              createdAt: record.createdAt,
-              promptPos: record.promptPos,
-              storyboardId: record.storyboardId ?? null,
-            });
-          } else if (eventName === 'error') {
-            const parsed = JSON.parse(data) as { message: string };
-            if (promptId) failJob(promptId, parsed.message);
-            setStatus('error');
-            setErrorMsg(parsed.message);
-          }
-        }
-      }
+      const { queuedJobId } = await res.json() as { queuedJobId: string };
+      addJob({
+        queuedJobId,
+        promptId: null,
+        generationId: '',
+        mediaType: 'stitch',
+        promptSummary: `Stitched: ${projectName}`.slice(0, 60),
+        startedAt: Date.now(),
+        runningSince: Date.now(),
+        progress: null,
+        status: 'pending',
+        queuePosition: null,
+        retryCount: 0,
+        lastFailReason: null,
+      });
+      setStatus('done');
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
       setStatus('error');
@@ -881,7 +809,7 @@ function StitchModal({ projectId, projectName, videoClips, allClips, initialClip
 
           {status === 'done' && (
             <div className="py-1 space-y-3">
-              <p className="text-sm text-emerald-400 font-medium">Stitch complete! The video is now in your Gallery.</p>
+              <p className="text-sm text-emerald-400 font-medium">Stitch queued! Track progress in the queue tray.</p>
               <button
                 onClick={onClose}
                 className="w-full min-h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
@@ -1331,12 +1259,12 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const tabMenuStoryboard = storyboards.find((s) => s.id === tabMenuStoryboardId) ?? null;
 
   // Phase 5c: Quick-generate state
-  const [inFlightScenes, setInFlightScenes] = useState<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  const [inFlightScenes, setInFlightScenes] = useState<Map<string, { startedAt: number; queuedJobId: string }>>(new Map());
   const [quickGenerateError, setQuickGenerateError] = useState<{ sceneId: string; message: string } | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
 
   // Phase 6: Keyframe generation state
-  const [inFlightKeyframeScenes, setInFlightKeyframeScenes] = useState<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  const [inFlightKeyframeScenes, setInFlightKeyframeScenes] = useState<Map<string, { startedAt: number; queuedJobId: string }>>(new Map());
   const [keyframeError, setKeyframeError] = useState<{ sceneId: string; message: string } | null>(null);
   const [batchKeyframeScenes, setBatchKeyframeScenes] = useState<Set<string>>(new Set());
   const [canonicalKeyframePickerScene, setCanonicalKeyframePickerScene] = useState<StoryboardScene | null>(null);
@@ -1436,9 +1364,9 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
   const { addJob } = useQueue();
 
   // Ref so polling closures always read the latest inFlightScenes without re-creating the interval
-  const inFlightScenesRef = useRef<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  const inFlightScenesRef = useRef<Map<string, { startedAt: number; queuedJobId: string }>>(new Map());
   inFlightScenesRef.current = inFlightScenes;
-  const inFlightKeyframeScenesRef = useRef<Map<string, { startedAt: number; promptId: string }>>(new Map());
+  const inFlightKeyframeScenesRef = useRef<Map<string, { startedAt: number; queuedJobId: string }>>(new Map());
   inFlightKeyframeScenesRef.current = inFlightKeyframeScenes;
 
   const load = useCallback(async () => {
@@ -1834,19 +1762,18 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     };
     if (startImageB64) requestBody.startImageB64 = startImageB64;
 
-    let promptId: string;
+    let queuedJobId: string;
     try {
       const res = await fetch('/api/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
-      if (!res.ok) {
+      if (res.status !== 202) {
         const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error((errBody as { error?: string }).error ?? `HTTP ${res.status}`);
       }
-      if (!res.body) throw new Error('No SSE body');
-      promptId = await readInitEvent(res.body);
+      ({ queuedJobId } = await res.json() as { queuedJobId: string });
     } catch (err) {
       setQuickGenerateError({ sceneId: scene.id, message: String(err) });
       return;
@@ -1854,16 +1781,20 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
     const startedAt = Date.now();
     addJob({
-      promptId,
+      queuedJobId,
+      promptId: null,
       generationId: '',
       mediaType: 'video',
       promptSummary: `Scene ${scene.position + 1}: ${scene.description.slice(0, 40)}`,
       startedAt,
       runningSince: null,
       progress: null,
-      status: 'queued',
+      status: 'pending',
+      queuePosition: null,
+      retryCount: 0,
+      lastFailReason: null,
     });
-    setInFlightScenes((prev) => new Map(prev).set(scene.id, { startedAt, promptId }));
+    setInFlightScenes((prev) => new Map(prev).set(scene.id, { startedAt, queuedJobId }));
   }
 
   async function handleGenerateKeyframe(scene: StoryboardScene) {
@@ -1880,7 +1811,7 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
       return;
     }
 
-    setInFlightKeyframeScenes((prev) => new Map(prev).set(scene.id, { startedAt: Date.now(), promptId: '' }));
+    setInFlightKeyframeScenes((prev) => new Map(prev).set(scene.id, { startedAt: Date.now(), queuedJobId: '' }));
     setKeyframeError(null);
 
     const params = {
@@ -1907,27 +1838,31 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       });
-      if (!res.ok) {
+      if (res.status !== 202) {
         const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error((errBody as { error?: string }).error ?? `HTTP ${res.status}`);
       }
-      if (!res.body) throw new Error('No SSE body');
 
-      const promptId = await readInitEvent(res.body);
+      const { queuedJobId } = await res.json() as { queuedJobId: string };
+      const startedAt = Date.now();
       setInFlightKeyframeScenes((prev) => {
         const next = new Map(prev);
-        next.set(scene.id, { startedAt: Date.now(), promptId });
+        next.set(scene.id, { startedAt, queuedJobId });
         return next;
       });
       addJob({
-        promptId,
+        queuedJobId,
+        promptId: null,
         generationId: '',
         mediaType: 'image',
         promptSummary: `Keyframe — Scene ${scene.position + 1}: ${scene.description.slice(0, 40)}`,
-        startedAt: Date.now(),
+        startedAt,
         runningSince: null,
         progress: null,
-        status: 'queued',
+        status: 'pending',
+        queuePosition: null,
+        retryCount: 0,
+        lastFailReason: null,
       });
     } catch (err) {
       setInFlightKeyframeScenes((prev) => {
@@ -2030,19 +1965,18 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
     };
     if (startImageB64) requestBody.startImageB64 = startImageB64;
 
-    let promptId: string;
+    let queuedJobId: string;
     try {
       const res = await fetch('/api/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
-      if (!res.ok) {
+      if (res.status !== 202) {
         const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error((errBody as { error?: string }).error ?? `HTTP ${res.status}`);
       }
-      if (!res.body) throw new Error('No SSE body');
-      promptId = await readInitEvent(res.body);
+      ({ queuedJobId } = await res.json() as { queuedJobId: string });
     } catch (err) {
       setQuickGenerateError({ sceneId: scene.id, message: String(err) });
       return;
@@ -2050,16 +1984,20 @@ export default function ProjectDetailView({ projectId, onBack, onDeleted, onNavi
 
     const startedAt = Date.now();
     addJob({
-      promptId,
+      queuedJobId,
+      promptId: null,
       generationId: '',
       mediaType: 'video',
       promptSummary: `Scene ${scene.position + 1}: ${scene.description.slice(0, 40)}`,
       startedAt,
       runningSince: null,
       progress: null,
-      status: 'queued',
+      status: 'pending',
+      queuePosition: null,
+      retryCount: 0,
+      lastFailReason: null,
     });
-    setInFlightScenes((prev) => new Map(prev).set(scene.id, { startedAt, promptId }));
+    setInFlightScenes((prev) => new Map(prev).set(scene.id, { startedAt, queuedJobId }));
   }
 
   function handleGenerateScene(scene: StoryboardScene) {

@@ -15,7 +15,7 @@ import ReferencePanel from './ReferencePanel';
 import ProjectPicker from './ProjectPicker';
 import NewProjectModal from './NewProjectModal';
 import { useQueue, type ActiveJob } from '@/contexts/QueueContext';
-import type { ActiveJobInfo } from '@/lib/comfyws';
+import type { ActiveQueueJobInfo } from '@/types';
 import { useModelLists } from '@/lib/useModelLists';
 import VideoLoraStack from './VideoLoraStack';
 
@@ -354,10 +354,7 @@ export default function Studio({
 }: Props) {
   const {
     addJob,
-    updateProgress,
-    setCompleting,
-    completeJob,
-    failJob,
+    removeJob: _removeJob,
     requestPermissionIfNeeded,
   } = useQueue();
 
@@ -436,26 +433,38 @@ export default function Studio({
     setMode(readSessionMode());
     setProjectContext(readSessionProjectContext());
 
-    // On mount, poll for any in-flight jobs on the server (post-refresh recovery)
-    fetch('/api/jobs/active')
+    // On mount, recover any in-flight or recently-completed jobs from the durable queue
+    fetch('/api/queue/active')
       .then((r) => r.json())
-      .then(({ jobs: serverJobs }: { jobs: ActiveJobInfo[] }) => {
+      .then(({ jobs: serverJobs }: { jobs: ActiveQueueJobInfo[] }) => {
         for (const sj of serverJobs) {
+          const mapStatus = (s: ActiveQueueJobInfo['status']): ActiveJob['status'] => {
+            switch (s) {
+              case 'pending': return 'pending';
+              case 'submitted': return 'queued';
+              case 'running': return 'running';
+              case 'completing': return 'completing';
+              case 'complete': return 'done';
+              case 'failed':
+              case 'cancelled':
+                return 'error';
+              default: return 'pending';
+            }
+          };
           const job: ActiveJob = {
+            queuedJobId: sj.queuedJobId,
             promptId: sj.promptId,
             generationId: sj.generationId,
             mediaType: sj.mediaType,
             promptSummary: sj.promptSummary,
-            startedAt: sj.startedAt || Date.now(),
-            runningSince: sj.runningSince ?? null,
+            startedAt: Date.now(),
+            runningSince: sj.runningSince ? new Date(sj.runningSince).getTime() : null,
             progress: sj.progress,
-            // Map server status to client status
-            status: sj.status === 'done' ? 'done'
-              : sj.status === 'error' ? 'error'
-              : sj.status === 'queued' ? 'queued'
-              : 'running',
+            status: mapStatus(sj.status),
+            queuePosition: sj.queuePosition,
+            retryCount: sj.retryCount,
+            lastFailReason: sj.lastFailReason,
           };
-          if (sj.status === 'error') job.errorMessage = sj.errorMessage;
           addJob(job);
         }
       })
@@ -995,7 +1004,7 @@ export default function Studio({
     requestPermissionIfNeeded();
 
     for (let i = 0; i < batchSize; i++) {
-      // seed === -1: route randomizes per take; explicit seed: sequential seed + i for reproducibility
+      // seed === -1: runner randomizes per take; explicit seed: sequential seed + i
       const takeSeed = baseSeed === -1 ? -1 : baseSeed + i;
       const generateParams: GenerationParams = { ...basePayload, seed: takeSeed };
 
@@ -1011,7 +1020,7 @@ export default function Studio({
         return;
       }
 
-      if (!res.ok) {
+      if (res.status !== 202) {
         try {
           const errBody = await res.json() as { error: string };
           setSubmitError(errBody.error);
@@ -1021,87 +1030,26 @@ export default function Studio({
         return;
       }
 
-      if (!res.body) {
-        setSubmitError('No response stream');
-        return;
-      }
+      const { queuedJobId } = await res.json() as { queuedJobId: string };
 
-      // Process this take's SSE stream in the background — don't block the submission loop
-      const reader = res.body.getReader();
-      const takeIndex = i;
-
-      void (async () => {
-        const dec = new TextDecoder();
-        let lineBuf = '';
-        let currentEvt = '';
-        let streamDone = false;
-        let jobPromptId = '';
-        let jobAdded = false;
-
-        try {
-          while (!streamDone) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            lineBuf += dec.decode(value, { stream: true });
-            const lines = lineBuf.split('\n');
-            lineBuf = lines.pop() ?? '';
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                currentEvt = line.slice(7).trim();
-              } else if (line.startsWith('data: ')) {
-                const dataStr = line.slice(6);
-                if (currentEvt === 'init') {
-                  const initData = JSON.parse(dataStr) as { promptId: string; resolvedSeed: number };
-                  jobPromptId = initData.promptId;
-                  // Display the first take's seed; subsequent takes visible in gallery
-                  if (takeIndex === 0) setLastResolvedSeed(initData.resolvedSeed);
-                  if (!jobAdded) {
-                    jobAdded = true;
-                    addJob({
-                      promptId: jobPromptId,
-                      generationId: '',
-                      mediaType: 'image',
-                      promptSummary,
-                      startedAt: submitTime,
-                      runningSince: null,
-                      progress: null,
-                      status: 'queued',
-                    });
-                  }
-                } else if (currentEvt === 'progress') {
-                  const pd = JSON.parse(dataStr) as { value: number; max: number };
-                  if (jobPromptId) updateProgress(jobPromptId, { current: pd.value, total: pd.max });
-                } else if (currentEvt === 'completing') {
-                  if (jobPromptId) setCompleting(jobPromptId);
-                } else if (currentEvt === 'complete') {
-                  const d = JSON.parse(dataStr) as { records: GenerationRecord[] };
-                  // Accumulate results as each take completes — order depends on ComfyUI queue
-                  setLastImageRecords((prev) => [...prev, ...d.records]);
-                  if (jobPromptId) completeJob(jobPromptId, d.records[0]?.id ?? '');
-                  onGenerated();
-                  reader.cancel();
-                  streamDone = true;
-                  break;
-                } else if (currentEvt === 'error') {
-                  const er = JSON.parse(dataStr) as { message: string };
-                  if (jobPromptId) {
-                    failJob(jobPromptId, er.message);
-                  } else {
-                    setSubmitError(er.message);
-                  }
-                  reader.cancel();
-                  streamDone = true;
-                  break;
-                }
-                currentEvt = '';
-              }
-            }
-          }
-        } catch {
-          if (jobPromptId) failJob(jobPromptId, 'SSE connection lost');
-        }
-      })();
+      addJob({
+        queuedJobId,
+        promptId: null,
+        generationId: '',
+        mediaType: 'image',
+        promptSummary,
+        startedAt: submitTime,
+        runningSince: null,
+        progress: null,
+        status: 'pending',
+        queuePosition: null,
+        retryCount: 0,
+        lastFailReason: null,
+      });
     }
+
+    // Trigger gallery refresh (no-op if gallery not visible; refreshes on next visit)
+    onGenerated();
   }
 
   // ── Video generation ──────────────────────────────────────────────────────
@@ -1179,7 +1127,7 @@ export default function Studio({
     requestPermissionIfNeeded();
 
     for (let i = 0; i < batchSize; i++) {
-      // seed === -1: route randomizes independently per take; explicit: sequential seed+i
+      // seed === -1: runner randomizes independently per take; explicit: sequential seed+i
       const takeSeed = baseSeed === -1 ? -1 : baseSeed + i;
 
       let res: Response;
@@ -1208,7 +1156,7 @@ export default function Studio({
         return;
       }
 
-      if (!res.ok) {
+      if (res.status !== 202) {
         try {
           const errBody = await res.json() as { error: string };
           setSubmitError(errBody.error);
@@ -1218,86 +1166,26 @@ export default function Studio({
         return;
       }
 
-      if (!res.body) {
-        setSubmitError('No response stream');
-        return;
-      }
+      const { queuedJobId } = await res.json() as { queuedJobId: string };
 
-      // Process this take's SSE stream in the background — don't block the submission loop
-      const reader = res.body.getReader();
-
-      void (async () => {
-        const dec = new TextDecoder();
-        let lineBuf = '';
-        let currentEvt = '';
-        let streamDone = false;
-        let jobPromptId = '';
-        let jobAdded = false;
-
-        try {
-          while (!streamDone) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            lineBuf += dec.decode(value, { stream: true });
-            const lines = lineBuf.split('\n');
-            lineBuf = lines.pop() ?? '';
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                currentEvt = line.slice(7).trim();
-              } else if (line.startsWith('data: ')) {
-                const dataStr = line.slice(6);
-                if (currentEvt === 'init') {
-                  const initData = JSON.parse(dataStr) as { promptId: string; generationId: string };
-                  jobPromptId = initData.promptId;
-                  if (!jobAdded) {
-                    jobAdded = true;
-                    addJob({
-                      promptId: jobPromptId,
-                      generationId: initData.generationId,
-                      mediaType: 'video',
-                      promptSummary,
-                      startedAt: submitTime,
-                      runningSince: null,
-                      progress: null,
-                      status: 'queued',
-                    });
-                  }
-                } else if (currentEvt === 'progress') {
-                  const pd = JSON.parse(dataStr) as { value: number; max: number };
-                  if (jobPromptId) updateProgress(jobPromptId, { current: pd.value, total: pd.max });
-                } else if (currentEvt === 'completing') {
-                  if (jobPromptId) setCompleting(jobPromptId);
-                } else if (currentEvt === 'complete') {
-                  const d = JSON.parse(dataStr) as { records: GenerationRecord[] };
-                  setLastVideoResults((prev) => [...prev, ...d.records]);
-                  if (jobPromptId) completeJob(jobPromptId, d.records[0]?.id ?? '');
-                  onGenerated();
-                  // Clear activeSceneId after first take completes — subsequent takes from
-                  // the same submit don't carry the scene ID
-                  setActiveSceneId(null);
-                  reader.cancel();
-                  streamDone = true;
-                  break;
-                } else if (currentEvt === 'error') {
-                  const er = JSON.parse(dataStr) as { message: string };
-                  if (jobPromptId) {
-                    failJob(jobPromptId, er.message);
-                  } else {
-                    setSubmitError(er.message);
-                  }
-                  reader.cancel();
-                  streamDone = true;
-                  break;
-                }
-                currentEvt = '';
-              }
-            }
-          }
-        } catch {
-          if (jobPromptId) failJob(jobPromptId, 'SSE connection lost');
-        }
-      })();
+      addJob({
+        queuedJobId,
+        promptId: null,
+        generationId: '',
+        mediaType: 'video',
+        promptSummary,
+        startedAt: submitTime,
+        runningSince: null,
+        progress: null,
+        status: 'pending',
+        queuePosition: null,
+        retryCount: 0,
+        lastFailReason: null,
+      });
     }
+
+    setActiveSceneId(null);
+    onGenerated();
   }
 
   // ── Misc handlers ─────────────────────────────────────────────────────────

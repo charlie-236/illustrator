@@ -285,6 +285,53 @@ export interface VideoRemixData {
   lightning: boolean | null;
 }
 
+// ── Phase 8: Durable app-side queue ──────────────────────────────────────────
+
+export type QueuedJobStatus =
+  | 'pending'
+  | 'submitted'
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'cancelled';
+
+export interface QueuedJobRecord {
+  id: string;
+  mediaType: 'image' | 'video' | 'stitch';
+  payloadJson: Record<string, unknown>;
+  generationId: string | null;
+  projectId: string | null;
+  sceneId: string | null;
+  storyboardId: string | null;
+  status: QueuedJobStatus;
+  promptId: string | null;
+  retryCount: number;
+  lastFailReason: string | null;
+  position: number;
+  createdAt: string;
+  submittedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+// Shape returned by GET /api/queue/active
+export interface ActiveQueueJobInfo {
+  queuedJobId: string;
+  promptId: string | null;
+  mediaType: 'image' | 'video' | 'stitch';
+  status: QueuedJobStatus | 'completing';
+  progress: { current: number; total: number } | null;
+  promptSummary: string;
+  createdAt: string;
+  submittedAt: string | null;
+  startedAt: string | null;
+  runningSince: string | null;
+  queuePosition: number | null;
+  retryCount: number;
+  lastFailReason: string | null;
+  generationId: string;
+}
+
 export type SSEEvent =
   | { type: 'progress'; value: number; max: number }
   | { type: 'complete'; records: GenerationRecord[] }

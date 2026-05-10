@@ -130,6 +130,47 @@ model EmbeddingConfig {
   updatedAt     DateTime @updatedAt
 }
 
+model QueuedJob {
+  id              String    @id @default(cuid())
+
+  // What media type and full payload — enough to re-submit to ComfyUI
+  mediaType       String    // 'image' | 'video' | 'stitch'
+  payloadJson     Json      // GenerationParams | VideoRequest | StitchParams (full request body)
+
+  // Lineage — tie back to whatever surface created this
+  generationId    String?   // populated by runner on submission (video/stitch pre-set; image set on finalize)
+  projectId       String?   // for project-context jobs
+  sceneId         String?   // for storyboard scenes
+  storyboardId    String?   // for storyboard batches
+
+  // Lifecycle state machine
+  status          String    @default("pending")
+  // 'pending'   — in DB, not yet submitted to ComfyUI
+  // 'submitted' — POSTed to ComfyUI, awaiting execution_start
+  // 'running'   — ComfyUI accepted, executing or queued internally
+  // 'complete'  — finalized successfully
+  // 'failed'    — terminal failure
+  // 'cancelled' — user-cancelled (pre or during)
+
+  promptId        String?   // ComfyUI prompt_id, populated after submission
+
+  // Retry tracking (auto-retry on VM loss only)
+  retryCount      Int       @default(0)
+  lastFailReason  String?   // 'vm_lost' | 'workflow_error' | 'aborted' | 'timeout'
+
+  // Ordering (FIFO by position+createdAt; position reserved for future reorder UI)
+  position        Int       @default(0)
+
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  submittedAt     DateTime?
+  startedAt       DateTime? // when ComfyUI's execution_start event arrived
+  finishedAt      DateTime?
+
+  @@index([status, position])
+  @@index([promptId])
+}
+
 model SamplingPreset {
   id          String   @id @default(cuid())
   name        String   @unique

@@ -93,4 +93,4 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Suggestions diagnostics + robust parser — `batch/fix-suggestions-robust-parsing` (PR #88)
 - [~] Suggestions: independent SUGGESTIONS_LLM_* env vars — `batch/fix-suggestions-independent-endpoint` (PR #90)
 - [~] Suggestions persistence — surface swallowed Prisma error + fix Json cast — `batch/fix-suggestions-persistence` (PR #89)
-- [ ] Phase 8 — Durable app-side queue (spot-resilience) — see prompts/phase-8-durable-queue.md
+- [~] Phase 8 — Durable app-side queue (spot-resilience) — `batch/phase-8-durable-queue` (PR #91)
