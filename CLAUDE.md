@@ -4,7 +4,8 @@ Loom is a tablet-first multi-modal creative workspace. Single-user, local-first.
 
 ---
 ## Agent Roles
-For agent role briefs, see `agents/`. The workflow is described in `agents/ROLES.md
+For agent role briefs, see 'agents/'. The workflow is described in 'agents/ROLES.md'
+
 ---
 
 ## 🛑 CRITICAL ARCHITECTURE RULES
