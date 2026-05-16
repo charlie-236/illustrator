@@ -13,7 +13,7 @@ Re-read CLAUDE.md before starting. Disk-avoidance is unaffected — no workflow 
 
 ## Critical
 
-This batch only touches **the public-repo surface**: source code, `.env.example`, prompt files in `prompts/`, and `CLAUDE.md`. The user's local `.env` is theirs to update — the agent doesn't see it, doesn't write it, and doesn't pretend to know what's in it.
+This batch only touches **the public-repo surface**: source code, `.env.example`, prompt files in `tasks/`, and `CLAUDE.md`. The user's local `.env` is theirs to update — the agent doesn't see it, doesn't write it, and doesn't pretend to know what's in it.
 
 Tablet UX: ServerBay's display labels become user-supplied. The agent can't know what the user will type, so the rendering must handle long labels (truncate or wrap gracefully) and the empty-services case (no services configured → friendly empty state).
 
@@ -337,7 +337,7 @@ Files that contain the username (verify with `grep -rn "charlie" .` after each p
 
 **`add_model.sh`** — verify; the script should already read everything from `.env`, but check for any default values that fall back to a hardcoded path.
 
-**`prompts/*.md`** — every reference to `/home/charlie/` becomes `/home/<your-user>/`. Same for any `charlie@<ip>` SSH commands (those should be `<your-user>@<gpu-vm-ip>` per the existing placeholder convention).
+**`tasks/*.md`** — every reference to `/home/charlie/` becomes `/home/<your-user>/`. Same for any `charlie@<ip>` SSH commands (those should be `<your-user>@<gpu-vm-ip>` per the existing placeholder convention).
 
 **`CLAUDE.md`** — same sweep. Replace all paths and usernames.
 

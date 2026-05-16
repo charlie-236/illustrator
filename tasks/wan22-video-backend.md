@@ -2,7 +2,7 @@
 
 First step toward video in the app. This batch is **backend only** — no UI work. After this lands, you can hit `/api/generate-video` with curl and get a webm back. Studio integration (Prompt 1.2) and Gallery integration (Prompt 1.3) follow in subsequent batches.
 
-The model is Wan 2.2 (14B fp8 MoE). Models are already on the VM. Two API-format ComfyUI workflows are at `prompts/wan22_t2v.json` and `prompts/wan22_i2v.json`, smoke-tested end-to-end. Read `prompts/video-report.md` carefully — it documents three load-bearing gotchas and the parameter map for the API override layer.
+The model is Wan 2.2 (14B fp8 MoE). Models are already on the VM. Two API-format ComfyUI workflows are at `tasks/wan22_t2v.json` and `tasks/wan22_i2v.json`, smoke-tested end-to-end. Read `tasks/video-report.md` carefully — it documents three load-bearing gotchas and the parameter map for the API override layer.
 
 Re-read CLAUDE.md before starting. This batch introduces a **narrow exception** to the disk-avoidance rule, documented in detail below.
 
@@ -68,9 +68,9 @@ type VideoParams = {
 
 Implementation:
 
-1. Copy `prompts/wan22_t2v.json` and `prompts/wan22_i2v.json` into `src/lib/wan22-templates/` (new directory). These are the API-format templates. Import them as JSON modules. Don't reference `prompts/` at runtime — that directory is for prompts to me, not runtime data.
+1. Copy `tasks/wan22_t2v.json` and `tasks/wan22_i2v.json` into `src/lib/wan22-templates/` (new directory). These are the API-format templates. Import them as JSON modules. Don't reference `tasks/` at runtime — that directory is for tasks to me, not runtime data.
 
-2. For each builder, deep-clone the template, then mutate per the parameter map in `prompts/video-report.md`:
+2. For each builder, deep-clone the template, then mutate per the parameter map in `tasks/video-report.md`:
 
    | Parameter | Node (t2v) | Node (i2v) | Path |
    |---|---|---|---|
@@ -184,8 +184,8 @@ function validateVideoWorkflow(wf: ComfyWorkflow): void {
 
 The existing comfyws.ts is a singleton with per-prompt subscriptions. Extend it (don't fork it):
 
-- The `executed` message handler currently looks for image binary data via WS. For video prompts, no binary frames arrive — the data lives on disk. Add a code path that, when the executed message is for a SaveWEBM node (detect by class_type or by the prompt being marked as a video prompt at registration time), records `{filename, subfolder}` and resolves the prompt's promise with that metadata instead of binary data.
-- Cleanest implementation: when a prompt is registered, the caller passes a `mediaType` flag. Video prompts resolve with `{kind: 'video', filename, subfolder}`; image prompts resolve with `{kind: 'image', bytes}` as today.
+- The `executed` message handler currently looks for image binary data via WS. For video tasks, no binary frames arrive — the data lives on disk. Add a code path that, when the executed message is for a SaveWEBM node (detect by class_type or by the prompt being marked as a video prompt at registration time), records `{filename, subfolder}` and resolves the prompt's promise with that metadata instead of binary data.
+- Cleanest implementation: when a prompt is registered, the caller passes a `mediaType` flag. Video tasks resolve with `{kind: 'video', filename, subfolder}`; image tasks resolve with `{kind: 'image', bytes}` as today.
 - Watchdog timeout argument added to the registration call (15 min for video, existing default for image).
 
 If the existing API doesn't expose registration cleanly, factor it out — but minimize churn. The image path's behavior must be byte-for-byte identical after this batch.
@@ -246,7 +246,7 @@ Document in the PR description: total wall-clock time observed for a 57-frame t2
 - No FPS selection — 16 hardcoded.
 - No LoRA support for video. Wan LoRAs exist but the workflow plumbing is its own batch — queue separately if you want it.
 - Don't touch the existing image path's class_type guard, watchdog timeout, or storage logic except where the video path explicitly needs to extend them.
-- Don't add a Polish equivalent for video prompts. The polisher is SD-tag-tuned; Wan wants prose. Confirmed out of scope by the user.
+- Don't add a Polish equivalent for video tasks. The polisher is SD-tag-tuned; Wan wants prose. Confirmed out of scope by the user.
 - Don't expose first+last-frame conditioning. First-frame i2v only for Phase 1.
 - Don't add audio support. Wan 2.2 doesn't generate audio natively — the example LTX setup did, Wan doesn't, this is fine.
 - Don't try to surface VAE-decode progress in SSE. Sampling-only progress is sufficient for Phase 1.
