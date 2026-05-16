@@ -439,7 +439,7 @@ src/
     notification.ts     playChime() Web Audio API bell tone; requestNotificationPermission(); sendBrowserNotification()
     workflow.ts         buildWorkflow() — image path
     wan22-workflow.ts   buildT2VWorkflow(), buildI2VWorkflow() — Wan 2.2 video path; exports VideoParams, ComfyWorkflow
-    wan22-templates/    wan22-t2v.json, wan22-i2v.json — API-format ComfyUI workflow templates (runtime data; do not reference prompts/ at runtime)
+    wan22-templates/    wan22-t2v.json, wan22-i2v.json — API-format ComfyUI workflow templates (runtime data; do not reference tasks/ at runtime)
     prisma.ts           Prisma client singleton (global.__prisma)
     imageSrc.ts         imgSrc(filePath) helper — handles legacy /generations/ paths
     civitaiIngest.ts    SSH-driven CivitAI metadata fetch + download to the GPU VM; supports type: 'checkpoint' | 'lora' | 'embedding'; embeddings go to /models/ComfyUI/models/embeddings/

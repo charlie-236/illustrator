@@ -5,7 +5,7 @@ Status legend:
 - `[~]` in flight (PR open, awaiting review/merge)
 - `[x]` merged
 
-When picking the next item, find its prompt file in `prompts/` and execute that prompt. Never start work without a prompt file — they are the source of truth, not this list.
+When picking the next item, find its prompt file in `tasks/` and execute that prompt. Never start work without a prompt file — they are the source of truth, not this list.
 
 - [x] image storage relocation, gallery infinite-scroll, CivitAI Air format — `batch/storage-gallery-air` (PR #1)
 - [x] Install gh CLI and wire up PR creation workflow — `batch/gh-cli` (PR #2)
@@ -13,16 +13,16 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] CheckpointConfig.baseModel UI + auto-populate — `batch/checkpoint-basemodel` (PR #4)
 - [x] Textual inversion / embeddings full feature — `batch/checkpoint-basemodel` (PR #5)
 - [x] Fix delete-from-UI to actually remove image files from disk — `batch/checkpoint-basemodel` (PR #5)
-- [x] Clean up leftovers from image-storage migration — see prompts/storage-migration-leftovers.md (direct commit to main, AGENTS.md violation)
+- [x] Clean up leftovers from image-storage migration — see tasks/storage-migration-leftovers.md (direct commit to main, AGENTS.md violation)
 - [x] Fail closed on missing SSH env vars + validate /api/generate body — `batch/input-env-hardening` (PR #7)
-- [x] Extract useModelLists hook + clean up ModelSelect effect deps — see prompts/modelselect-hook-refactor.md (PR #8)
+- [x] Extract useModelLists hook + clean up ModelSelect effect deps — see tasks/modelselect-hook-refactor.md (PR #8)
 - [x] Prisma client touch-ups — `batch/prisma-client-touchups` (PR #9)
 - [x] Delete-by-filename for checkpoints and LoRAs (replaces /api/models/[id]) — `batch/model-delete-by-filename` (PR #10)
 - [x] Source embeddings list from the VM (orphan visibility + delete) — `batch/embeddings-vm-source` (PR #11)
 - [x] Real-readiness status probe for Admin tab services — `batch/service-readiness-probe` (PR #12)
 - [x] Aphrodite readiness probe fix (PR #12 follow-up) — `batch/aphrodite-readiness-probe-fix` (PR #13)
 - [x] Wan 2.2 video generation backend (Phase 1.1 of video) — `batch/wan22-video-backend` (PR #15)
-- [x] Wan 2.2 video generation backend fixes (Phase 1.1 of video) — `prompts/wan22-video-backend-fixes.md` — `batch/wan22-video-backend-fixes` (PR #16)
+- [x] Wan 2.2 video generation backend fixes (Phase 1.1 of video) — `batch/wan22-video-backend-fixes.md` — `batch/wan22-video-backend-fixes` (PR #16)
 - [x] Obfuscate VM filename prefix for video generations — `batch/wan22-video-filename-obfuscation` (PR #17)
 - [x] Studio video mode (Phase 1.2a of video) — `batch/wan22-studio-video-mode` (PR #18)
 - [x] Queue UX: concurrency, tray, notifications, refresh survivability (Phase 1.2b of video) — `batch/wan22-queue-ux` (PR #19)
@@ -63,9 +63,9 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Migrate image-mode generation to one-call SSE — `batch/image-one-call-sse` (PR #56)
 - [x] Consolidate per-type switches in comfyws.ts — `batch/comfyws-job-refactor` (PR #57)
 - [x] Fix StitchModal complete-event handler (post-PR-#51 cleanup) — `batch/fix-stitch-modal-complete-handler` (PR #59)
-- [x] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — see prompts/claude-md-schema-category-docs.md
-- [x] Unify dirForItem with dirForGeneration (M3 cleanup) — see prompts/unify-dirforitem.md
-- [x] Wan LoRA expert scope — ingest detection + manual override UI — see prompts/wan-lora-expert-scope.md
+- [x] CLAUDE.md schema doc gap: add category to LoraConfig and CheckpointConfig — see tasks/claude-md-schema-category-docs.md
+- [x] Unify dirForItem with dirForGeneration (M3 cleanup) — see tasks/unify-dirforitem.md
+- [x] Wan LoRA expert scope — ingest detection + manual override UI — see tasks/wan-lora-expert-scope.md
 - [x] Phase 5a — Storyboard data model + LLM generation — `batch/phase-5a-storyboard` (PR #63)
 - [x] Phase 5b — Storyboard scene execution + editing — `batch/phase-5b-storyboard-execution` (PR #64)
 - [x] Env cleanup — split LLM endpoints, remove hardware-specific names — `batch/env-cleanup-llm-split-and-hardware-neutral` (PR #65)
@@ -76,7 +76,7 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Phase 6 — Storyboard keyframes (cheap previews + promote to video) — `batch/phase-6-storyboard-keyframes` (PR #70)
 - [x] Fix bundle — Phase 5d / Phase 6 issues (keyframe checkpoint, deletes, attach/detach, stitch storyboard naming) — `batch/fix-5d-and-phase6-issues` (PR #72)
 - [x] Fix storyboard tab ⋮ menu + add rename — `batch/fix-storyboard-tab-menu-and-rename` (PR #73)
-- [x] Strip hardcoded service identities and username from public repo — see prompts/strip-hardcoded-service-identities.md
+- [x] Strip hardcoded service identities and username from public repo — see tasks/strip-hardcoded-service-identities.md
 - [x] Rename app to Loom + install new logo — `batch/rename-to-loom` (PR #75)
 - [X] comfyws cleanup hygiene — SSH cleanup on reconnect + activePromptId clear on abort — `batch/comfyws-cleanup-hygiene` (PR #76)
 - [x] Phase 7a — Ghost writing chat (foundation) — `batch/phase-7a-ghost-writing` (PR #77)
@@ -87,8 +87,8 @@ When picking the next item, find its prompt file in `prompts/` and execute that 
 - [x] Keyframe fixes bundle (delete regression, regenerate-all, auto-canonical) — `batch/fix-keyframe-bundle` (PR #82)
 - [x] Cross-cutting fixes (queue auto-remove, gallery duplicates, WAN toggle, lora download status, tablet crypto) — `batch/fix-cross-cutting-bundle` (PR #83)
 - [x] Cross-cutting bundle followups (queue auto-clear, WAN toggle, queue timer) — `batch/fix-cross-cutting-followups` (PR #84)
-- [x] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see prompts/fix-chat-scroll-and-width.md
-- [x] Phase 7 followup — suggested next prompts (three pills above composer) — see prompts/phase-7-suggested-next-prompts.md
+- [x] Chat surface UX fixes (no auto-scroll, scroll-to-top, fill width) — see tasks/fix-chat-scroll-and-width.md
+- [x] Phase 7 followup — suggested next prompts (three pills above composer) — see tasks/phase-7-suggested-next-prompts.md
 - [x] Move WAN high/low to Models tab + diagnose disappearing suggestions — `batch/fix-wan-toggle-and-suggestions` (PR #87)
 - [x] Suggestions diagnostics + robust parser — `batch/fix-suggestions-robust-parsing` (PR #88)
 - [~] Suggestions: independent SUGGESTIONS_LLM_* env vars — `batch/fix-suggestions-independent-endpoint` (PR #90)

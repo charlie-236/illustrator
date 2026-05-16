@@ -2,7 +2,7 @@
 
 Project stitching fails immediately with `ffprobe failed (code 1):` (empty stderr). The pending stitched `Generation` row is created and then deleted; the SSE stream returns 200 with an `error` event. Cause: `src/app/api/projects/[id]/stitch/route.ts` uses `STITCH_OUTPUT_DIR` for both the output mp4 path **and** the source clip paths. Source clips are `.webm` files written by `/api/generate-video` to `VIDEO_OUTPUT_DIR` — when the user has split env vars per the env-refactor batch, the source paths point at the wrong directory and ffprobe gets non-existent files.
 
-This is a regression introduced by the env-refactor batch (`prompts/env-refactor.md`, PR #41). That prompt instructed the agent to swap the route's single `outputDir` from `IMAGE_OUTPUT_DIR` to `STITCH_OUTPUT_DIR` but didn't flag that the route reads source clips as well as writing output — the source side needs `VIDEO_OUTPUT_DIR` (or `STITCH_OUTPUT_DIR` for the unusual case of a stitched output added to a project as a clip and re-stitched).
+This is a regression introduced by the env-refactor batch (`tasks/env-refactor.md`, PR #41). That prompt instructed the agent to swap the route's single `outputDir` from `IMAGE_OUTPUT_DIR` to `STITCH_OUTPUT_DIR` but didn't flag that the route reads source clips as well as writing output — the source side needs `VIDEO_OUTPUT_DIR` (or `STITCH_OUTPUT_DIR` for the unusual case of a stitched output added to a project as a clip and re-stitched).
 
 `src/app/api/extract-last-frame/route.ts` already has the right pattern via a `dirForGeneration({ mediaType, isStitched })` helper. Mirror it.
 

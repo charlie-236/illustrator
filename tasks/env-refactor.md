@@ -48,7 +48,7 @@ The `/api/images/<filename>` URL path remains the single way to serve any of the
 
   Alternative cleaner pattern: when creating the DB row at finalize time, store an additional `mediaCategory: 'image' | 'clip' | 'stitch'` field that the static-serve handler uses to pick the right directory. But that's a schema migration just to avoid a 3-way fs check; too much for this batch. The "try each directory" pattern is fine for single-user volume.
 
-- `prompts/extract-last-frame/route.ts` (already grep-confirmed at `src/app/api/extract-last-frame/route.ts`) — handle the path-traversal guard against the resolved directory, not the static `IMAGE_OUTPUT_DIR`.
+- `tasks/extract-last-frame/route.ts` (already grep-confirmed at `src/app/api/extract-last-frame/route.ts`) — handle the path-traversal guard against the resolved directory, not the static `IMAGE_OUTPUT_DIR`.
 
 The migration concern: existing files. The user has files in the current `IMAGE_OUTPUT_DIR`. After this batch, image files stay there (the env var name doesn't change for that case), but video and stitched files would conceptually belong elsewhere — but they're currently in `IMAGE_OUTPUT_DIR`. **Don't auto-move existing files.** Document the migration step in the PR description: "If you split your output directories, manually move existing video files (.webm) and stitched files (stitched_*.mp4) to their new homes; otherwise they'll 404 in the gallery." Or instruct the user to keep `VIDEO_OUTPUT_DIR` and `STITCH_OUTPUT_DIR` pointing at the same path as `IMAGE_OUTPUT_DIR` initially, then migrate at their leisure.
 

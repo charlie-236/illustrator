@@ -5,3 +5,4 @@ node_modules/
 public/generations/
 prisma/migrations/
 model_instructions/
+runs/

@@ -4,7 +4,7 @@ UI work to make the video backend usable from Studio. Adds an Image/Video mode t
 
 Backend already exists at `POST /api/generate-video` from PR #13. SSE shape mirrors `/api/generate`. Filename obfuscation lands separately as `wan22-video-filename-obfuscation` — no UI dependency on it.
 
-Re-read CLAUDE.md and `prompts/video-report.md` before starting.
+Re-read CLAUDE.md and `tasks/video-report.md` before starting.
 
 ---
 
