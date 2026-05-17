@@ -274,8 +274,6 @@ The User's local machine drives the loop. The wrapper script:
 
 Files that are gitignored and never enter PRs:
 - `.env` — DB URL, GPU VM SSH key path, IMAGE_OUTPUT_DIR, etc.
-- `~/gh-credentials` — out-of-repo copy of `~/.config/gh` for
-  Cowork sandbox use
 - Anything under `runs/` — script logs, sentinels
 
 Any PR that requires post-merge actions (Prisma migration, env var

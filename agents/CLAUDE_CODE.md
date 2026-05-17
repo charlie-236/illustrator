@@ -120,6 +120,32 @@ If a task prompt comes with additional QA-designed pre-merge gates
 (A1, A2, …), run those too. The Architect's prompt will list any
 project-specific assertions.
 
+### Where these commands run
+
+The disk-avoidance greps are static checks against source files —
+they run wherever the working tree is.
+
+`npm run build` needs to run **on mint-main** (`192.168.1.206`)
+because the app's runtime expectations resolve there (Postgres,
+Tailscale to the Azure A100 VM running ComfyUI). It will appear
+to work on other machines but produces false-negative results.
+
+In practice:
+
+- **You're a Claude Code subprocess launched by `run-next-batch.sh`
+  on mint-main directly** (Cowork stack default, or User-initiated
+  via SSH). `npm run build` runs locally for you — no action
+  needed beyond `npm run build`.
+- **You're the VS Code Operator wearing the Claude Code hat on
+  PC1**. `npm run build` does NOT run locally — your wider brief
+  (`agents/OPERATOR.md`) describes the SSH-to-mint-main pattern.
+  Follow that. Do not try to run the build on PC1.
+- **You're not sure which environment you're in.** Run
+  `hostname` and `curl -m 2 http://127.0.0.1:8188/system_stats`.
+  If the hostname is `mint-main` (or similar) and the curl
+  returns a JSON system_stats response, you're on mint-main and
+  builds run locally. Otherwise stop and ask.
+
 ## Operational boundaries — DO NOT
 
 - Do not run `pm2` commands. PM2 management is the User's manual
@@ -206,21 +232,21 @@ step. After merge, the User updates `[~]` to `[x]`. Do not modify
 - ComfyUI: tunneled to `127.0.0.1:8188`; do not assume it's
   running
 
-## Cowork-specific note on gh credentials
+## Cowork-specific note on auth
 
 When `run-next-batch.sh` is launched from a Cowork sandbox session,
-`gh` cannot read `~/.config/gh` (protected host path). The wrapper
-prefixes `gh` and `git push` invocations with
-`GH_CONFIG_DIR=<gh-credentials-mount-path>` so the credentials
-under `~/gh-credentials` are used. From inside Claude Code, you
-should just use `gh` and `git push` normally — the wrapper sets up
-the environment before invoking you. If a `gh` or `git push`
-command fails with an auth error, surface it and stop; the User
-needs to re-run `gh auth login` on the host and re-copy
-`~/.config/gh ~/gh-credentials`.
+both `gh` and `git push` need credentials that aren't accessible
+from inside the bwrap sandbox by default. The Operator solves this
+by mounting `~/claude-auth-bridge` (the User's persistent auth
+state) via `request_cowork_directory` and SSHing to `localhost`
+to run the script on the host directly — see
+`agents/OPERATOR_cowork.md` for the full pattern.
 
-This `~/gh-credentials` folder is intentionally outside the repo
-and never committed.
+From inside Claude Code itself, you should just use `gh` and `git
+push` normally. The wrapper sets up the environment before
+invoking you. If a `gh` or `git push` command fails with an auth
+error, surface it and stop; the User needs to refresh the bridge's
+auth state on the host.
 
 ## Repo paths
 

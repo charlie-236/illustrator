@@ -22,6 +22,86 @@ If the signals match, proceed.
 
 ---
 
+## Two-machine topology — where code lives vs. where the app runs
+
+The illustrator runs across two LAN-connected machines, and you
+need to keep them straight in your head from session start.
+
+| Machine | Role | What's local |
+|---|---|---|
+| **PC1** (where you're running) | Operator + Claude Code hat + browser-MCP driver | The git working tree, `repomix`, `gh`, `git`, the Playwright-managed browser tabs |
+| **mint-main** (`192.168.1.206`) | Application host | The Postgres database, the Next.js dev server on `:3001`, the SSH tunnel to the Azure A100 VM running ComfyUI, the production process (whatever Charlie has wired through PM2) |
+
+**Why this matters:** the Azure A100 VM is on Tailscale only from
+mint-main. **PC1 cannot reach the A100 VM at all.** That means:
+
+- `npm run build` and `npm run dev` MUST run on mint-main, not on
+  PC1. Even though `npm run build` is a static check on the
+  surface, build-time hooks and runtime env defaults in this repo
+  expect to be resolvable against the mint-main environment.
+  Running them locally on PC1 wastes time and produces
+  false-negatives.
+- Smoke tests against the running app MUST hit
+  `http://192.168.1.206:3001/...`, not `http://localhost:3001/...`.
+- Database queries (Prisma, `psql`) MUST run from mint-main, since
+  Postgres is local there and not exposed on the LAN by default.
+- ComfyUI checks (`curl http://127.0.0.1:8188/system_stats`) MUST
+  run from mint-main — that's where the tunnel terminates.
+
+**What stays on PC1:**
+
+- All file editing (the working tree is here).
+- All git operations (`git commit`, `git push`, `gh pr ...`).
+- All static checks that read source files only: the
+  disk-avoidance greps, ESLint, TypeScript compilation if you
+  scope it to type-only (`tsc --noEmit`), file-scope diffs.
+- All browser MCP driving of the Architect / Reviewer / QA tabs.
+- Reading the repo (the role-side Claudes get a `repomix` archive
+  generated locally on PC1).
+
+**Practical impact on Phase C:** when Claude Code (you, wearing
+the hat) finishes editing files locally, the build-and-validation
+gate happens via SSH to mint-main — push the branch, then run
+the gate on mint-main against a fresh checkout of that branch.
+See Phase C below for the exact pattern.
+
+### SSH from PC1 to mint-main — one-time setup
+
+You need passwordless SSH from PC1 to `charlie@192.168.1.206`.
+Confirm at the start of every session, before anything else:
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=4 charlie@192.168.1.206 'echo ok'
+```
+
+Expected output: `ok`. If you get a password prompt or
+"Permission denied", **HALT** and tell the User — they need to
+either install your SSH key on mint-main (`ssh-copy-id
+charlie@192.168.1.206` from PC1) or fix the existing one.
+
+You should also confirm the repo is checked out on mint-main and
+the remote points at the same origin as PC1's clone:
+
+```bash
+ssh charlie@192.168.1.206 'cd ~/illustrator && git remote -v && git rev-parse --abbrev-ref HEAD'
+```
+
+Expected: `origin <github-url>` and `main` as the current branch.
+If the repo isn't there, **HALT** and tell the User.
+
+For convenience, set an alias once at session start (don't export
+it to subprocess scripts — define it fresh per bash-tool call):
+
+```bash
+SSH_MINT="ssh -o BatchMode=yes -o ConnectTimeout=4 charlie@192.168.1.206"
+```
+
+Every reference to `$SSH_MINT` in the procedure below assumes that
+variable. If your bash-tool calls don't persist environment between
+invocations, inline the full SSH command instead.
+
+---
+
 ## The Operator is an implementer, not a designer
 
 This is the canonical statement of the Operator's scope. Internalize
@@ -385,7 +465,6 @@ using VS Code's file tools and bash.
 
 3. **Implement the prompt.** Follow it step by step. Hard rules:
    - Touch only the files the prompt allows
-   - Run any pre-merge gates QA designed (the "A" gates) as you go
    - Do not refactor adjacent code
    - Do not add tests beyond what QA specified
    - If a step is ambiguous, **halt** and write
@@ -394,30 +473,119 @@ using VS Code's file tools and bash.
 
 4. **Verify scope before committing:**
    ```
-   git diff --stat main..HEAD          # files changed
-   git status                          # gitignored files modified?
+   git diff --stat main..HEAD          # only commits, not WT
+   git status                          # working tree state
+   git diff main..HEAD -- '.env' '.env.local' 'ecosystem.config.js' \
+                          'prisma/schema.prisma' 'systemd/*'
    ```
-   `.env`, `~/gh-credentials`, and anything under `runs/` must NOT
-   appear in a diff. Working-tree modifications to `.env` are
-   expected and gitignored; they must not show under `git diff
-   --staged` or in the PR.
+   `.env`, anything under `runs/`, and unauthorized changes to
+   load-bearing config files must NOT appear. Working-tree
+   modifications to `.env` are expected and gitignored; they must
+   not show under `git diff --staged` or in the PR.
 
-5. **Run pre-merge gates (QA's A1–An):**
-   - Each gate must pass before the PR opens.
-   - The universal A-gates that always run:
-     - `npm run build` exits 0
-     - `grep -rn "class_type.*['\"]SaveImage['\"]"  src/` matches only `SaveImageWebsocket`
-     - `grep -rn "class_type.*['\"]LoadImage['\"]"  src/` matches only `ETN_LoadImageBase64` (and `ETN_LoadMaskBase64` for inpaint paths)
-   - If a gate fails, do NOT "improve the code" beyond the prompt's
-     scope to make the gate pass — that's a design decision. If a
-     gate failure indicates the prompt was wrong, halt and write a
-     SESSION-STALL.
+5. **Run the PC1 (local) static gates** — these read source files
+   only and don't need the app to run, so they can fire against
+   the working tree before commit:
 
-6. **Commit, push, and open the PR:**
+   - `grep -rn "class_type.*['\"]SaveImage['\"]"  src/` must match only `SaveImageWebsocket`
+   - `grep -rn "class_type.*['\"]LoadImage['\"]"  src/` must match only `ETN_LoadImageBase64` (and `ETN_LoadMaskBase64` for inpaint paths)
+   - ESLint or `tsc --noEmit` if QA's plan specifies them
+   - Any other prompt-specific greps (e.g., "no hardcoded IPs
+     remain in source")
+
+   If any PC1 static gate fails, fix on PC1 and re-run before
+   proceeding to commit. Do NOT commit a known-broken state with
+   the idea of "fixing on mint-main."
+
+6. **Commit and push the branch:**
    ```
    git add <files-from-prompt-scope>
    git commit -m "<short-name>: <description>"
    git push -u origin batch/<short-name>
+   ```
+
+7. **Run the mint-main build gate via SSH** — the branch is now
+   on origin; mint-main pulls it and builds:
+
+   ```bash
+   $SSH_MINT "cd ~/illustrator && \
+              git fetch origin --quiet && \
+              git checkout batch/<short-name> && \
+              git reset --hard origin/batch/<short-name> && \
+              ([ -f package.json ] && npm install --no-audit --no-fund 2>&1 | tail -20) ; \
+              npm run build 2>&1 | tail -50; \
+              echo \"BUILD_EXIT=\$?\""
+   ```
+
+   - The `git reset --hard origin/...` after `git checkout` makes
+     sure mint-main's working tree exactly matches the just-pushed
+     branch tip (catches the case where mint-main had local
+     un-pushed work on the same branch, which shouldn't happen but
+     would silently corrupt the gate).
+   - `npm install` is gated on `package.json` being present — but
+     since mint-main may have stale `node_modules` from a previous
+     branch with different dependencies, run it whenever the diff
+     between `origin/main` and your branch touches `package.json`
+     or `package-lock.json`. When in doubt, run it.
+   - Capture both the last 50 lines of output (for the report back
+     to Architect) and the exit code via the `BUILD_EXIT=` echo.
+
+   **If `BUILD_EXIT=0`** → gate passes, continue to step 8.
+
+   **If `BUILD_EXIT≠0`** → gate fails. Do NOT "improve the code"
+   beyond the prompt's scope to make the gate pass — that's a
+   design decision. Two options:
+
+   - If the failure is mechanical (a syntax error you can see in
+     the output and the prompt's intent makes the fix obvious),
+     fix it on PC1, commit (`git commit --amend` if you want to
+     squash into the previous commit, otherwise a follow-up
+     commit), `git push --force-with-lease`, re-run the gate from
+     the SSH block above. Don't loop on this more than twice.
+   - Otherwise, halt and write a SESSION-STALL with the build
+     output. Either the prompt was wrong or there's an
+     environmental issue the User needs to look at (a missing
+     package on mint-main, a Node version mismatch, etc.).
+
+   **If QA designed additional A-gates that require the app to be
+   running** (e.g., "POST `/api/jobs/...` and verify 200 + correct
+   shape"), run those on mint-main too via SSH, against the same
+   freshly-checked-out branch. The pattern is to spin up
+   `npm run dev` on mint-main, wait for the "Ready" line, run the
+   gate via curl, then SIGTERM the dev process:
+
+   ```bash
+   $SSH_MINT "cd ~/illustrator && \
+              (nohup npm run dev > /tmp/dev-gate-<short-name>.log 2>&1 &) ; \
+              for i in {1..30}; do \
+                grep -q 'Ready in' /tmp/dev-gate-<short-name>.log && break; \
+                sleep 1; \
+              done; \
+              curl -sf -X POST http://localhost:3001/api/... ; \
+              EXIT=\$?; \
+              pkill -f 'next dev'; \
+              exit \$EXIT"
+   ```
+
+   Note `localhost:3001` is correct INSIDE the SSH session — the
+   call runs on mint-main, so localhost there is mint-main itself.
+   From PC1 (not inside the SSH session), use
+   `http://192.168.1.206:3001/...` instead.
+
+   The dev-server-spinup pattern is fiddly; if QA's plan calls for
+   many such runtime gates, ask QA to design a small driver script
+   that mint-main runs and have the SSH call invoke that script
+   with the gate name. Don't open-code each gate inline.
+
+   **Conflict with the running production app:** if mint-main is
+   serving the production app on `:3001` (whatever Charlie has
+   wired through PM2), `npm run dev` will fail to bind. Surface
+   this as a SESSION-STALL — you don't touch PM2 yourself. Charlie
+   will either stop the production process before the next session
+   or move dev to a different port.
+
+8. **Open the PR:**
+   ```
    gh pr create --base main --head batch/<short-name> \
                 --title "<short-name>: <description>" \
                 --body-file /tmp/pr-body.md
@@ -426,17 +594,17 @@ using VS Code's file tools and bash.
    The PR body (written to a temp file first to survive shell
    escaping) must follow the format in `agents/CLAUDE_CODE.md`'s
    "PR body format" section: Summary, Acceptance criteria
-   walkthrough, Manual smoke tests, Deviations, and — if applicable
-   — Post-merge actions.
+   walkthrough, Manual smoke tests, Deviations, and — if
+   applicable — Post-merge actions.
 
-7. **Update BACKLOG.md on the same branch:**
+9. **Update BACKLOG.md on the same branch:**
    - Find the `[ ]` line that referenced your task prompt
    - Change `[ ]` to `[~]`
    - Replace `— see tasks/<short-name>.md` with `— \`batch/<short-name>\` (PR #N)`
    - Commit with message `Mark <short-name> in-flight (PR #N)`
-   - Push to the same feature branch
+   - Push to the same feature branch (the PR will update)
 
-8. **Switch back to the Operator hat for Phase D.**
+10. **Switch back to the Operator hat for Phase D.**
 
 ### Phase D — PR Review (Architect-only)
 
@@ -444,10 +612,13 @@ using VS Code's file tools and bash.
    - Files changed: `gh pr diff <num> --name-only`
    - Diff scope vs. prompt scope: any files outside what the prompt
      allowed to modify?
-   - Any gitignored files (`.env`, `gh-credentials`, `runs/*`) in
-     the diff? (must NOT be)
-   - Disk-avoidance grep results
-   - `npm run build` exit code and output
+   - Any gitignored files (`.env`, anything under `runs/`) in the
+     diff? (must NOT be)
+   - Disk-avoidance grep results (run locally on PC1 against the
+     source files)
+   - `npm run build` exit code and last 50 lines (the gate that
+     ran on mint-main during Phase C step 7 — quote it back from
+     your bash-tool history)
    - PR description completeness (Summary, Acceptance criteria,
      Manual smoke tests, Deviations, Post-merge actions if needed)
 
@@ -460,8 +631,9 @@ PR #<num> opened. Mechanical facts:
 - Files changed: <list>
 - Scope check: <within prompt | violations: list>
 - Gitignored files present in diff: <yes (list) | no>
-- npm run build: <pass | fail (output)>
-- Disk-avoidance greps: <pass | fail (matches)>
+- npm run build (run on mint-main, output tail):
+  <quote>
+- Disk-avoidance greps (run on PC1): <pass | fail (matches)>
 - A-gate results: <A1: pass, A2: pass, ...>
 - PR description: <complete | missing: list>
 
@@ -508,7 +680,28 @@ approach, destructive scope violations).
 
 ### Phase E — Test + Evaluate
 
-1. Run any QA-designed verification scripts (the "B" gates).
+1. Run any QA-designed post-merge verification scripts (the "B"
+   gates). These execute on mint-main via SSH, against the merged
+   `main`:
+
+   ```bash
+   $SSH_MINT "cd ~/illustrator && \
+              git checkout main && \
+              git pull --ff-only origin main"
+   ```
+
+   Then run each B-gate as designed. Patterns:
+
+   - **Static B-gates** (read-only file checks, DB queries): one
+     SSH call per gate; capture exit code and output.
+   - **Runtime B-gates** (require the app to respond): same
+     dev-server-spinup pattern as Phase C runtime A-gates —
+     `nohup npm run dev`, wait for "Ready", curl, SIGTERM. If
+     mint-main's production app on `:3001` conflicts, surface as
+     a SESSION-STALL.
+   - **Database queries**: `psql` and `npx prisma studio` run on
+     mint-main natively; SSH and run them there.
+
 2. Architect's own evaluation if the merged change has observable
    runtime behavior worth checking. Most items in this project
    don't require a separate evaluate phase — the A/B gates plus
@@ -542,6 +735,11 @@ Save state, write `decisions/SESSION-STALL-<timestamp>.md`, exit
 the loop on any of:
 
 - Any model tier downgrade (Architect / Reviewer / QA / yourself)
+- SSH to mint-main fails (password prompt, "Permission denied", or
+  unreachable host) — the build/test gates can't fire without it
+- mint-main reports the production app on `:3001` is occupying
+  the port and you need `npm run dev` to run there for a runtime
+  gate
 - Build phase produces a diff outside prompt scope and you can't
   trivially trim it back
 - Architect verdicts STOP with `## Open issues` listing
@@ -549,8 +747,9 @@ the loop on any of:
 - Browser tab goes unresponsive after recovery attempts
   (snapshot-and-rediscover; if still broken, stall)
 - `gh pr create` fails for reasons other than transient network
-- Disk-avoidance grep fails after Claude Code's work and the cause
-  isn't obvious from the diff
+- mint-main build gate fails twice on attempted mechanical fixes
+- Disk-avoidance grep fails on PC1 after Claude Code's work and
+  the cause isn't obvious from the diff
 - Three consecutive Reviewer-round-trips on the same item — even
   if Architect is willing to keep iterating, three rounds suggests
   the prompt isn't clear and the User should look
@@ -574,21 +773,35 @@ stall), write `decisions/SESSION-SUMMARY-<timestamp>.md` with:
 - Any decision logs created during the session
 - The User's TODO when they return
 
-## Capabilities — VS Code bash, gh, git
+## Capabilities — PC1 (local) and mint-main (via SSH)
 
-You're running inside VS Code, which has full host shell access.
-Available from `bash_tool`:
+You're running inside VS Code on **PC1**, which has full host shell
+access. Available locally from `bash_tool`:
 
 - `git`, `gh` (authenticated against github.com), `node`, `npm`,
   `curl`, `python`, `ssh`
-- The GPU VM SSH key path is in `.env` at `GPU_VM_SSH_KEY_PATH`
-- Database: PostgreSQL via Prisma; `npx prisma studio` for
-  browsing, or `psql` against `$DATABASE_URL`
-- ComfyUI: tunneled to `127.0.0.1:8188`; do not assume it's
-  running — check with `curl http://127.0.0.1:8188/system_stats`
-  before any operation that depends on it
+- The repo working tree
+- The Playwright-managed browser tabs (Architect on Copilot M365,
+  Reviewer on Gemini)
 
-You do NOT have access to:
+You do NOT have, locally on PC1:
+
+- Connection to the Azure A100 VM (not on Tailscale from here)
+- The Postgres database (lives on mint-main)
+- A working `npm run build` / `npm run dev` environment (build-time
+  and runtime expectations resolve to mint-main)
+
+You reach **mint-main** at `192.168.1.206` via SSH (see the
+two-machine topology section at the top of this file for the
+one-time-setup and the `$SSH_MINT` alias). From there:
+
+- `npm run build`, `npm run dev`, `npm install`
+- `psql` against `$DATABASE_URL`; `npx prisma studio`
+- `curl http://127.0.0.1:8188/system_stats` (ComfyUI tunnel
+  terminates here)
+- The actual Next.js dev server on `:3001`
+
+You do NOT have access, on either machine, to:
 - `pm2` commands (User's manual responsibility)
 - Anything that would modify `.env`, `ecosystem.config.js`, or
   systemd unit files

@@ -18,6 +18,22 @@ instead.
 - `gh` authenticated against github.com on this machine.
 - The illustrator repo cloned at the path you usually use; `main`
   checked out with no uncommitted changes you care about.
+- **Passwordless SSH from PC1 to mint-main** (`charlie@192.168.1.206`).
+  Test once with:
+  ```
+  ssh -o BatchMode=yes -o ConnectTimeout=4 charlie@192.168.1.206 'echo ok'
+  ```
+  If you don't get `ok` back, run `ssh-copy-id charlie@192.168.1.206`
+  from PC1 to install the key, then re-test. The VS Code Operator
+  CANNOT run `npm run build` or `npm run dev` on PC1 — those
+  commands route via SSH to mint-main, and a session that can't SSH
+  there will stall at the first build gate.
+- mint-main has the illustrator repo cloned at `~/illustrator` with
+  the same origin remote. Verify with:
+  ```
+  ssh charlie@192.168.1.206 'cd ~/illustrator && git remote -v && git rev-parse --abbrev-ref HEAD'
+  ```
+  Expected: `origin <github-url>` and `main`.
 
 ## Per-session setup
 
@@ -92,21 +108,26 @@ tools/browser_helpers.md.
 At bootstrap:
 1. Confirm STACK VALIDATION matches (Playwright MCP, VS Code,
    synchronous Phase C). If not, halt and tell me.
-2. Read agents/ARCHITECT.md, agents/ROLES.md,
-   agents/OPERATOR.md, agents/REVIEWER.md, agents/QA.md,
+2. Verify passwordless SSH to mint-main:
+   `ssh -o BatchMode=yes -o ConnectTimeout=4 charlie@192.168.1.206 'echo ok'`
+   should return `ok`. If not, halt and tell me.
+3. Read agents/ARCHITECT.md, agents/ROLES.md,
+   agents/OPERATOR.md (note the "Two-machine topology" section
+   at the top — npm runs go via SSH to mint-main, not local),
+   agents/REVIEWER.md, agents/QA.md,
    agents/HISTORIAN.md, agents/DIAGNOSTICIAN.md,
    agents/CLAUDE_CODE.md, tools/browser_helpers.md.
-3. Verify Architect tab's model + thinking state via the helper
+4. Verify Architect tab's model + thinking state via the helper
    selectors. Verify Reviewer tab's model.
-4. Attach /tmp/repo-snapshot.xml to the Architect tab and send an
+5. Attach /tmp/repo-snapshot.xml to the Architect tab and send an
    identification ping; parse the response.
-5. Send the Reviewer Bootstrap Block (template at end of
+6. Send the Reviewer Bootstrap Block (template at end of
    agents/OPERATOR.md) to the Reviewer tab; parse the model
    identity in the reply.
-6. Confirm to me in one short message: your tier, Architect's
+7. Confirm to me in one short message: your tier, Architect's
    model + thinking state, Reviewer's model, repomix archive
-   path, current phase, next backlog item.
-7. Then begin the next backlog item without further prompting
+   path, SSH to mint-main status, current phase, next backlog item.
+8. Then begin the next backlog item without further prompting
    from me. I'm walking away.
 
 Stop conditions are listed in agents/OPERATOR.md. When you stop,

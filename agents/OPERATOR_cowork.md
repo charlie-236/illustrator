@@ -10,7 +10,7 @@ stack**:
 | Your host UI | Cowork desktop app | VS Code Insiders / Stable chat panel |
 | Browser MCP | Claude in Chrome MCP (`mcp__Claude_in_Chrome__navigate`, `mcp__Claude_in_Chrome__javascript_tool`, `mcp__Claude_in_Chrome__click_element_at`, `mcp__Claude_in_Chrome__send_text_at`, `mcp__Claude_in_Chrome__take_screenshot`, etc.) | Microsoft Playwright MCP |
 | Phase C (Build) | Asynchronous; spawn `run-next-batch.sh` as subprocess, poll for PR | Synchronous in this same chat (switch hats to Claude Code) |
-| Filesystem | Cowork sandbox; requires `request_cowork_directory` mount for repo + `~/claude-auth-bridge` + `~/gh-credentials` | VS Code workspace's local filesystem; full git access |
+| Filesystem | Cowork sandbox; requires `request_cowork_directory` mount for repo + `~/claude-auth-bridge` | VS Code workspace's local filesystem; full git access |
 | Where role-side Claudes live | claude.ai tabs in the "Illustrator" project | Copilot M365 tabs |
 | Repo context for role-side AIs | `project_knowledge_search` over the synced repo | `repomix` archive attached per chat |
 
@@ -171,52 +171,54 @@ via `request_cowork_directory`:
 
 1. **The illustrator repo** — typically `~/illustrator` on the host.
    Mount it so you have read/write access to the working tree.
-2. **`~/claude-auth-bridge`** — the User's persistent Claude Code
-   auth state. Mount this so the `run-next-batch.sh` script can
-   invoke Claude Code without "Not logged in" failures.
+2. **`~/claude-auth-bridge`** — the User's persistent auth state
+   for Claude Code, `gh`, `git`, and SSH. This is the single most
+   important mount; without it nothing else works.
 3. **`~/.local/share/claude`** — contains the Claude Code binary
-   under `versions/<X.Y.Z>/`. Mount this so the script can find
-   the binary.
-4. **`~/gh-credentials`** — the User's `gh` CLI auth, copied out of
-   `~/.config/gh` so it's mountable. Required for `gh pr create`
-   and any `git push` operation.
+   under `versions/<X.Y.Z>/`. Mount only if you'll invoke Claude
+   Code directly outside the batch script (Diagnostician
+   deep-dives, one-off scripts). The batch script
+   (`run-next-batch.sh`) does NOT need this mounted inside the
+   sandbox — it runs over SSH on the host where the binary lives
+   natively. See Phase C below.
 
 `~/claude-auth-bridge` has its own `README.md` at the root —
 **read it on first mount of every session**. That README is the
-authority on which env vars the script needs (`HOME=` redirect,
-the binary path, etc.) and what each mount holds. If anything in
-this file contradicts the bridge's README, the README wins; tell
-the User the doc is stale.
+canonical reference for the `HOME=<bridge>` envelope, the
+`GH_TOKEN` extraction pattern, the SSH key paths and `.ssh/config`
+template, and any version-drift gotchas. If anything in this brief
+contradicts the bridge's README, the README wins; tell the User
+the doc is stale.
 
-Reference invocation pattern (the exact form lives in the auth
-bridge README and `run-next-batch.sh`):
+## Capabilities — Claude Code, gh, git, SSH from bash
 
-```
-cd <repo-mount-path> && \
-HOME=<claude-auth-bridge-mount-path> \
-<claude-binary-mount-path>/versions/<X.Y.Z> \
--p "<task prompt content>" \
---dangerously-skip-permissions 2>&1
-```
+Once `~/claude-auth-bridge` is mounted via
+`request_cowork_directory`, you can run from bash inside this
+sandbox:
 
-The mount paths will use your session-specific name. Use whatever
-`request_cowork_directory` returns.
+- **Claude Code** (also requires mounting `~/.local/share/claude`
+  for the binary, when invoked directly) — the underlying tool
+  that `run-next-batch.sh` wraps for Phase C builds. Useful
+  directly for ad-hoc work outside the batch loop.
+- **`gh` CLI** — PR creation, listing, merging, comments.
+- **`git push` / `fetch` / `clone`** — authenticated against
+  github.com without per-session auth setup.
+- **SSH** to remote hosts (including `127.0.0.1` for the
+  SSH-localhost-detached subprocess pattern documented under
+  Phase C; the bridge's `.ssh/config` and key files cover the
+  authentication).
 
-For `gh` and `git push` operations, prefix with `GH_CONFIG_DIR`
-pointing at your `~/gh-credentials` mount:
-
-```
-GH_CONFIG_DIR=<gh-credentials-mount-path> gh pr create ...
-
-GH_CONFIG_DIR=<gh-credentials-mount-path> \
-  git -c credential.helper='!GH_CONFIG_DIR=<gh-credentials-mount-path> gh auth git-credential' \
-  push -u origin batch/<short-name>
-```
+The bridge's `README.md` is the canonical reference for invocation
+patterns, the `HOME=<bridge>` envelope, gotchas (wrapper-script
+staleness, token rotation, version drift, stdin-pipe for long
+prompts), and the directory layout. **Read
+`<bridge-mount-path>/README.md` after mounting** — those patterns
+are stack-agnostic and identical across any project that uses
+this bridge.
 
 If `gh auth status` ever reports "The token is invalid", the User
-needs to re-run `gh auth login` on the host and re-copy `~/.config/gh`
-into `~/gh-credentials`. Surface this with a SESSION-STALL — you
-can't fix it from the sandbox.
+needs to refresh the bridge's auth state on the host. Surface this
+with a SESSION-STALL — you can't fix it from the sandbox.
 
 ## Model tier verification (CRITICAL — ongoing, not just bootstrap)
 
@@ -373,45 +375,286 @@ Please approve, request changes, or reject. Respond with
 
 ### Phase C — Build (autonomous, long-running, separate subprocess)
 
+**Critical launch constraint.** The Cowork workspace bash tool is
+bwrap-sandboxed with `--unshare-pid --die-with-parent` and a hard
+~45 s per-call timeout. Launching `run-next-batch.sh` directly from
+the bash tool — including with `nohup … &`, `setsid`, or `disown`
+— does NOT work: every child process dies when the bash tool
+returns, ~30 s before Claude Code finishes its session-startup
+phase. This was learned the hard way on the long-form-writing
+project and the workaround is the **SSH-localhost-detached**
+pattern below.
+
+#### Subprocess launch via SSH-localhost (the working path)
+
+Network is NOT unshared in the bwrap config, so the bash sandbox
+can reach `127.0.0.1:22`. The User's host runs `sshd`. When we SSH
+out, the remote shell is spawned by `sshd` as a child of `systemd`,
+completely outside our bwrap process tree. `nohup` + `&` +
+`disown` then detach the script from the SSH session, so the
+process survives both the SSH disconnect AND our bash-tool
+teardown.
+
+**One-time setup** (should already be done by the time you're
+running, but documented here for new project clones):
+
+1. Authorize the auth-bridge ed25519 pubkey for `charlie@localhost`:
+   ```
+   PUB=$(cat $HOME/claude-auth-bridge/.ssh/id_ed25519.pub)
+   mkdir -p $HOME/.ssh && chmod 700 $HOME/.ssh
+   touch $HOME/.ssh/authorized_keys && chmod 600 $HOME/.ssh/authorized_keys
+   grep -qF "$PUB" $HOME/.ssh/authorized_keys || echo "$PUB" >> $HOME/.ssh/authorized_keys
+   ```
+2. SSH config with current-session paths (the bridge's
+   `.ssh/config` has stale-session paths under
+   `/sessions/<old-sid>/...`; write your own at
+   `/sessions/<current-sid>/mnt/outputs/ssh_config`):
+   ```
+   Host localhost-host
+       HostName 127.0.0.1
+       User charlie
+       IdentityFile /sessions/<sid>/mnt/charlie/claude-auth-bridge/.ssh/id_ed25519
+       StrictHostKeyChecking no
+       UserKnownHostsFile /dev/null
+   ```
+
+**Per-Phase-C launch:**
+
 1. Stage the prompt: write to `tasks/<short-name>.md`. Add the
    `[ ]` line to `BACKLOG.md`. Commit both to main:
    ```
    git add tasks/<short-name>.md BACKLOG.md
    git commit -m "Stage <short-name> for Build"
-   GH_CONFIG_DIR=<gh-credentials-mount-path> \
-     git -c credential.helper='!GH_CONFIG_DIR=<gh-credentials-mount-path> gh auth git-credential' \
-     push origin main
+   git push origin main
    ```
-2. Launch the batch script asynchronously:
-   ```
-   nohup ./run-next-batch.sh > runs/<short-name>-<ts>.log 2>&1 &
-   echo $! > runs/.in-flight-<short-name>.pid
-   ```
-3. Poll every 30 seconds:
-   - PID alive: `kill -0 $(cat runs/.in-flight-<short-name>.pid) 2>/dev/null`
-   - Log growing: `wc -l runs/<short-name>-<ts>.log`
-   - PR opened: `gh pr list --head <branch> --json number`
-4. Stop conditions:
-   - PID dead AND PR exists → advance to Phase D
-   - PID dead AND no PR → failure, write SESSION-STALL
-   - Log file unchanged for 30 minutes (heartbeat lost) → write
-     SESSION-STALL. Use `stat -c %Y runs/<short-name>-<ts>.log`
-     to get last-modified epoch; compare with `date +%s`.
+   (Once the auth-bridge is mounted, `git push` to GitHub works
+   without `GH_CONFIG_DIR` prefixing — the bridge handles auth.)
+2. Launch the batch script via SSH-localhost, detached, with
+   `~/.local/bin` on PATH (Mint's default SSH login PATH does NOT
+   include it, so `claude` resolves to nothing without the
+   augmentation):
+   ```bash
+   SSH="ssh -i $HOME/claude-auth-bridge/.ssh/id_ed25519 \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o BatchMode=yes -o ConnectTimeout=4 charlie@127.0.0.1"
 
-The 30-minute log-growth heartbeat replaces a wall-clock hard cap.
-Long downloads, slow builds, and long Claude Code thinking traces
-are all legitimate; what's NOT legitimate is the log going silent.
-If a build genuinely hangs (no log growth for 30 min), the
-heartbeat fires.
+   TS=$(date -u +%Y%m%dT%H%M%SZ)
+   LOG=/home/charlie/runs/<short-name>-$TS.log
+   PIDFILE=/home/charlie/runs/<short-name>.pid
+
+   $SSH "mkdir -p /home/charlie/runs && \
+         nohup bash -c 'PATH=\$HOME/.local/bin:\$PATH; \
+                        /home/charlie/bin/run-next-batch.sh' \
+         > $LOG 2>&1 < /dev/null & \
+         echo \$! > $PIDFILE; disown"
+   ```
+   Adjust the script path if `run-next-batch.sh` lives somewhere
+   other than `~/bin/`; the canonical illustrator location is
+   what the User has wired up.
+3. Poll across separate bash-tool calls (use short queries so you
+   don't grab git locks the host script needs). **The PIDFILE is
+   a weak signal — see the warning below.**
+   - **Authoritative liveness** — scan for the worker by name:
+     ```
+     $SSH "ps -eo pid,etime,cmd | grep 'claude -p --dangerously-skip-permissions' | grep -v grep"
+     ```
+     A row means a worker is alive. No rows means no batch worker
+     is running. **Do NOT rely on the PIDFILE alone** — it
+     captures the immediate background bash from `$!`, which
+     exits in seconds after detach, leaving the real worker as an
+     orphaned grandchild (re-parented to init) in a different
+     pgroup.
+   - PID alive (advisory only): `$SSH "kill -0 \$(cat $PIDFILE) 2>/dev/null && echo alive || echo dead"`
+   - Log size: `$SSH "wc -l $LOG"`
+   - Log tail: `$SSH "tail -20 $LOG"`
+   - PR opened: `gh pr list --head batch/<short-name> --state open --json number,url`
+   - Origin branch present: `git ls-remote --heads origin batch/<short-name>`
+4. Stop conditions:
+   - PR exists on origin → advance to Phase D regardless of
+     PIDFILE state.
+   - No worker running (via `ps … claude -p` scan) AND no PR →
+     failure, write SESSION-STALL. Inspect `$LOG` for the failure
+     mode.
+   - Log file unchanged for 30 minutes (heartbeat lost) → write
+     SESSION-STALL. Use `stat -c %Y $LOG` + `date +%s`.
+   - No hard time cap. A healthy long run (large model download,
+     long build) is not a stall condition.
+
+⚠️ **Never relaunch without first scanning for live workers**
+(`ps … claude -p`). On the long-form-writing project a misread of
+the PIDFILE triggered a relaunch while the original worker was
+still alive — two concurrent `claude -p` workers raced on the same
+`batch/` working tree. One worker committed before the kills
+landed, the other was discarded; outcome was salvageable but the
+dual-worker pattern is destructive in general. If you see a worker
+in `ps`, wait or kill it cleanly (`kill -TERM -<pgid>` against
+its process-group ID) before relaunching.
+
+#### Pre-launch cleanup checklist
+
+When relaunching after a failed run, the local working tree on the
+host can be in a mixed state — particularly if a prior bwrap-killed
+run created `batch/<short-name>` locally before dying. The
+script's `git checkout -b $BRANCH_NAME` step will fail with
+"ERROR: branch already exists" on retry. Cleanup over SSH:
+
+```
+$SSH 'cd ~/illustrator && \
+      git checkout main 2>&1 | tail -1 && \
+      git branch -D batch/<short-name> 2>&1 | tail -1; \
+      git fetch --all --prune --quiet'
+```
+
+#### Why this works (and the failure modes it avoids)
+
+| Approach | Outcome | Why |
+|---|---|---|
+| `mcp__workspace__bash` runs `.sh` directly | Killed at 45 s, no edits land | `--die-with-parent` kills entire process tree on bash exit |
+| `mcp__workspace__bash` runs `claude -p` directly with the task prompt | Same — killed at 45 s | Same reason |
+| Wrap inner `claude -p` in outer `claude -p` from bash | Same — 45 s budget shared by all descendants | Recursive claude inside bwrap inherits the same parent |
+| `nohup … &` from within `mcp__workspace__bash` | Process dies at 45 s | `--die-with-parent` ignores `nohup` (and `setsid`, `disown`) |
+| **SSH to localhost, `nohup … &` inside the SSH command** | **Works** | **SSH client dies at bash exit; remote process is a child of `sshd`, outside our bwrap. `nohup` survives the SSH session disconnect.** |
+| SSH to a remote host instead of localhost | Would also work | Same mechanics. Used in some projects where the build host isn't the bridge host. |
+
+The localhost-SSH path is the canonical Cowork Phase C launch.
+Use it for every long-running subprocess job that exceeds ~30 s of
+claude work. A one-line edit might just barely fit the 45 s
+window; anything bigger needs SSH.
+
+#### Path C — sub-phase work that bypasses the BACKLOG dispatcher
+
+`run-next-batch.sh` reads the first `[ ]` line in `BACKLOG.md`
+and extracts ONE task path. The dispatcher's design assumption is
+*"first `[ ]` line is the next User-priority work item."* For
+sub-phase work — a Phase X.Y of an in-flight item, a follow-up
+fixup that the Architect wants threaded into the in-flight item
+rather than queued as a new BACKLOG entry, infrastructure
+sequencing that precedes a multi-phase comparison — there is no
+clean way to dispatch through this mechanism without polluting
+BACKLOG with sub-phase lines (which obscures BACKLOG state) or
+rewriting the parent line (which conflates parent and sub-phase
+history).
+
+The **Path C** envelope bypasses the dispatcher entirely. Use it
+whenever the lead BACKLOG `[ ]` line is NOT the work you're
+staging.
+
+**When Path C is the right call (decision rubric):**
+
+- The work is a sub-phase of an in-flight item whose parent
+  `[ ]` line in BACKLOG must stay pointing at the parent task
+  spec.
+- The work is a fix-forward for a recently merged sub-phase
+  where adding a new BACKLOG line would create false priority
+  signal.
+- The work is sequencing infrastructure for a multi-phase
+  effort.
+- Architect explicitly directs "do this without touching
+  BACKLOG."
+
+**When Path C is the WRONG call:**
+
+- The work is a new top-level BACKLOG item — use the standard
+  dispatcher path. The whole point of BACKLOG is to surface
+  priority.
+- The work is a docs-only follow-up the User has authorized for
+  inline edit — use the inline-edit shortcut (see "Inline-edit
+  shortcut" below), not Path C. Path C still spawns a `claude -p`
+  subprocess; inline edits don't.
+- You haven't asked the Architect first. Path C is
+  Architect-blessed per-instance, not a default. The Operator
+  surfaces the dispatch problem to Architect; Architect picks
+  Path C (or rejects and re-shapes the work to fit standard
+  dispatch).
+
+**Path C procedure** (per-launch):
+
+1. Stage `tasks/<short-name>-phase-Y.Z.md` byte-for-byte with the
+   Architect-authored content. Push to `main` as a normal staging
+   commit. **Do NOT modify `BACKLOG.md`** — the lead `[ ]` line
+   stays pointing at the parent item.
+2. Write the combined prompt (task body + an OPERATIONAL CONTEXT
+   preamble) to a host-side file under
+   `/home/charlie/runs/<short-name>-phase-Y.Z-prompt.txt`. The
+   OPERATIONAL CONTEXT preamble MUST include, verbatim:
+   - "You are already on branch `batch/<short-name>-phase-Y.Z`
+     (pre-created by the Operator)."
+   - "DO NOT edit BACKLOG.md. This is a sub-phase of an in-flight
+     item; BACKLOG's lead `[ ]` line must remain unchanged."
+   - "Files in scope: <explicit list from task body>. NOT
+     BACKLOG.md."
+   - "Before push, verify
+     `git diff --stat main..HEAD | grep -q BACKLOG && exit 1`."
+   - "Open PR with
+     `gh pr create --base main --head batch/<short-name>-phase-Y.Z ...`
+     and include the standard PR description headers from the
+     task body."
+3. SSH to localhost-host, pre-create the branch from a
+   freshly-fetched `origin/main`:
+   ```
+   $SSH "cd ~/illustrator && \
+         git fetch origin --quiet && \
+         git checkout main && git pull --ff-only origin main && \
+         git branch -D batch/<short-name>-phase-Y.Z 2>/dev/null || true && \
+         git checkout -b batch/<short-name>-phase-Y.Z origin/main"
+   ```
+4. SSH again, nohup-detach `claude -p` with the combined prompt
+   piped via stdin (the wrapper script `run-next-batch.sh` isn't
+   on this path — you're invoking `claude -p` directly):
+   ```
+   $SSH "nohup bash -c 'PATH=\$HOME/.local/bin:\$PATH; \
+                        cd ~/illustrator && \
+                        cat /home/charlie/runs/<short-name>-phase-Y.Z-prompt.txt | \
+                        claude -p --dangerously-skip-permissions' \
+         > /home/charlie/runs/<short-name>-phase-Y.Z-$TS.log 2>&1 < /dev/null & \
+         echo \$! > /home/charlie/runs/<short-name>-phase-Y.Z.pid; disown"
+   ```
+5. Poll via the same authoritative-liveness pattern as standard
+   Phase C — `ps … claude -p` for worker presence,
+   `gh pr list --head batch/<short-name>-phase-Y.Z` for completion.
+   PIDFILE is advisory only.
+6. Stop conditions are identical to standard Phase C.
+
+**Path C is intentionally a manual envelope, not a script.** The
+whole point is that the Operator decides per-sub-phase what the
+OPERATIONAL CONTEXT and file-scope guardrails need to be.
+Scripting it would re-introduce the rigidity that made the
+standard dispatcher unsuitable for sub-phase work in the first
+place.
+
+#### Inline-edit shortcut (no subprocess at all)
+
+For tasks where the prompt body is exhaustive about WHERE and
+WHAT (concrete before/after blocks with unique surrounding
+context), the change is mechanical insertion/replacement, AND
+there's a behavioral gate that proves correctness end-to-end —
+the Operator may perform the edits directly in the same bash
+tool, without spawning a `claude -p` subprocess at all. The
+implementer's job is reduced to typing, and no design judgment
+is being added.
+
+Use only when:
+- The task spec is byte-precise (find/replace blocks, not "update
+  the function appropriately")
+- All file paths are explicit
+- All scope is bounded ("Files in scope" section is complete)
+- The change is small enough to verify with a `git diff` pass
+
+If the task involves audit, restructure, choose-the-right-place,
+or write-new-logic, **don't inline** — subprocess earns its
+keep when the implementer's job involves reasoning. Default for
+code changes is full subprocess Phase C. Propose inline
+item-by-item with explicit justification; Architect approves or
+rejects.
 
 ### Phase D — PR Review (Architect-only)
 
 1. Capture mechanical facts about the PR:
-   - Files changed: `GH_CONFIG_DIR=<...> gh pr diff <num> --name-only`
+   - Files changed: `gh pr diff <num> --name-only`
    - Diff scope vs. prompt scope: any files outside what the prompt
      allowed to modify?
-   - Any gitignored files (`.env`, `gh-credentials`, `runs/*`) in
-     the diff? (must NOT be)
+   - Any gitignored files (`.env`, `runs/*`) in the diff?
+     (must NOT be)
    - Disk-avoidance grep results
    - PR description completeness (Summary, Acceptance criteria,
      Manual smoke tests, Deviations, Post-merge actions if needed)
@@ -452,10 +695,9 @@ approach, destructive scope violations).
 ```
 
 3. Parse Architect's verdict:
-   - `MERGE` → execute the merge via the GH_CONFIG_DIR-prefixed
-     `gh pr merge <num> --squash --delete-branch`. **Then check the
-     Architect's response for a fix-forward follow-up block.** If
-     present:
+   - `MERGE` → execute `gh pr merge <num> --squash --delete-branch`.
+     **Then check the Architect's response for a fix-forward
+     follow-up block.** If present:
      - Append the follow-up `[ ]` line to `BACKLOG.md`
      - Write the proposed prompt to `tasks/<short-name>-followup.md`
      - Commit and push to main
@@ -464,8 +706,8 @@ approach, destructive scope violations).
    - `REQUEST_CHANGES` → Architect provides a corrective prompt in
      the same message. Re-stage that prompt the same way (overwrite
      `tasks/<short-name>.md` on the PR's branch, NOT main), then
-     re-launch `run-next-batch.sh` against the same branch. Rare
-     path.
+     re-launch `run-next-batch.sh` against the same branch via the
+     SSH-localhost-detached pattern. Rare path.
    - `CLOSE` → `gh pr close <num>`, mark item blocked in BACKLOG,
      proceed to next item. The Architect should re-diagnose before
      this item gets re-queued.
@@ -522,15 +764,19 @@ Save state, write `decisions/SESSION-STALL-<timestamp>.md`, exit
 the loop on any of:
 
 - Any model tier downgrade (Architect / Reviewer / QA / yourself)
-- `run-next-batch.sh` subprocess dies without producing a PR
+- `run-next-batch.sh` subprocess died (no worker in `ps … claude -p`
+  scan) AND no PR opened
 - 30-minute log-growth heartbeat lost mid-build
+- Two `claude -p` workers observed concurrently in `ps` (you
+  somehow relaunched without the worker scan — surface immediately;
+  kill one cleanly via `kill -TERM -<pgid>` before any other action)
 - Architect verdicts STOP with `## Open issues` listing
   User-required decisions
 - Browser tab goes unresponsive after recovery attempts
   (snapshot-and-rediscover; if still broken, stall)
 - `gh pr create` fails for reasons other than transient network
-- `gh auth status` reports invalid token (User must re-auth on the
-  host; you can't fix from the sandbox)
+- `gh auth status` reports invalid token (User must refresh the
+  bridge's auth state on the host; you can't fix from the sandbox)
 - Disk-avoidance grep fails in Claude Code's pre-merge gates and
   the cause isn't obvious from the diff
 - Three consecutive Reviewer-round-trips on the same item — even

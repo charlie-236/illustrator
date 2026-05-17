@@ -12,17 +12,22 @@ If you're on the VS Code stack, read `USER_BOOTSTRAP.md` instead.
 - Claude in Chrome MCP enabled in your Cowork session.
 - The "Illustrator" project exists on claude.ai with the illustrator
   repo synced as project knowledge (Settings → Connect to GitHub).
-- `~/claude-auth-bridge/` exists on the host, contains a working
-  Claude Code auth state, and has a `README.md` documenting the
-  invocation pattern. This is what lets the Cowork sandbox run
-  Claude Code without keychain access.
-- `~/.local/share/claude/versions/<X.Y.Z>/` contains the Claude Code
-  binary.
-- `~/gh-credentials/` exists on the host with a working copy of
-  `~/.config/gh` (run `cp -r ~/.config/gh ~/gh-credentials` after
-  any `gh auth login`).
-- `gh auth status` reports a valid token (use the GitHub account
-  that has write access to the illustrator repo).
+- `~/claude-auth-bridge/` exists on the host and contains:
+  - Working Claude Code auth state
+  - A `README.md` at the root documenting the invocation pattern,
+    `HOME=<bridge>` envelope, and `GH_TOKEN` extraction
+  - SSH key files under `.ssh/` for the localhost-detached
+    subprocess pattern (the ed25519 keypair authorized in
+    `~/.ssh/authorized_keys` for `charlie@localhost`)
+- `~/.local/share/claude/versions/<X.Y.Z>/` contains the Claude
+  Code binary.
+- `gh auth status` reports a valid token on the host (the
+  auth-bridge sources its token state from here; refresh it on the
+  host with `gh auth login` if it expires).
+- `sshd` is running on the host (`systemctl status ssh` returns
+  active) and the auth-bridge's ed25519 pubkey is in
+  `~/.ssh/authorized_keys`. This is what enables the Operator's
+  SSH-localhost subprocess launch pattern.
 
 ## Per-session setup
 
@@ -79,10 +84,12 @@ this file, not OPERATOR.md.
 Before doing anything else, mount these directories via
 request_cowork_directory:
 1. ~/illustrator (the repo)
-2. ~/claude-auth-bridge (Claude Code auth state; read the
-   README.md there for the invocation pattern)
-3. ~/.local/share/claude (Claude Code binary location)
-4. ~/gh-credentials (gh CLI auth)
+2. ~/claude-auth-bridge (single source of truth for Claude Code
+   auth, gh auth, git push, and SSH keys; read the README.md
+   there for the invocation pattern)
+3. ~/.local/share/claude (only if you'll invoke Claude Code
+   directly outside the batch script — Diagnostician deep-dives,
+   one-off scripts)
 
 Current chain head: <main, OR a batch/... branch if mid-chain>
 Current phase: <Phase 1 — multi-role workflow standup, OR whatever
@@ -99,32 +106,44 @@ project, for project_knowledge_search access) for QA, Historian,
 and Diagnostician as needed. Use the model-check helpers in
 tools/browser_helpers_cowork.md.
 
+Phase C launches happen via SSH-to-localhost (not directly from
+the Cowork bash tool — the bwrap sandbox kills detached processes
+at the 45s timeout). The auth-bridge contains the ed25519 keypair
+for `charlie@localhost`. See agents/OPERATOR_cowork.md Phase C
+section for the full pattern.
+
 At bootstrap:
 1. Confirm STACK VALIDATION matches (Claude in Chrome MCP, Cowork
-   sandbox, async Phase C via subprocess). If not, halt and tell
-   me.
-2. Mount all four directories above. Confirm all mounts succeeded.
+   sandbox, async Phase C via SSH-localhost subprocess). If not,
+   halt and tell me.
+2. Mount ~/illustrator and ~/claude-auth-bridge. Confirm mounts
+   succeeded.
 3. Read the README.md at the root of ~/claude-auth-bridge — it's
-   the authority on the Claude Code invocation pattern.
-4. Read agents/ARCHITECT.md, agents/ROLES.md,
+   the canonical reference for the HOME envelope, GH_TOKEN, and
+   SSH key paths.
+4. Verify SSH to localhost works from the sandbox:
+   ssh -i <bridge>/.ssh/id_ed25519 -o BatchMode=yes charlie@127.0.0.1 'echo ok'
+   should return `ok`. If not, halt and tell me — the SSH-
+   localhost subprocess pattern can't fire without this.
+5. Read agents/ARCHITECT.md, agents/ROLES.md,
    agents/OPERATOR_cowork.md, agents/REVIEWER.md, agents/QA.md,
    agents/HISTORIAN.md, agents/DIAGNOSTICIAN.md,
    agents/CLAUDE_CODE.md, tools/browser_helpers_cowork.md (all in
    the mounted repo).
-5. Verify Architect tab's model + thinking state via the helper
+6. Verify Architect tab's model + thinking state via the helper
    selectors. Verify Reviewer tab's model.
-6. Send an identification ping to the Architect tab (it'll search
+7. Send an identification ping to the Architect tab (it'll search
    project knowledge to confirm its bearings). Parse the response.
-7. Send the Reviewer Bootstrap Block (template at end of
+8. Send the Reviewer Bootstrap Block (template at end of
    agents/OPERATOR_cowork.md) to the Reviewer tab. Parse the model
    identity in the reply.
-8. Verify gh auth from the sandbox: run
-   GH_CONFIG_DIR=<gh-credentials-mount-path> gh auth status
-   and confirm a valid token.
-9. Confirm to me in one short message: your tier, Architect's
-   model + thinking state, Reviewer's model, all four mount paths,
-   gh auth status, current phase, next backlog item.
-10. Then begin the next backlog item without further prompting
+9. Verify gh auth from the sandbox: `gh auth status` should report
+   a valid token (auth comes via the mounted bridge).
+10. Confirm to me in one short message: your tier, Architect's
+    model + thinking state, Reviewer's model, mount paths,
+    SSH-localhost status, gh auth status, current phase, next
+    backlog item.
+11. Then begin the next backlog item without further prompting
     from me. I'm walking away.
 
 Stop conditions are listed in agents/OPERATOR_cowork.md. When you
@@ -137,8 +156,8 @@ what happened when I'm back.
 The Cowork chat should reply within 60 seconds with the one-message
 confirmation. If it does:
 
-- Tiers look right? All mounts succeeded? `gh auth status` valid?
-  → walk away.
+- Tiers look right? Mounts succeeded? SSH-localhost works?
+  `gh auth status` valid? → walk away.
 - Anything wrong? → fix and paste a one-line correction.
 
 If the chat doesn't reply within 60 seconds or the reply is
@@ -153,7 +172,10 @@ incoherent:
   gemini.google.com have drifted before; the helpers file lists
   the canonical ones at the time of writing.
 - Check `gh auth status` returned a valid token. If not, run `gh
-  auth login` on the host and re-copy `~/.config/gh ~/gh-credentials`.
+  auth login` on the host (the auth-bridge sources its token from
+  the host).
+- Check `sshd` is running on the host. The SSH-localhost
+  subprocess pattern can't fire if `sshd` is down.
 - Verify project knowledge is synced. A stale sync looks like the
   Architect tab "can't find" files that exist on main.
 - Re-paste the bootstrap if needed.
@@ -169,9 +191,13 @@ The loop is now autonomous. The Cowork Operator will:
   symptom). Each uses `project_knowledge_search` over the synced
   repo.
 - Stage prompts to `tasks/`, append to `BACKLOG.md`, push to main
-- **Launch `run-next-batch.sh` as a subprocess** (via the
-  claude-auth-bridge invocation pattern); poll the log file for
-  30-minute heartbeat and check for PR creation every 30 seconds
+- **Launch `run-next-batch.sh` as a subprocess via the
+  SSH-localhost-detached pattern** (the Cowork bash tool's 45s
+  bwrap timeout would kill any direct `nohup &` launch; SSHing
+  to `127.0.0.1:22` puts the worker outside the bwrap process
+  tree where `nohup` actually works); poll the log file for the
+  30-minute heartbeat and the `ps … claude -p` worker scan, and
+  check for PR creation
 - Drive PR Review back through the Architect tab using mechanical
   facts from `gh pr diff`
 - Write decision logs when Architect overrules a role
@@ -201,8 +227,13 @@ with the next backlog item.
 **Browser unresponsive**: re-log into claude.ai or gemini.google.com
 as needed. Then resume.
 
-**`gh auth status` failure**: run `gh auth login` on the host, then
-`cp -r ~/.config/gh ~/gh-credentials`, then resume.
+**`gh auth status` failure**: run `gh auth login` on the host (the
+auth-bridge sources its token state from there). Then resume.
+
+**SSH-localhost failure**: confirm `sshd` is running on the host
+(`systemctl status ssh`); confirm the auth-bridge's ed25519 pubkey
+is still in `~/.ssh/authorized_keys`. Once SSH-localhost works
+from the sandbox again, resume.
 
 **Mount failures**: confirm the host paths exist and are readable.
 The Operator can't mount what doesn't exist; if `~/claude-auth-bridge`
@@ -210,11 +241,23 @@ is missing the binary path or session state, the Operator will
 report it in the stall.
 
 **`run-next-batch.sh` subprocess died without producing a PR**:
-read the `runs/<short-name>-<ts>.log` file. Common causes: Claude
-Code hit a permissions wall the prompt didn't anticipate, the agent
-got confused about the chain head, the branch already existed from
-a previous run. Surface to Architect via a new session bootstrap
-and let it decide whether to re-stage or redesign.
+read the `runs/<short-name>-<ts>.log` file via SSH to the host.
+Common causes: Claude Code hit a permissions wall the prompt didn't
+anticipate, the agent got confused about the chain head, the branch
+already existed from a previous run. Surface to Architect via a new
+session bootstrap and let it decide whether to re-stage or
+redesign.
+
+**Two concurrent `claude -p` workers observed in `ps`**: the
+Operator relaunched without scanning for live workers, and the two
+workers raced on the same working tree. Inspect both
+`runs/*-<ts>.log` files to see which is further along. The
+canonical recovery is to kill the older one cleanly
+(`kill -TERM -<pgid>` against its process-group ID) and let the
+newer one complete. If both committed to the branch, one will
+fast-forward and the other will fail to push — let the failure
+resolve naturally. Re-paste a resume bootstrap once a single PR
+exists.
 
 **Project knowledge stale**: trigger a manual refresh and re-paste
 a resume bootstrap.
