@@ -248,19 +248,38 @@ record. Either is fine.
   repo root and every role brief points back to it. Moving it
   into `agents/` would require updating Claude Code's read-order
   expectations.
-- **COWORK.md's keychain-limitation note is removed.** Per your
-  instruction, that's stale; the new `OPERATOR_cowork.md` points
-  at `~/claude-auth-bridge` and treats the bridge's `README.md`
-  as the authority on the invocation pattern.
+- **COWORK.md's keychain-limitation note is removed.** The new
+  `OPERATOR_cowork.md` points at `~/claude-auth-bridge` as the
+  single source of auth (Claude Code, gh, git, SSH keys), and
+  treats the bridge's `README.md` as the canonical reference.
 - **`prompts/` → `tasks/`.** Aligns vocabulary with LFW.
 - **`run-next-batch.sh` keeps its illustrator-specific name** —
   no need to rename it.
 - **Header vocabulary adopted** (`## Architect → Operator`,
   `PROCEED/REVISE/STOP`, `MERGE/REQUEST_CHANGES/CLOSE`,
-  `PASS/PASS_WITH_RESERVATIONS/FAIL`). Even though no script
-  parses these in the illustrator's current state, adopting them
-  costs nothing and lets the Operator (when you stand it up) work
-  the same way as on LFW.
-- **`gh-credentials` pattern preserved** as a fact inside
-  `agents/CLAUDE_CODE.md` and `agents/OPERATOR_cowork.md`, since
-  it's still how Cowork sandbox sessions get gh auth.
+  `PASS/PASS_WITH_RESERVATIONS/FAIL`). Cheap to adopt and makes
+  the workflow identical across both stacks.
+- **`~/gh-credentials` pattern dropped.** The auth-bridge handles
+  gh / git push directly, so the older "separate gh-credentials
+  mount with `GH_CONFIG_DIR` prefix" pattern from the early
+  illustrator COWORK.md is gone. If the bridge's README contradicts
+  this and your bridge is set up the old way, follow the README —
+  this doc is wrong.
+- **Cowork Phase C uses the SSH-localhost-detached pattern**,
+  not direct `nohup ./run-next-batch.sh &`. The Cowork bash tool
+  is bwrap-sandboxed with `--die-with-parent --unshare-pid` and a
+  45s timeout; the old direct-launch pattern dies before Claude
+  Code finishes its session-startup phase. SSH to `127.0.0.1:22`
+  puts the worker outside the bwrap process tree where `nohup`
+  actually survives. This is documented in
+  `agents/OPERATOR_cowork.md` Phase C with the full procedure
+  including authoritative liveness via `ps`, the never-relaunch-
+  without-scan warning, pre-launch cleanup, and the Path C
+  sub-phase envelope.
+- **VS Code stack routes npm via SSH to mint-main** (`192.168.1.206`).
+  PC1 (where the VS Code Operator runs) isn't on Tailscale to the
+  Azure A100 VM, so `npm run build` and `npm run dev` MUST happen
+  on mint-main where the database lives and the SSH tunnel to the
+  A100 terminates. The static disk-avoidance greps and lint stay
+  local on PC1. This is documented in `agents/OPERATOR.md`
+  "Two-machine topology" section and Phase C steps 5–7.
